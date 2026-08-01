@@ -1,0 +1,18 @@
+{
+  "expo": {
+    "name": "HealthApp",
+    "slug": "healthapp",
+    "version": "0.0.1",
+    "orientation": "portrait",
+    "scheme": "healthapp",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.healthapp"
+    },
+    "android": {
+      "package": "com.healthapp"
+    }
+  }
+}
