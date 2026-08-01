@@ -37,6 +37,7 @@ function getNative(): HealthConnectNative | null {
   if (Platform.OS !== 'android') return null;
   try {
     // Required lazily so Jest / iOS / web never touch expo-modules-core native.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { requireNativeModule } = require('expo-modules-core');
     native = requireNativeModule('HealthConnect') as HealthConnectNative;
   } catch {

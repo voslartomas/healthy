@@ -79,6 +79,49 @@ function liveStats(snap: HealthSnapshot): typeof dashboard.stats {
   };
 }
 
+/**
+ * Truthful recovery headline/body from the live snapshot. The sample copy is
+ * only used as a fallback — never shown alongside live numbers it contradicts
+ * (e.g. asserting "HRV is up" when HRV is below baseline). Correctness of the
+ * interpretation matters as much as the number (priority #1).
+ */
+function recoveryCopy(snap: HealthSnapshot): { headline: string; body: string } {
+  if (!snap.live || !snap.readiness) {
+    return { headline: dashboard.recovery.headline, body: dashboard.recovery.body };
+  }
+  const state = snap.readiness.state;
+  const headline =
+    state === 'Recovered'
+      ? "You're ready to push"
+      : state === 'Balanced'
+        ? 'A balanced day'
+        : 'Prioritize recovery today';
+  const advice =
+    state === 'Recovered'
+      ? 'A moderate-to-high cardio load is well within reach.'
+      : state === 'Balanced'
+        ? "Keep today's training load moderate."
+        : 'Favor easy movement and rest today.';
+
+  const signals: string[] = [];
+  if (snap.hrv) {
+    signals.push(
+      snap.hrv.delta >= 0
+        ? 'HRV is at or above your baseline'
+        : 'HRV is below your baseline',
+    );
+  }
+  if (snap.sleep) {
+    signals.push(
+      snap.sleep.performancePct >= 85 ? 'sleep was solid' : 'sleep ran short',
+    );
+  }
+  const prefix = signals.length
+    ? `${signals.join(' and ').replace(/^./, c => c.toUpperCase())}. `
+    : '';
+  return { headline, body: `${prefix}${advice}` };
+}
+
 /** The "Today" dashboard: goals, recovery, key metrics, energy balance. */
 export function DashboardScreen({ navigation }: ScreenProps) {
   const t = useTheme();
@@ -87,6 +130,7 @@ export function DashboardScreen({ navigation }: ScreenProps) {
   const stats = liveStats(snap);
   const recoveryPct = snap.readiness?.pct ?? d.recovery.pct;
   const recoveryState = snap.readiness?.state ?? d.recovery.state;
+  const recovery = recoveryCopy(snap);
   const syncedNote = snap.live
     ? `Live · Health Connect · ${snap.sources.length} source${snap.sources.length === 1 ? '' : 's'}`
     : d.syncedNote;
@@ -144,10 +188,10 @@ export function DashboardScreen({ navigation }: ScreenProps) {
               </Text>
             </View>
             <Text style={[styles.heroTitle, { color: t.colors.fg }]}>
-              {d.recovery.headline}
+              {recovery.headline}
             </Text>
             <Text style={[styles.heroBody, { color: t.colors.muted }]}>
-              {d.recovery.body}
+              {recovery.body}
             </Text>
           </View>
         </View>

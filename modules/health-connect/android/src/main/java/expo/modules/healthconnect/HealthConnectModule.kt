@@ -14,6 +14,7 @@ import androidx.health.connect.client.records.StepsRecord
 import androidx.health.connect.client.request.ReadRecordsRequest
 import androidx.health.connect.client.time.TimeRangeFilter
 import expo.modules.kotlin.exception.Exceptions
+import expo.modules.kotlin.functions.Coroutine
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.time.Duration
@@ -75,7 +76,8 @@ class HealthConnectModule : Module() {
         return@Coroutine emptyList<String>()
       }
       try {
-        val intent = Intent(HealthConnectClient.healthConnectSettingsAction).apply {
+        // Health Connect settings screen; the user manages app read grants here.
+        val intent = Intent("androidx.health.ACTION_HEALTH_CONNECT_SETTINGS").apply {
           addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         context.startActivity(intent)
@@ -156,7 +158,7 @@ class HealthConnectModule : Module() {
         .map {
           val src = it.metadata.dataOrigin.packageName
           mapOf(
-            "kcal" to it.energy.kilocalories,
+            "kcal" to it.energy.inKilocalories,
             "start" to it.startTime.toEpochMilli().toDouble(),
             "end" to it.endTime.toEpochMilli().toDouble(),
             "source" to src,
@@ -181,7 +183,7 @@ class HealthConnectModule : Module() {
 
   /** Run a per-type read, swallowing SecurityException (revoked permission) so a
    * single denied type degrades to an empty list instead of failing the batch. */
-  private inline fun <T> safeRead(
+  private inline fun safeRead(
     sources: HashSet<String>,
     block: () -> List<Map<String, Any?>>,
   ): List<Map<String, Any?>> {
