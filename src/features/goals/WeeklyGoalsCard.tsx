@@ -8,6 +8,7 @@ import { Ring } from '../../components/Ring';
 import { GOAL_SOURCES } from '../../data/goalSources';
 import { dashboard } from '../../data/health';
 import { removeGoal } from '../../state/goalsService';
+import { useHealthStore } from '../../state/useHealthStore';
 import {
   goalCurrent,
   goalProgress,
@@ -35,12 +36,13 @@ function headline(avg: number, count: number): string {
 export function WeeklyGoalsCard() {
   const t = useTheme();
   const goals = useGoalsStore(s => s.goals);
+  const tracked = useHealthStore(s => s.snapshot.tracked);
   const [editing, setEditing] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
 
-  const total = goals.reduce((sum, g) => sum + goalProgress(g), 0);
+  const total = goals.reduce((sum, g) => sum + goalProgress(g, tracked), 0);
   const avg = goals.length ? total / goals.length : 0;
-  const doneCount = goals.filter(isGoalComplete).length;
+  const doneCount = goals.filter(g => isGoalComplete(g, tracked)).length;
 
   return (
     <Card>
@@ -119,9 +121,10 @@ function GoalRow({
   first: boolean;
 }) {
   const t = useTheme();
-  const done = isGoalComplete(goal);
+  const tracked = useHealthStore(s => s.snapshot.tracked);
+  const done = isGoalComplete(goal, tracked);
   const src = GOAL_SOURCES[goal.source];
-  const cur = goalCurrent(goal);
+  const cur = goalCurrent(goal, tracked);
 
   return (
     <View
@@ -164,7 +167,7 @@ function GoalRow({
           </Text>
         </View>
         <ProgressBar
-          progress={goalProgress(goal)}
+          progress={goalProgress(goal, tracked)}
           color={done ? t.colors.rec : t.colors.accent}
           height={8}
         />

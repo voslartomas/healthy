@@ -9,6 +9,8 @@ import { AppHeader, Screen } from '../../components/Screen';
 import { SectionLabel } from '../../components/SectionLabel';
 import { StatCard } from '../../components/StatCard';
 import { dashboard, MiniStat } from '../../data/health';
+import { HealthSnapshot } from '../../health';
+import { useHealthStore } from '../../state/useHealthStore';
 import { metricColor } from '../../theme/metricColors';
 import { monoFont, useTheme } from '../../theme/theme';
 import { WeeklyGoalsCard } from '../goals/WeeklyGoalsCard';
@@ -18,10 +20,76 @@ function grp(n: number): string {
   return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
+/** Format decimal hours as h:mm, e.g. 7.7 → "7:42". */
+function hoursToHm(hours: number): string {
+  const total = Math.round(hours * 60);
+  const h = Math.floor(total / 60);
+  const m = total % 60;
+  return `${h}:${m.toString().padStart(2, '0')}`;
+}
+
+/** "▲ 7 vs 30-day" / "▼ 1 vs 30-day" / "flat vs 30-day" from a baseline delta. */
+function baselineDetail(delta: number, unit = ''): string {
+  const rounded = Math.round(delta);
+  if (rounded === 0) return 'flat vs 30-day';
+  const arrow = rounded > 0 ? '▲' : '▼';
+  return `${arrow} ${Math.abs(rounded)}${unit} vs 30-day`;
+}
+
+function trendOf(delta: number): MiniStat['trend'] {
+  if (delta > 0) return 'up';
+  if (delta < 0) return 'down';
+  return 'flat';
+}
+
+/**
+ * Build the four dashboard mini-stats from a live snapshot, falling back to the
+ * sample stat for any metric the read did not surface. Cardio load stays on
+ * sample data — a real load figure needs the derivation formula tracked in a
+ * follow-up (ADR pending).
+ */
+function liveStats(snap: HealthSnapshot): typeof dashboard.stats {
+  const s = dashboard.stats;
+  return {
+    sleep: snap.sleep
+      ? {
+          ...s.sleep,
+          value: hoursToHm(snap.sleep.hours),
+          detail: `${snap.sleep.performancePct}% performance`,
+        }
+      : s.sleep,
+    load: s.load,
+    hrv: snap.hrv
+      ? {
+          ...s.hrv,
+          value: String(Math.round(snap.hrv.value)),
+          detail: baselineDetail(snap.hrv.delta),
+          trend: trendOf(snap.hrv.delta),
+        }
+      : s.hrv,
+    rhr: snap.restingHr
+      ? {
+          ...s.rhr,
+          value: String(Math.round(snap.restingHr.value)),
+          detail: baselineDetail(snap.restingHr.delta),
+          // For RHR, a drop vs baseline is the good direction.
+          trend: trendOf(-snap.restingHr.delta),
+        }
+      : s.rhr,
+  };
+}
+
 /** The "Today" dashboard: goals, recovery, key metrics, energy balance. */
 export function DashboardScreen({ navigation }: ScreenProps) {
   const t = useTheme();
+  const snap = useHealthStore(s => s.snapshot);
   const d = dashboard;
+  const stats = liveStats(snap);
+  const recoveryPct = snap.readiness?.pct ?? d.recovery.pct;
+  const recoveryState = snap.readiness?.state ?? d.recovery.state;
+  const syncedNote = snap.live
+    ? `Live · Health Connect · ${snap.sources.length} source${snap.sources.length === 1 ? '' : 's'}`
+    : d.syncedNote;
 
   const stat = (s: MiniStat, onPress?: () => void, a11y?: string) => (
     <StatCard
@@ -48,16 +116,16 @@ export function DashboardScreen({ navigation }: ScreenProps) {
 
       <Card
         onPress={() => navigation.navigate('Recovery')}
-        accessibilityLabel={`Open recovery detail, ${d.recovery.pct} percent recovered`}
+        accessibilityLabel={`Open recovery detail, ${recoveryPct} percent recovered`}
         style={styles.spaced}
       >
         <View style={styles.heroRing}>
           <Ring
-            progress={d.recovery.pct / 100}
+            progress={recoveryPct / 100}
             color={t.colors.rec}
             size={118}
             strokeWidth={10}
-            value={String(d.recovery.pct)}
+            value={String(recoveryPct)}
             valueSuffix="%"
             label="Recovery"
           />
@@ -72,7 +140,7 @@ export function DashboardScreen({ navigation }: ScreenProps) {
                 style={[styles.stateDot, { backgroundColor: t.colors.rec }]}
               />
               <Text style={[styles.stateText, { color: t.colors.recStateFg }]}>
-                {d.recovery.state}
+                {recoveryState}
               </Text>
             </View>
             <Text style={[styles.heroTitle, { color: t.colors.fg }]}>
@@ -87,16 +155,16 @@ export function DashboardScreen({ navigation }: ScreenProps) {
 
       <View style={[styles.grid, styles.spaced]}>
         <View style={styles.gridRow}>
-          {stat(d.stats.sleep)}
+          {stat(stats.sleep)}
           {stat(
-            d.stats.load,
+            stats.load,
             () => navigation.navigate('Cardio'),
-            'Open cardio load detail, 12.4',
+            `Open cardio load detail, ${stats.load.value}`,
           )}
         </View>
         <View style={styles.gridRow}>
-          {stat(d.stats.hrv)}
-          {stat(d.stats.rhr)}
+          {stat(stats.hrv)}
+          {stat(stats.rhr)}
         </View>
       </View>
 
@@ -157,7 +225,7 @@ export function DashboardScreen({ navigation }: ScreenProps) {
       </Card>
 
       <Text style={[styles.dinfo, { color: t.colors.muted }]}>
-        {d.syncedNote}
+        {syncedNote}
       </Text>
     </Screen>
   );

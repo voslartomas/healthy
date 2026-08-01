@@ -1,6 +1,11 @@
 import { create } from 'zustand';
 
-import { GoalSourceKey, TRACKED } from '../data/goalSources';
+import { GoalSourceKey } from '../data/goalSources';
+import { useHealthStore } from './useHealthStore';
+
+/** Live auto-tracked weekly totals per source (real Health Connect read, or
+ * the sample fallback when unavailable). */
+type TrackedMap = Partial<Record<GoalSourceKey, number>>;
 
 /**
  * A weekly goal is a *definition* of something to track. Progress is not stored
@@ -41,17 +46,24 @@ export const useGoalsStore = create<GoalsState>(set => ({
     set(state => ({ goals: state.goals.filter(g => g.id !== id) })),
 }));
 
-/** Auto-tracked amount for a goal's source this week. */
-export function goalCurrent(goal: WeeklyGoal): number {
-  return TRACKED[goal.source] ?? 0;
+/**
+ * Auto-tracked amount for a goal's source this week. Reads the live health
+ * snapshot by default; callers inside a component pass the reactively-subscribed
+ * map so the row re-renders when a fresh read lands.
+ */
+export function goalCurrent(
+  goal: WeeklyGoal,
+  tracked: TrackedMap = useHealthStore.getState().snapshot.tracked,
+): number {
+  return tracked[goal.source] ?? 0;
 }
 
 /** Fractional progress toward the goal's target, clamped to [0, 1]. */
-export function goalProgress(goal: WeeklyGoal): number {
+export function goalProgress(goal: WeeklyGoal, tracked?: TrackedMap): number {
   if (goal.target <= 0) return 0;
-  return Math.min(goalCurrent(goal) / goal.target, 1);
+  return Math.min(goalCurrent(goal, tracked) / goal.target, 1);
 }
 
-export function isGoalComplete(goal: WeeklyGoal): boolean {
-  return goalCurrent(goal) >= goal.target;
+export function isGoalComplete(goal: WeeklyGoal, tracked?: TrackedMap): boolean {
+  return goalCurrent(goal, tracked) >= goal.target;
 }

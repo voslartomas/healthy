@@ -15,7 +15,8 @@
       "package": "com.healthapp"
     },
     "plugins": [
-      "expo-sqlite"
+      "expo-sqlite",
+      "./plugins/withHealthConnect"
     ]
   }
 }

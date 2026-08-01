@@ -10,6 +10,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { RootStack } from './src/app/navigation/RootStack';
 import { initGoals } from './src/state/goalsService';
+import { initHealth } from './src/state/useHealthStore';
 import { colors } from './src/theme/colors';
 
 const lightTheme = {
@@ -38,9 +39,10 @@ export default function App() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
 
-  // Load persisted goals from SQLite once on startup.
+  // Load persisted goals from SQLite and the live health snapshot on startup.
   useEffect(() => {
     initGoals().catch(err => console.warn('Failed to load goals', err));
+    initHealth().catch(err => console.warn('Failed to load health data', err));
   }, []);
 
   return (
