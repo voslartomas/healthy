@@ -1,45 +1,67 @@
-import { isGoalComplete, useGoalsStore } from '../src/state/useGoalsStore';
+import { TRACKED } from '../src/data/goalSources';
+import {
+  goalCurrent,
+  goalProgress,
+  isGoalComplete,
+  useGoalsStore,
+  WeeklyGoal,
+} from '../src/state/useGoalsStore';
+
+const strengthGoal: WeeklyGoal = {
+  id: '1',
+  source: 'strength',
+  name: 'Strength workouts',
+  target: 3,
+};
 
 describe('useGoalsStore', () => {
   beforeEach(() => {
-    useGoalsStore.setState({ goals: [] });
+    useGoalsStore.setState({ goals: [], hydrated: false });
   });
 
-  it('adds a weekly goal with zero progress', () => {
-    useGoalsStore.getState().addGoal('Run 5k', 3);
+  it('hydrates goals from a persisted list', () => {
+    useGoalsStore.getState().setGoals([strengthGoal]);
 
-    const { goals } = useGoalsStore.getState();
-    expect(goals).toHaveLength(1);
-    expect(goals[0]).toMatchObject({
-      title: 'Run 5k',
-      targetPerWeek: 3,
-      completedThisWeek: 0,
-    });
+    expect(useGoalsStore.getState().goals).toHaveLength(1);
+    expect(useGoalsStore.getState().hydrated).toBe(true);
   });
 
-  it('increments progress but never past the weekly target', () => {
-    useGoalsStore.getState().addGoal('Meditate', 2);
-    const id = useGoalsStore.getState().goals[0].id;
+  it('adds and removes goals in memory', () => {
+    useGoalsStore.getState().addGoalLocal(strengthGoal);
+    expect(useGoalsStore.getState().goals).toHaveLength(1);
 
-    const { incrementProgress } = useGoalsStore.getState();
-    incrementProgress(id);
-    incrementProgress(id);
-    incrementProgress(id);
+    useGoalsStore.getState().removeGoalLocal('1');
+    expect(useGoalsStore.getState().goals).toHaveLength(0);
+  });
+});
 
-    const goal = useGoalsStore.getState().goals[0];
-    expect(goal.completedThisWeek).toBe(2);
-    expect(isGoalComplete(goal)).toBe(true);
+describe('goal progress helpers', () => {
+  it('derives progress from auto-tracked totals', () => {
+    // strength tracked = 2, target = 3 → 2/3
+    expect(goalCurrent(strengthGoal)).toBe(TRACKED.strength);
+    expect(goalProgress(strengthGoal)).toBeCloseTo(2 / 3);
+    expect(isGoalComplete(strengthGoal)).toBe(false);
   });
 
-  it('resets weekly progress while keeping goals', () => {
-    useGoalsStore.getState().addGoal('Lift', 4);
-    const id = useGoalsStore.getState().goals[0].id;
-    useGoalsStore.getState().incrementProgress(id);
+  it('clamps progress at 1 and marks completion', () => {
+    const easy: WeeklyGoal = {
+      id: '2',
+      source: 'core',
+      name: 'Core',
+      target: 2,
+    };
+    // core tracked = 3, target = 2 → complete, clamped to 1
+    expect(goalProgress(easy)).toBe(1);
+    expect(isGoalComplete(easy)).toBe(true);
+  });
 
-    useGoalsStore.getState().resetWeek();
-
-    const goal = useGoalsStore.getState().goals[0];
-    expect(goal.completedThisWeek).toBe(0);
-    expect(isGoalComplete(goal)).toBe(false);
+  it('handles a zero target safely', () => {
+    const zero: WeeklyGoal = {
+      id: '3',
+      source: 'steps',
+      name: 'Steps',
+      target: 0,
+    };
+    expect(goalProgress(zero)).toBe(0);
   });
 });
