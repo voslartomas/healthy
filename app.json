@@ -13,6 +13,9 @@
     },
     "android": {
       "package": "com.healthapp"
-    }
+    },
+    "plugins": [
+      "expo-sqlite"
+    ]
   }
 }

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { StatusBar } from 'expo-status-bar';
 import {
   NavigationContainer,
@@ -8,7 +8,8 @@ import {
 import { useColorScheme } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import { RootTabs } from './src/app/navigation/RootTabs';
+import { RootStack } from './src/app/navigation/RootStack';
+import { initGoals } from './src/state/goalsService';
 import { colors } from './src/theme/colors';
 
 const lightTheme = {
@@ -37,10 +38,15 @@ export default function App() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
 
+  // Load persisted goals from SQLite once on startup.
+  useEffect(() => {
+    initGoals().catch(err => console.warn('Failed to load goals', err));
+  }, []);
+
   return (
     <SafeAreaProvider>
       <NavigationContainer theme={isDark ? darkTheme : lightTheme}>
-        <RootTabs />
+        <RootStack />
         <StatusBar style={isDark ? 'light' : 'dark'} />
       </NavigationContainer>
     </SafeAreaProvider>
