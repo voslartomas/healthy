@@ -1,10 +1,12 @@
 import { TRACKED } from '../data/goalSources';
 import { deriveSnapshot } from './derive';
+import { fetchGoogleHealthRaw } from './GoogleHealthApi';
 import { getHealthConnect } from './HealthConnect';
 import { HealthSnapshot } from './types';
 
 export * from './types';
 export { isHealthConnectSupported } from './HealthConnect';
+export { GOOGLE_HEALTH_SCOPES } from './GoogleHealthApi';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const READ_WINDOW_MS = 30 * DAY_MS; // Health Connect default history (HEA-4 §3).
@@ -38,12 +40,54 @@ function hasAnyMetric(s: HealthSnapshot): boolean {
 }
 
 /**
+ * OAuth access-token provider for the Google Health cloud source. The OAuth /
+ * PKCE flow lives outside this module (it needs a Google client ID and the
+ * platform keychain — see ADR-005 §"Remaining wiring"); when that flow is in
+ * place it registers a getter here. Until then this stays null and
+ * {@link readSnapshot} falls through to on-device Health Connect exactly as
+ * before, so the cloud path is additive and cannot regress existing behaviour.
+ */
+type TokenProvider = () => Promise<string | null>;
+let googleTokenProvider: TokenProvider | null = null;
+
+export function setGoogleHealthTokenProvider(fn: TokenProvider | null): void {
+  googleTokenProvider = fn;
+}
+
+/** True once a Google Health token provider has been registered. */
+export function isGoogleHealthConfigured(): boolean {
+  return googleTokenProvider != null;
+}
+
+/** Try the Google Health cloud source; null if unconfigured, unauthenticated,
+ * or the read surfaced no usable metric (so callers fall back cleanly). */
+async function readGoogleHealthSnapshot(
+  now: number,
+): Promise<HealthSnapshot | null> {
+  if (!googleTokenProvider) return null;
+  const token = await googleTokenProvider();
+  if (!token) return null;
+  const raw = await fetchGoogleHealthRaw(token, now, fetch as never);
+  const snapshot = deriveSnapshot(raw, now);
+  return hasAnyMetric(snapshot) ? snapshot : null;
+}
+
+/**
  * Read the current health snapshot, preferring real Health Connect data and
  * falling back to {@link SAMPLE_SNAPSHOT} at every gate: no native module, SDK
  * not available, no permissions granted, or a read that surfaced no usable
  * metric. The permission grant itself is re-checked on every call (HEA-4 §4).
  */
 export async function readSnapshot(now: number): Promise<HealthSnapshot> {
+  // Cloud Google Health source first when configured (cross-platform; ADR-005).
+  // Any failure here degrades to the on-device path rather than throwing.
+  try {
+    const cloud = await readGoogleHealthSnapshot(now);
+    if (cloud) return cloud;
+  } catch (err) {
+    console.warn('Google Health read failed; trying Health Connect', err);
+  }
+
   const hc = getHealthConnect();
   if (!hc) return SAMPLE_SNAPSHOT;
 
