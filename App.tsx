@@ -9,6 +9,7 @@ import { useColorScheme } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { RootStack } from './src/app/navigation/RootStack';
+import { registerGoogleHealthAuth } from './src/health/googleAuth';
 import { initGoals } from './src/state/goalsService';
 import { initHealth } from './src/state/useHealthStore';
 import { colors } from './src/theme/colors';
@@ -41,6 +42,7 @@ export default function App() {
 
   // Load persisted goals from SQLite and the live health snapshot on startup.
   useEffect(() => {
+    registerGoogleHealthAuth();
     initGoals().catch(err => console.warn('Failed to load goals', err));
     initHealth().catch(err => console.warn('Failed to load health data', err));
   }, []);

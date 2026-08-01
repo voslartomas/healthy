@@ -16,7 +16,12 @@
     },
     "plugins": [
       "expo-sqlite",
-      "./plugins/withHealthConnect"
-    ]
+      "expo-secure-store",
+      "expo-web-browser"
+    ],
+    "extra": {
+      "//": "Google Health cloud API OAuth client ID (iOS/Android OAuth 2.0 client, no secret — PKCE). Provide the real value here or via app config; empty disables the live cloud read and the app renders sample data.",
+      "googleClientId": ""
+    }
   }
 }

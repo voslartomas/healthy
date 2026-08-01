@@ -24,6 +24,7 @@ function emptyRaw(): RawHealthData {
     steps: [],
     exercise: [],
     activeEnergy: [],
+    nutrition: [],
     sources: [],
     readAt: NOW,
   };

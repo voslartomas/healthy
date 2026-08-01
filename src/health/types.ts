@@ -13,8 +13,9 @@ import { GoalSourceKey } from '../data/goalSources';
  * and aggregated. Nothing above the derivation layer sees raw multi-source data.
  */
 
-/** HRV algorithm. Android exposes RMSSD, iOS HealthKit exposes SDNN — they are
- * NOT numerically comparable, so every HRV value is tagged (HEA-4 landmine). */
+/** HRV algorithm. The Google Health API exposes RMSSD (deep-sleep RMSSD field);
+ * SDNN is retained in the union because it is NOT numerically comparable to
+ * RMSSD, so every HRV value stays explicitly tagged (HEA-4 landmine). */
 export type HrvAlgorithm = 'RMSSD' | 'SDNN';
 
 /** A single instantaneous sample (HRV, resting HR). Times are epoch ms. */
@@ -59,6 +60,24 @@ export interface EnergyRecord {
 }
 
 /**
+ * One logged food / nutrition entry. Unlike the other record types this is the
+ * one thing the user *writes* (see {@link ./GoogleHealthApi.writeFoodEntry}) as
+ * well as reads. `start`/`end` bound the meal; macros are grams; `kcal` is the
+ * entry's energy. All macros optional — a quick calorie-only log is valid.
+ */
+export interface NutritionEntry {
+  start: number;
+  end: number;
+  name: string;
+  mealType: string | null;
+  kcal: number | null;
+  proteinG: number | null;
+  carbsG: number | null;
+  fatG: number | null;
+  source: string;
+}
+
+/**
  * Everything the native module reads in one pass, normalized to the units above
  * but NOT yet deduped or aggregated. This is the boundary between native and TS.
  */
@@ -69,6 +88,7 @@ export interface RawHealthData {
   steps: StepsRecord[];
   exercise: ExerciseRecord[];
   activeEnergy: EnergyRecord[];
+  nutrition: NutritionEntry[];
   /** Distinct source packages seen across all record types. */
   sources: string[];
   /** Epoch ms when the read completed. */
@@ -100,6 +120,24 @@ export interface ReadinessMetric {
   state: 'Recovered' | 'Balanced' | 'Strained';
 }
 
+/** One meal row for the nutrition screen (derived from a {@link NutritionEntry}). */
+export interface MealSummary {
+  name: string;
+  mealType: string | null;
+  kcal: number;
+  time: number;
+}
+
+/** Today's aggregated nutrition, derived from the day's logged food entries. */
+export interface NutritionSummary {
+  /** Total energy eaten today (kcal). */
+  eaten: number;
+  proteinG: number;
+  carbsG: number;
+  fatG: number;
+  meals: MealSummary[];
+}
+
 /**
  * The fully-derived view of a user's health data that the dashboard reads.
  * Any field can be `null` when the underlying data is absent (a permission was
@@ -112,6 +150,8 @@ export interface HealthSnapshot {
   stepsToday: number;
   stepsThisWeek: number;
   readiness: ReadinessMetric | null;
+  /** Today's logged nutrition, null when nothing has been logged today. */
+  nutrition: NutritionSummary | null;
   /** Auto-tracked weekly totals per goal source, from real activity. */
   tracked: Partial<Record<GoalSourceKey, number>>;
   /** Distinct writing apps, for the "Synced via …" line. */

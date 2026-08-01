@@ -1,7 +1,13 @@
 import { create } from 'zustand';
 
 import { GoalSourceKey } from '../data/goalSources';
-import { HealthSnapshot, readSnapshot, SAMPLE_SNAPSHOT } from '../health';
+import {
+  FoodEntryInput,
+  HealthSnapshot,
+  logFood,
+  readSnapshot,
+  SAMPLE_SNAPSHOT,
+} from '../health';
 
 /**
  * In-memory store for the current health snapshot. Seeded with the sample
@@ -18,6 +24,9 @@ interface HealthState {
   status: Status;
   /** Fetch a fresh snapshot (live if available, sample otherwise). */
   refresh: () => Promise<void>;
+  /** Log a food entry to Google Health, then refresh. Returns false if the
+   * write failed (e.g. not connected) so the UI can tell the user. */
+  logFood: (input: FoodEntryInput) => Promise<boolean>;
 }
 
 export const useHealthStore = create<HealthState>((set, get) => ({
@@ -33,6 +42,11 @@ export const useHealthStore = create<HealthState>((set, get) => ({
       console.warn('Health read failed; keeping sample data', err);
       set({ status: 'ready' });
     }
+  },
+  logFood: async input => {
+    const ok = await logFood(input);
+    if (ok) await get().refresh();
+    return ok;
   },
 }));
 

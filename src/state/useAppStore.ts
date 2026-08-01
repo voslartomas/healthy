@@ -57,34 +57,33 @@ export const PROVIDER_ORDER: AiProvider[] = [
   'ondevice',
 ];
 
-export type HealthSource = 'googleHealth' | 'appleHealth';
+// Google Health is the single cross-platform data source (the REST API behaves
+// identically on iOS and Android, so there is no separate Apple Health path).
+export type HealthSource = 'googleHealth';
 
 interface AppState {
   aiProvider: AiProvider;
   model: string;
   apiKey: string;
-  /** Connection toggles for health data sources. */
+  /** Connection state for health data sources (true once OAuth-connected). */
   connections: Record<HealthSource, boolean>;
   setAiProvider: (provider: AiProvider) => void;
   setModel: (model: string) => void;
   setApiKey: (key: string) => void;
-  toggleConnection: (source: HealthSource) => void;
+  setConnection: (source: HealthSource, connected: boolean) => void;
 }
 
 export const useAppStore = create<AppState>(set => ({
   aiProvider: 'anthropic',
   model: PROVIDERS.anthropic.models[0],
   apiKey: '',
-  connections: { googleHealth: true, appleHealth: true },
+  connections: { googleHealth: false },
   setAiProvider: provider =>
     set({ aiProvider: provider, model: PROVIDERS[provider].models[0] }),
   setModel: model => set({ model }),
   setApiKey: apiKey => set({ apiKey }),
-  toggleConnection: source =>
+  setConnection: (source, connected) =>
     set(state => ({
-      connections: {
-        ...state.connections,
-        [source]: !state.connections[source],
-      },
+      connections: { ...state.connections, [source]: connected },
     })),
 }));

@@ -13,7 +13,6 @@ import {
  * snapshot. No network — the fetch layer is exercised with an injected stub.
  */
 
-const DAY = 24 * 60 * 60 * 1000;
 // A fixed "now" late in a UTC day so start-of-today windows are unambiguous.
 const NOW = Date.UTC(2026, 6, 20, 18, 0, 0); // 2026-07-20T18:00:00Z
 
@@ -25,6 +24,7 @@ function emptyPayloads(): GoogleHealthPayloads {
     steps: [],
     calories: [],
     exercise: [],
+    nutrition: [],
   };
 }
 
@@ -271,6 +271,7 @@ describe('Google Health → deriveSnapshot end to end', () => {
           },
         },
       ],
+      nutrition: [],
     };
 
     const snapshot = deriveSnapshot(mapGoogleHealthRaw(payloads, NOW), NOW);
@@ -329,9 +330,10 @@ describe('fetchGoogleHealthRaw (injected fetch)', () => {
 
     expect(raw.steps[0].count).toBe(7200);
     expect(raw.restingHr[0].value).toBe(52);
-    // 4 GET lists (hrv, rhr, sleep, exercise) + 2 POST rollups (steps, calories).
-    expect(calls.length).toBe(6);
+    // 5 GET lists (hrv, rhr, sleep, exercise, nutrition) + 2 POST rollups (steps, calories).
+    expect(calls.length).toBe(7);
     expect(calls.some((u) => u.includes(':dailyRollUp'))).toBe(true);
+    expect(calls.some((u) => u.includes('nutrition-log'))).toBe(true);
   });
 
   it('degrades a failing metric to empty instead of throwing', async () => {

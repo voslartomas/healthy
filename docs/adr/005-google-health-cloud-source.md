@@ -2,6 +2,10 @@
 
 Status: Accepted (HEA-18) — CEO-directed
 Date: 2026-08-01
+Superseding update (2026-08-01): the CEO then directed that the Google Health
+cloud API become the **sole** source — remove on-device Android Health Connect
+**and** iOS HealthKit ("it will work same as on android") — and that the app be
+allowed to **write food** back to Google Health. See "Revision 2" at the bottom.
 
 ## Context
 
@@ -104,3 +108,40 @@ Items 1 and 3 are owner-provided; item 2 is a follow-up implementation task.
   writes to local Health Connect are still served by the on-device path.
 - Sensitive-scope OAuth apps require Google verification before public release —
   a release-gating item to track.
+
+## Revision 2 (2026-08-01) — sole source, native removed, food write added
+
+The CEO decided the cloud API is now the **only** source. Changes:
+
+- **Removed** `modules/health-connect` (Kotlin), `plugins/withHealthConnect`,
+  `src/health/HealthConnect.ts`, the Health Connect config-plugin entry and its
+  Android manifest permissions, and the Apple Health settings row. There is no
+  native health bridge left. Because the REST API behaves identically on iOS and
+  Android, **iOS needs no separate HealthKit path or separate test pass**.
+- `readSnapshot` is now simply: Google Health cloud (when a token provider is
+  registered) → sample snapshot. No native branch.
+- **OAuth/PKCE flow implemented** (previously "remaining wiring" item 2):
+  `src/health/googleAuth.ts` runs the Authorization-Code + PKCE flow with
+  `expo-auth-session`, persists tokens in the keychain via `expo-secure-store`,
+  and refreshes on expiry. Client ID comes from `expo.extra.googleClientId`.
+  Items 1 (a provisioned OAuth **client ID**) and 3 (an account with data) remain
+  owner-provided; they are all that blocks a **live** end-to-end verification.
+
+### Food write — the one write we allow
+
+The app now **writes** the user's food log to their Google Health account
+(`writeFoodEntry` → `POST …/nutrition-log/dataPoints`, `googlehealth.nutrition`
+scope). This is a deliberate, bounded exception to the earlier read-only stance:
+
+- We write **only user-authored nutrition** (what the user typed into the food
+  log), never derived body metrics (HRV/RHR/sleep/steps). Those stay read-only.
+- It is the user's own data going to the user's own account they already chose,
+  over TLS with explicit OAuth consent, through no HealthApp backend. The
+  audio/speech boundary is untouched.
+
+**Correctness caveat (priority #1, stated plainly):** the reference dashboard is
+read-only, so unlike every read path the **write wire format is NOT verified
+against a live sample**. The payload mirrors the shape we read back and the
+builder (`buildNutritionLogPayload`) is isolated + unit-tested, so if the live
+format differs we fix one pure function. This must be confirmed against a real
+account before we rely on it.

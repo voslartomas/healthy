@@ -132,7 +132,7 @@ export function DashboardScreen({ navigation }: ScreenProps) {
   const recoveryState = snap.readiness?.state ?? d.recovery.state;
   const recovery = recoveryCopy(snap);
   const syncedNote = snap.live
-    ? `Live · Health Connect · ${snap.sources.length} source${snap.sources.length === 1 ? '' : 's'}`
+    ? `Live · Google Health · ${snap.sources.length} source${snap.sources.length === 1 ? '' : 's'}`
     : d.syncedNote;
 
   const stat = (s: MiniStat, onPress?: () => void, a11y?: string) => (

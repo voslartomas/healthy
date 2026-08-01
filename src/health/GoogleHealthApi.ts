@@ -2,6 +2,7 @@ import {
   EnergyRecord,
   ExerciseRecord,
   InstantSample,
+  NutritionEntry,
   RawHealthData,
   SleepRecord,
   StepsRecord,
@@ -32,13 +33,21 @@ import {
 
 const BASE_URL = 'https://health.googleapis.com/v4';
 
-/** OAuth read scopes required for the metrics the dashboard consumes. */
+/**
+ * OAuth scopes. Reads cover every dashboard metric plus nutrition; the one
+ * WRITE scope (`nutrition`, non-readonly) is what lets the user log food back to
+ * their own Google Health account. Writing is limited to nutrition on purpose —
+ * we never write derived body metrics (HRV/RHR/sleep), only the user's own
+ * food log, which they authored (privacy boundary; see ADR-005 §write).
+ */
 export const GOOGLE_HEALTH_SCOPES = [
   'openid',
   'profile',
   'https://www.googleapis.com/auth/googlehealth.sleep.readonly',
   'https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly',
   'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly',
+  'https://www.googleapis.com/auth/googlehealth.nutrition.readonly',
+  'https://www.googleapis.com/auth/googlehealth.nutrition',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -110,6 +119,22 @@ interface ExerciseDataPoint {
     exerciseType?: string;
     activeDuration?: string;
     metricsSummary?: { caloriesKcal?: number; caloriesBurned?: number };
+  };
+}
+
+/** A `nutrition-log` data point. Field paths mirror the reference dashboard's
+ * NutritionDataPoint (google-health-web-dashboard/src/types/health.ts). */
+interface NutritionDataPoint {
+  dataSource?: DataSource;
+  nutritionLog?: {
+    interval?: { startTime?: string; endTime?: string };
+    energy?: { kcal?: number };
+    totalCarbohydrate?: { grams?: number };
+    totalFat?: { grams?: number };
+    totalProtein?: { grams?: number };
+    nutrients?: { nutrient?: string; quantity?: { grams?: number; kcal?: number } }[];
+    mealType?: string;
+    foodDisplayName?: string;
   };
 }
 
@@ -188,6 +213,21 @@ export interface GoogleHealthPayloads {
   steps: StepsRollupDataPoint[];
   calories: CaloriesRollupDataPoint[];
   exercise: ExerciseDataPoint[];
+  nutrition: NutritionDataPoint[];
+}
+
+/** Grams for a named nutrient, checking the explicit total field first then the
+ * generic `nutrients[]` array (Google returns protein either way). */
+function nutrientGrams(
+  log: NonNullable<NutritionDataPoint['nutritionLog']>,
+  total: number | undefined,
+  nutrientName: string,
+): number | null {
+  if (total != null) return total;
+  const hit = log.nutrients?.find(
+    n => n.nutrient?.toUpperCase() === nutrientName,
+  );
+  return hit?.quantity?.grams ?? null;
 }
 
 /**
@@ -291,6 +331,28 @@ export function mapGoogleHealthRaw(
     });
   }
 
+  const nutrition: NutritionEntry[] = [];
+  for (const dp of p.nutrition) {
+    const log = dp.nutritionLog;
+    if (!log) continue;
+    const start = isoToMs(log.interval?.startTime);
+    const end = isoToMs(log.interval?.endTime) ?? start;
+    if (start == null || end == null) continue;
+    const source = sourceLabel(dp.dataSource);
+    sources.add(source);
+    nutrition.push({
+      start,
+      end,
+      name: log.foodDisplayName ?? 'Food',
+      mealType: log.mealType ?? null,
+      kcal: log.energy?.kcal ?? null,
+      proteinG: nutrientGrams(log, log.totalProtein?.grams, 'PROTEIN'),
+      carbsG: nutrientGrams(log, log.totalCarbohydrate?.grams, 'CARBS'),
+      fatG: nutrientGrams(log, log.totalFat?.grams, 'FAT'),
+      source,
+    });
+  }
+
   return {
     hrvRmssd,
     restingHr,
@@ -298,6 +360,7 @@ export function mapGoogleHealthRaw(
     steps,
     exercise,
     activeEnergy,
+    nutrition,
     sources: [...sources],
     readAt: now,
   };
@@ -402,29 +465,110 @@ export async function fetchGoogleHealthRaw(
     `sleep.interval.civil_end_time >= "${isoDaysAgo(now, daysBack)}"`,
   );
 
-  const [hrv, restingHr, sleep, steps, calories, exercise] = await Promise.all([
-    getList<HrvDataPoint>(
-      `/users/me/dataTypes/daily-heart-rate-variability/dataPoints?filter=${hrvFilter}`,
-    ),
-    getList<RestingHrDataPoint>(
-      `/users/me/dataTypes/daily-resting-heart-rate/dataPoints?filter=${rhrFilter}`,
-    ),
-    getList<SleepDataPoint>(
-      `/users/me/dataTypes/sleep/dataPoints?filter=${sleepFilter}&page_size=20`,
-    ),
-    postRollup<StepsRollupDataPoint>(
-      '/users/me/dataTypes/steps/dataPoints:dailyRollUp',
-    ),
-    postRollup<CaloriesRollupDataPoint>(
-      '/users/me/dataTypes/total-calories/dataPoints:dailyRollUp',
-    ),
-    getList<ExerciseDataPoint>(
-      '/users/me/dataTypes/exercise/dataPoints?page_size=100',
-    ),
-  ]);
+  const [hrv, restingHr, sleep, steps, calories, exercise, nutrition] =
+    await Promise.all([
+      getList<HrvDataPoint>(
+        `/users/me/dataTypes/daily-heart-rate-variability/dataPoints?filter=${hrvFilter}`,
+      ),
+      getList<RestingHrDataPoint>(
+        `/users/me/dataTypes/daily-resting-heart-rate/dataPoints?filter=${rhrFilter}`,
+      ),
+      getList<SleepDataPoint>(
+        `/users/me/dataTypes/sleep/dataPoints?filter=${sleepFilter}&page_size=20`,
+      ),
+      postRollup<StepsRollupDataPoint>(
+        '/users/me/dataTypes/steps/dataPoints:dailyRollUp',
+      ),
+      postRollup<CaloriesRollupDataPoint>(
+        '/users/me/dataTypes/total-calories/dataPoints:dailyRollUp',
+      ),
+      getList<ExerciseDataPoint>(
+        '/users/me/dataTypes/exercise/dataPoints?page_size=100',
+      ),
+      getList<NutritionDataPoint>(
+        '/users/me/dataTypes/nutrition-log/dataPoints?page_size=100',
+      ),
+    ]);
 
   return mapGoogleHealthRaw(
-    { hrv, restingHr, sleep, steps, calories, exercise },
+    { hrv, restingHr, sleep, steps, calories, exercise, nutrition },
     now,
   );
+}
+
+// ---------------------------------------------------------------------------
+// Write path — logging food back to the user's Google Health nutrition log.
+//
+// The reference dashboard is read-only, so unlike the read paths above the
+// exact create endpoint/body is NOT contract-verified against a live sample.
+// The payload mirrors the SHAPE we read back (`nutritionLog`), and the builder
+// is isolated + unit-tested so that if the live wire format differs we correct
+// one pure function, not the caller. Verifying this end-to-end needs a real
+// OAuth client ID + a Google Health account (see index.ts wiring notes).
+// ---------------------------------------------------------------------------
+
+/** What the user types when logging a meal. Macros optional (calorie-only ok). */
+export interface FoodEntryInput {
+  name: string;
+  kcal: number;
+  mealType?: string;
+  proteinG?: number;
+  carbsG?: number;
+  fatG?: number;
+  /** Meal time; defaults to `now` at the call site. */
+  at?: number;
+}
+
+/** RFC3339 UTC timestamp for an epoch-ms value. */
+function msToIso(ms: number): string {
+  return new Date(ms).toISOString();
+}
+
+/** Build the `nutrition-log` create body for a single food entry (pure). */
+export function buildNutritionLogPayload(
+  input: FoodEntryInput,
+  now: number,
+): { dataPoint: { nutritionLog: Record<string, unknown> } } {
+  const at = input.at ?? now;
+  const log: Record<string, unknown> = {
+    interval: { startTime: msToIso(at), endTime: msToIso(at) },
+    foodDisplayName: input.name,
+    energy: { kcal: input.kcal },
+  };
+  if (input.mealType) log.mealType = input.mealType;
+  if (input.proteinG != null) log.totalProtein = { grams: input.proteinG };
+  if (input.carbsG != null) log.totalCarbohydrate = { grams: input.carbsG };
+  if (input.fatG != null) log.totalFat = { grams: input.fatG };
+  return { dataPoint: { nutritionLog: log } };
+}
+
+/**
+ * Write one food entry to the signed-in user's Google Health nutrition log.
+ * Returns true on a 2xx. `accessToken` must carry the `googlehealth.nutrition`
+ * (write) scope. Never throws for a normal API failure — resolves false — so a
+ * failed log never crashes the screen.
+ */
+export async function writeFoodEntry(
+  accessToken: string,
+  input: FoodEntryInput,
+  now: number,
+  fetchImpl: FetchLike,
+): Promise<boolean> {
+  try {
+    const res = await fetchImpl(
+      `${BASE_URL}/users/me/dataTypes/nutrition-log/dataPoints`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify(buildNutritionLogPayload(input, now)),
+      },
+    );
+    return res.ok;
+  } catch {
+    return false;
+  }
 }

@@ -5,6 +5,8 @@ import {
   HealthSnapshot,
   InstantSample,
   MetricWithBaseline,
+  NutritionEntry,
+  NutritionSummary,
   RawHealthData,
   ReadinessMetric,
   SleepRecord,
@@ -265,6 +267,48 @@ function clamp(n: number, lo = 0, hi = 100): number {
   return Math.max(lo, Math.min(hi, n));
 }
 
+/**
+ * Today's nutrition, summed from the day's logged food entries. Nutrition is
+ * single-source (the user logs it), so there is no cross-origin dedup here —
+ * every entry the user wrote counts. Returns null when nothing was logged today.
+ */
+export function nutritionToday(
+  entries: NutritionEntry[],
+  now: number,
+): NutritionSummary | null {
+  const startOfToday = now - (now % DAY_MS);
+  const today = entries.filter(e => e.start >= startOfToday && e.start <= now);
+  if (today.length === 0) return null;
+
+  let eaten = 0;
+  let proteinG = 0;
+  let carbsG = 0;
+  let fatG = 0;
+  for (const e of today) {
+    eaten += e.kcal ?? 0;
+    proteinG += e.proteinG ?? 0;
+    carbsG += e.carbsG ?? 0;
+    fatG += e.fatG ?? 0;
+  }
+
+  const meals = today
+    .map(e => ({
+      name: e.name,
+      mealType: e.mealType,
+      kcal: Math.round(e.kcal ?? 0),
+      time: e.start,
+    }))
+    .sort((a, b) => a.time - b.time);
+
+  return {
+    eaten: Math.round(eaten),
+    proteinG: Math.round(proteinG),
+    carbsG: Math.round(carbsG),
+    fatG: Math.round(fatG),
+    meals,
+  };
+}
+
 /** Derive the full snapshot the UI consumes from one raw read. */
 export function deriveSnapshot(raw: RawHealthData, now: number): HealthSnapshot {
   const hrvBase = metricWithBaseline(raw.hrvRmssd);
@@ -291,6 +335,7 @@ export function deriveSnapshot(raw: RawHealthData, now: number): HealthSnapshot 
     stepsToday: stepsInWindow(raw.steps, startOfToday, now),
     stepsThisWeek: stepsInWindow(raw.steps, now - WEEK_MS, now),
     readiness: readiness(hrv, restingHr, sleep),
+    nutrition: nutritionToday(raw.nutrition, now),
     tracked: trackedFromExercise(raw.exercise, raw.steps, raw.activeEnergy, now),
     sources: raw.sources,
     readAt: raw.readAt,
