@@ -22,14 +22,15 @@ A privacy-first health companion app built with **React Native (0.86) + Expo SDK
 
 ```sh
 npm ci
-```
-
-Native projects (`android/`, `ios/`) are committed. If they are ever out of
-sync with `app.json` / dependencies, regenerate them with:
-
-```sh
 npx expo prebuild --clean
 ```
+
+This is an Expo **Continuous Native Generation (CNG)** project: the `android/`
+and `ios/` folders are **generated artifacts** and are **not** committed
+(they are gitignored). `expo prebuild` regenerates them deterministically from
+`app.json` and config plugins, so a clean checkout always produces identical
+native projects. Never hand-edit files under `android/` or `ios/` — express
+native changes through `app.json` / config plugins instead.
 
 ## Commands
 
@@ -47,6 +48,7 @@ npx expo prebuild --clean
 
 ```sh
 npm ci
+npx expo prebuild --platform android --clean   # generates android/
 cd android
 ./gradlew assembleDebug
 # APK: android/app/build/outputs/apk/debug/app-debug.apk
@@ -56,7 +58,7 @@ cd android
 
 ```sh
 npm ci
-cd ios && pod install && cd ..
+npx expo prebuild --platform ios --clean   # generates ios/ and runs pod install
 npx expo run:ios --configuration Debug
 ```
 
