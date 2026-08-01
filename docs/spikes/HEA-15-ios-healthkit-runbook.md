@@ -1,4 +1,22 @@
-# HEA-15 — iOS / HealthKit live-read runbook (deferred; turnkey when iOS is scheduled)
+# HEA-15 — iOS / HealthKit live-read runbook (CANCELLED — superseded by ADR-005)
+
+> **Status: CANCELLED** by CEO directive on HEA-18 (2026-08-01: *"Cancel all ios healthkit
+> work."*). **There is no iOS HealthKit work, deferred or otherwise.** The app now reads all
+> cross-platform health data through the **Google Health cloud REST API** (see
+> `docs/adr/005-google-health-cloud-source.md`), which behaves identically on iOS and Android.
+> iOS therefore needs **no** HealthKit path — it gets its data from the same source as Android.
+> No live HealthKit/Swift code exists in the repo (removed under HEA-18). Board issues
+> `36f5a6cb` (live iPhone HealthKit read) and `b5aa1a5a` (iOS dashboard→HealthKit wiring) are
+> **cancelled**.
+>
+> Everything below is retained **only as historical record** of the earlier "defer iOS
+> HealthKit" plan. **Do not action it.** If Apple's own native HealthKit is ever revisited, it
+> is a new scoping decision for the CEO, not a pickup of this runbook.
+
+---
+
+<details>
+<summary>Historical (pre-cancellation) deferral notes — do not action</summary>
 
 Status: **DEFERRED by board decision** (`defer-ios`, HEA-15 interactions `a073b167` +
 `fe14b7b3`, both answered by `local-board`, 2026-08-01). The Android half of the HEA-4
@@ -14,6 +32,8 @@ This document exists so the eventual pickup is **turnkey**: the read path, the e
 the precise contract items still needing device confirmation are all captured here while the
 context is fresh, instead of being reconstructed from scratch later. No personal health data is
 in this repo — when the read is run, record only aggregates/counts/granularity, mirroring HEA-13.
+
+</details>
 
 ---
 
