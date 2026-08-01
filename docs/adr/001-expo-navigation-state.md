@@ -17,7 +17,7 @@ custom native code we plan to write ourselves.
 
 1. **Expo SDK 57 with Continuous Native Generation (prebuild).** The
    `android/` and `ios/` directories are generated from `app.json` via
-   `npx expo prebuild` and committed for reproducible builds. This gives us
+   `pnpm expo prebuild` and committed for reproducible builds. This gives us
    the Expo module ecosystem (expo-av/audio, health adapters via config
    plugins) and OTA-friendly tooling while keeping full native build output.
 2. **React Navigation 7** (bottom tabs + native stack) instead of Expo Router.
