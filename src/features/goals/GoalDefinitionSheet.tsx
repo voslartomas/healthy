@@ -11,13 +11,11 @@ import {
   View,
 } from 'react-native';
 
-import { Icon } from '../../components/Icon';
-import {
-  GOAL_SOURCE_ORDER,
-  GOAL_SOURCES,
-  GoalSourceKey,
-} from '../../data/goalSources';
+import { Icon, IconName } from '../../components/Icon';
+import { GOAL_SOURCES, GoalSourceKey } from '../../data/goalSources';
+import { ActivityOption } from '../../health';
 import { createGoal } from '../../state/goalsService';
+import { useHealthStore } from '../../state/useHealthStore';
 import { monoFont, radii, useTheme } from '../../theme/theme';
 
 interface Props {
@@ -25,16 +23,62 @@ interface Props {
   onClose: () => void;
 }
 
+/** Aggregate-metric choices offered alongside the user's real activities. */
+const METRIC_SOURCES: GoalSourceKey[] = ['steps', 'zone2', 'calories'];
+
+/** Default weekly target for an activity goal (sessions/week). */
+const ACTIVITY_DEFAULT_TARGET = 3;
+
+/** What the user has selected to track — a metric, or a real activity option. */
+type Selection =
+  | { kind: 'metric'; source: GoalSourceKey }
+  | { kind: 'activity'; option: ActivityOption };
+
+function selectionLabel(sel: Selection): string {
+  return sel.kind === 'metric'
+    ? GOAL_SOURCES[sel.source].label
+    : sel.option.label;
+}
+
+function selectionKey(sel: Selection): string {
+  return sel.kind === 'metric'
+    ? `metric:${sel.source}`
+    : `activity:${sel.option.field}:${sel.option.value}`;
+}
+
+/** Heuristic icon for an activity pill so strength / core / cardio differ. */
+function activityIcon(o: ActivityOption): IconName {
+  const v = `${o.value} ${o.label}`.toLowerCase();
+  if (/strength|weight|posil/.test(v)) return 'strength';
+  if (/core|stred|střed|abs|pilates|jádr/.test(v)) return 'core';
+  return 'zone2';
+}
+
+function firstSelection(options: ActivityOption[]): Selection {
+  return options.length > 0
+    ? { kind: 'activity', option: options[0] }
+    : { kind: 'metric', source: 'steps' };
+}
+
 /**
- * Bottom sheet for defining a weekly goal (`.sheet` in the design). Picking a
- * source pre-fills the name and target placeholder; saving writes through to
- * SQLite via {@link createGoal}.
+ * Bottom sheet for defining a weekly goal (`.sheet` in the design). The picker
+ * is driven by the user's REAL recent activities (last ~2 weeks, from
+ * `snapshot.activityOptions`) plus a few aggregate metrics. An activity goal can
+ * match on exercise type or the localized displayName and carry a minimum
+ * session length; saving writes through to SQLite via {@link createGoal}.
  */
 export function GoalDefinitionSheet({ visible, onClose }: Props) {
   const t = useTheme();
-  const [source, setSource] = useState<GoalSourceKey>('strength');
-  const [name, setName] = useState(GOAL_SOURCES.strength.label);
+  const options = useHealthStore(s => s.snapshot.activityOptions);
+
+  const [selection, setSelection] = useState<Selection>(() =>
+    firstSelection(options),
+  );
+  const [name, setName] = useState(() =>
+    selectionLabel(firstSelection(options)),
+  );
   const [target, setTarget] = useState('');
+  const [minMinutes, setMinMinutes] = useState('');
 
   // Reset the form when the sheet transitions to open. This uses React's
   // "adjust state while rendering" pattern rather than an effect, so there is
@@ -43,23 +87,46 @@ export function GoalDefinitionSheet({ visible, onClose }: Props) {
   if (visible !== wasVisible) {
     setWasVisible(visible);
     if (visible) {
-      setSource('strength');
-      setName(GOAL_SOURCES.strength.label);
+      const initial = firstSelection(options);
+      setSelection(initial);
+      setName(selectionLabel(initial));
       setTarget('');
+      setMinMinutes('');
     }
   }
 
-  function pickSource(key: GoalSourceKey) {
-    setSource(key);
-    setName(GOAL_SOURCES[key].label);
+  function pick(sel: Selection) {
+    setSelection(sel);
+    setName(selectionLabel(sel));
   }
 
+  const isActivity = selection.kind === 'activity';
+  const defaultTarget = isActivity
+    ? ACTIVITY_DEFAULT_TARGET
+    : GOAL_SOURCES[selection.source].defaultTarget;
+
   async function save() {
-    const src = GOAL_SOURCES[source];
     const parsed = parseInt(target, 10);
-    const value =
-      Number.isFinite(parsed) && parsed > 0 ? parsed : src.defaultTarget;
-    await createGoal({ source, name: name.trim() || src.label, target: value });
+    const value = Number.isFinite(parsed) && parsed > 0 ? parsed : defaultTarget;
+    const finalName = name.trim() || selectionLabel(selection);
+    if (selection.kind === 'metric') {
+      await createGoal({
+        source: selection.source,
+        name: finalName,
+        target: value,
+      });
+    } else {
+      const mins = parseInt(minMinutes, 10);
+      await createGoal({
+        match: {
+          field: selection.option.field,
+          value: selection.option.value,
+        },
+        minDurationMin: Number.isFinite(mins) && mins > 0 ? mins : undefined,
+        name: finalName,
+        target: value,
+      });
+    }
     onClose();
   }
 
@@ -91,18 +158,80 @@ export function GoalDefinitionSheet({ visible, onClose }: Props) {
             and logged activities.
           </Text>
 
-          <Text style={[styles.label, { color: t.colors.muted }]}>Track</Text>
+          <Text style={[styles.label, { color: t.colors.muted }]}>
+            Your activities · last 2 weeks
+          </Text>
+          {options.length > 0 ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.sourceRow}
+            >
+              {options.map(o => {
+                const key = `activity:${o.field}:${o.value}`;
+                const selected = selectionKey(selection) === key;
+                return (
+                  <Pressable
+                    key={key}
+                    onPress={() => pick({ kind: 'activity', option: o })}
+                    accessibilityRole="radio"
+                    accessibilityState={{ selected }}
+                    style={[
+                      styles.sourcePill,
+                      {
+                        backgroundColor: selected
+                          ? t.colors.accentSoft
+                          : t.colors.surface2,
+                        borderColor: selected
+                          ? t.colors.accent
+                          : t.colors.border,
+                      },
+                    ]}
+                  >
+                    <Icon
+                      name={activityIcon(o)}
+                      size={16}
+                      color={selected ? t.colors.accent : t.colors.muted}
+                    />
+                    <Text
+                      style={[
+                        styles.sourcePillText,
+                        { color: selected ? t.colors.accent : t.colors.fg },
+                      ]}
+                    >
+                      {o.label}
+                    </Text>
+                    <Text style={[styles.pillCount, { color: t.colors.faint }]}>
+                      {o.count}×
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          ) : (
+            <Text style={[styles.hint, { color: t.colors.faint }]}>
+              No recent workouts found. Connect Google Health or record an
+              activity and it will show up here.
+            </Text>
+          )}
+
+          <Text
+            style={[styles.label, styles.labelGap, { color: t.colors.muted }]}
+          >
+            Or a metric
+          </Text>
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={styles.sourceRow}
           >
-            {GOAL_SOURCE_ORDER.map(key => {
-              const selected = key === source;
+            {METRIC_SOURCES.map(key => {
+              const selected =
+                selection.kind === 'metric' && selection.source === key;
               return (
                 <Pressable
                   key={key}
-                  onPress={() => pickSource(key)}
+                  onPress={() => pick({ kind: 'metric', source: key })}
                   accessibilityRole="radio"
                   accessibilityState={{ selected }}
                   style={[
@@ -141,7 +270,7 @@ export function GoalDefinitionSheet({ visible, onClose }: Props) {
               <TextInput
                 value={name}
                 onChangeText={setName}
-                placeholder={GOAL_SOURCES[source].label}
+                placeholder={selectionLabel(selection)}
                 placeholderTextColor={t.colors.faint}
                 style={[
                   styles.input,
@@ -155,13 +284,13 @@ export function GoalDefinitionSheet({ visible, onClose }: Props) {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={[styles.label, { color: t.colors.muted }]}>
-                Target
+                {isActivity ? 'Per week' : 'Target'}
               </Text>
               <TextInput
                 value={target}
                 onChangeText={setTarget}
                 keyboardType="number-pad"
-                placeholder={String(GOAL_SOURCES[source].defaultTarget)}
+                placeholder={String(defaultTarget)}
                 placeholderTextColor={t.colors.faint}
                 style={[
                   styles.input,
@@ -174,6 +303,33 @@ export function GoalDefinitionSheet({ visible, onClose }: Props) {
               />
             </View>
           </View>
+
+          {isActivity ? (
+            <View style={styles.minRow}>
+              <Text style={[styles.label, { color: t.colors.muted }]}>
+                Minimum session length
+              </Text>
+              <TextInput
+                value={minMinutes}
+                onChangeText={setMinMinutes}
+                keyboardType="number-pad"
+                placeholder="Any length (minutes)"
+                placeholderTextColor={t.colors.faint}
+                style={[
+                  styles.input,
+                  {
+                    color: t.colors.fg,
+                    backgroundColor: t.colors.surface2,
+                    borderColor: t.colors.border,
+                  },
+                ]}
+              />
+              <Text style={[styles.hint, { color: t.colors.faint }]}>
+                Only sessions at least this many minutes count. Leave empty to
+                count every session.
+              </Text>
+            </View>
+          ) : null}
 
           <View style={styles.actions}>
             <Pressable
@@ -261,6 +417,22 @@ const styles = StyleSheet.create({
   sourcePillText: {
     fontSize: 13,
     fontWeight: '700',
+  },
+  pillCount: {
+    fontFamily: monoFont,
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  labelGap: {
+    marginTop: 16,
+  },
+  hint: {
+    fontSize: 11.5,
+    lineHeight: 16,
+    marginTop: 8,
+  },
+  minRow: {
+    marginTop: 14,
   },
   fieldRow: {
     flexDirection: 'row',

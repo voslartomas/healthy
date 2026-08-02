@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  Alert,
   Pressable,
   StyleSheet,
   Switch,
@@ -14,12 +15,19 @@ import { Icon } from '../../components/Icon';
 import { DetailHeader, Screen } from '../../components/Screen';
 import { SectionLabel } from '../../components/SectionLabel';
 import {
+  connectGoogleHealth,
+  disconnectGoogleHealth,
+  isGoogleHealthClientConfigured,
+  isGoogleHealthConnected,
+} from '../../health/googleAuth';
+import {
   AiProvider,
   HealthSource,
   PROVIDER_ORDER,
   PROVIDERS,
   useAppStore,
 } from '../../state/useAppStore';
+import { useHealthStore } from '../../state/useHealthStore';
 import { monoFont, radii, useTheme } from '../../theme/theme';
 
 const CONNECTIONS: {
@@ -32,16 +40,9 @@ const CONNECTIONS: {
   {
     key: 'googleHealth',
     name: 'Google Health',
-    detail: 'steps, activities, heart rate',
+    detail: 'steps, activities, heart rate, sleep, nutrition',
     icon: 'googleHealth',
     logoColorKey: 'logoBlue',
-  },
-  {
-    key: 'appleHealth',
-    name: 'Apple Health',
-    detail: 'sleep, HRV, RHR',
-    icon: 'appleHealth',
-    logoColorKey: 'logoRed',
   },
 ];
 
@@ -52,9 +53,44 @@ export function SettingsScreen({ navigation }: ScreenProps) {
   const setAiProvider = useAppStore(s => s.setAiProvider);
   const setModel = useAppStore(s => s.setModel);
   const setApiKey = useAppStore(s => s.setApiKey);
-  const toggleConnection = useAppStore(s => s.toggleConnection);
+  const setConnection = useAppStore(s => s.setConnection);
+  const refreshHealth = useHealthStore(s => s.refresh);
   const provider = PROVIDERS[aiProvider];
   const isOnDevice = aiProvider === 'ondevice';
+  const clientConfigured = isGoogleHealthClientConfigured();
+
+  // Reflect the real (keychain-backed) connection state on mount.
+  React.useEffect(() => {
+    isGoogleHealthConnected()
+      .then(on => setConnection('googleHealth', on))
+      .catch(() => undefined);
+  }, [setConnection]);
+
+  const onToggleGoogleHealth = React.useCallback(
+    async (next: boolean) => {
+      if (!next) {
+        await disconnectGoogleHealth();
+        setConnection('googleHealth', false);
+        return;
+      }
+      if (!clientConfigured) {
+        Alert.alert(
+          'Google Health unavailable',
+          'Native Google sign-in is only available on Android and iOS builds.',
+        );
+        return;
+      }
+      try {
+        const ok = await connectGoogleHealth();
+        setConnection('googleHealth', ok);
+        if (ok) await refreshHealth();
+        else Alert.alert('Not connected', 'Google Health sign-in was cancelled.');
+      } catch {
+        Alert.alert('Connection failed', 'Could not connect to Google Health.');
+      }
+    },
+    [clientConfigured, refreshHealth, setConnection],
+  );
 
   return (
     <Screen>
@@ -110,7 +146,9 @@ export function SettingsScreen({ navigation }: ScreenProps) {
               </View>
               <Switch
                 value={on}
-                onValueChange={() => toggleConnection(conn.key)}
+                onValueChange={next => {
+                  void onToggleGoogleHealth(next);
+                }}
                 trackColor={{ true: t.colors.accent, false: t.colors.border }}
                 thumbColor="#fff"
                 accessibilityLabel={`${conn.name} connection`}
@@ -120,8 +158,9 @@ export function SettingsScreen({ navigation }: ScreenProps) {
         })}
       </Card>
       <Text style={[styles.dinfo, { color: t.colors.muted }]}>
-        Google Health is your primary source — steps and activities from it
-        auto-fill your weekly goals.
+        {clientConfigured
+          ? 'Google Health is your data source — activities auto-fill your weekly goals, and food you log is written back to it.'
+          : 'Native Google sign-in is only available on Android and iOS builds. Until you connect, metrics show "-".'}
       </Text>
 
       <SectionLabel>AI coach provider</SectionLabel>

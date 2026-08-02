@@ -1,4 +1,6 @@
+import * as SecureStore from 'expo-secure-store';
 import { create } from 'zustand';
+import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { IconName } from '../components/Icon';
 
@@ -57,34 +59,57 @@ export const PROVIDER_ORDER: AiProvider[] = [
   'ondevice',
 ];
 
-export type HealthSource = 'googleHealth' | 'appleHealth';
+// Google Health is the single cross-platform data source (the REST API behaves
+// identically on iOS and Android, so there is no separate Apple Health path).
+export type HealthSource = 'googleHealth';
 
 interface AppState {
   aiProvider: AiProvider;
   model: string;
   apiKey: string;
-  /** Connection toggles for health data sources. */
+  /** Connection state for health data sources (true once OAuth-connected). */
   connections: Record<HealthSource, boolean>;
   setAiProvider: (provider: AiProvider) => void;
   setModel: (model: string) => void;
   setApiKey: (key: string) => void;
-  toggleConnection: (source: HealthSource) => void;
+  setConnection: (source: HealthSource, connected: boolean) => void;
 }
 
-export const useAppStore = create<AppState>(set => ({
-  aiProvider: 'anthropic',
-  model: PROVIDERS.anthropic.models[0],
-  apiKey: '',
-  connections: { googleHealth: true, appleHealth: true },
-  setAiProvider: provider =>
-    set({ aiProvider: provider, model: PROVIDERS[provider].models[0] }),
-  setModel: model => set({ model }),
-  setApiKey: apiKey => set({ apiKey }),
-  toggleConnection: source =>
-    set(state => ({
-      connections: {
-        ...state.connections,
-        [source]: !state.connections[source],
-      },
-    })),
-}));
+/** SecureStore-backed storage for zustand persist. The API key is a secret, so
+ * it lives in the encrypted keychain, not plain AsyncStorage. */
+const secureStorage = {
+  getItem: (name: string) => SecureStore.getItemAsync(name),
+  setItem: (name: string, value: string) =>
+    SecureStore.setItemAsync(name, value),
+  removeItem: (name: string) => SecureStore.deleteItemAsync(name),
+};
+
+export const useAppStore = create<AppState>()(
+  persist(
+    set => ({
+      aiProvider: 'anthropic',
+      model: PROVIDERS.anthropic.models[0],
+      apiKey: '',
+      connections: { googleHealth: false },
+      setAiProvider: provider =>
+        set({ aiProvider: provider, model: PROVIDERS[provider].models[0] }),
+      setModel: model => set({ model }),
+      setApiKey: apiKey => set({ apiKey }),
+      setConnection: (source, connected) =>
+        set(state => ({
+          connections: { ...state.connections, [source]: connected },
+        })),
+    }),
+    {
+      name: 'app-settings',
+      storage: createJSONStorage(() => secureStorage),
+      // Persist only the coach config; the health connection state is re-derived
+      // from the sign-in SDK on launch, so it is intentionally not stored.
+      partialize: state => ({
+        aiProvider: state.aiProvider,
+        model: state.model,
+        apiKey: state.apiKey,
+      }),
+    },
+  ),
+);

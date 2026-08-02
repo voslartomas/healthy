@@ -1,6 +1,8 @@
 import { GoalSourceKey } from '../data/goalSources';
+import { deleteGoalWeeks } from '../db/goalHistoryRepository';
 import { deleteGoal, insertGoal, loadGoals } from '../db/goalsRepository';
-import { useGoalsStore, WeeklyGoal } from './useGoalsStore';
+import { syncGoalHistory } from './goalHistoryService';
+import { GoalMatch, useGoalsStore, WeeklyGoal } from './useGoalsStore';
 
 /**
  * Orchestration between the goals store (in-memory, for the UI) and the SQLite
@@ -23,9 +25,14 @@ export async function initGoals(): Promise<void> {
 }
 
 export interface NewGoalInput {
-  source: GoalSourceKey;
   name: string;
   target: number;
+  /** Aggregate-metric goal (steps/zone2/calories). Set this OR `match`. */
+  source?: GoalSourceKey;
+  /** Activity-session goal, matched by type/displayName. Set this OR `source`. */
+  match?: GoalMatch;
+  /** Minimum session length (minutes) to count; activity goals only. */
+  minDurationMin?: number;
 }
 
 /** Create a goal: write-through to SQLite, then update the store. */
@@ -33,11 +40,19 @@ export async function createGoal(input: NewGoalInput): Promise<WeeklyGoal> {
   const goal: WeeklyGoal = { id: newId(), ...input };
   await insertGoal(goal);
   useGoalsStore.getState().addGoalLocal(goal);
+  // Seed retrospective weekly history for the new goal from the current snapshot.
+  void syncGoalHistory().catch(err =>
+    console.warn('Failed to sync goal history', err),
+  );
   return goal;
 }
 
-/** Delete a goal: remove from SQLite, then from the store. */
+/** Delete a goal: remove it and its weekly history from SQLite, then the store. */
 export async function removeGoal(id: string): Promise<void> {
   await deleteGoal(id);
+  await deleteGoalWeeks(id);
   useGoalsStore.getState().removeGoalLocal(id);
+  void syncGoalHistory().catch(err =>
+    console.warn('Failed to sync goal history', err),
+  );
 }

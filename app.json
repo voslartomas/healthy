@@ -9,13 +9,21 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.healthapp"
+      "bundleIdentifier": "cz.healthapp"
     },
     "android": {
-      "package": "com.healthapp"
+      "package": "cz.healthapp"
     },
     "plugins": [
-      "expo-sqlite"
-    ]
+      "expo-sqlite",
+      "expo-secure-store",
+      "expo-web-browser",
+      "@react-native-google-signin/google-signin"
+    ],
+    "extra": {
+      "//": "Google Sign-In on Android needs no client ID in app config — the Android OAuth client is bound in Cloud Console via package name (cz.healthapp) + SHA-1 signing fingerprint. googleWebClientId below is only used for iOS/offline-access if ever provided; the legacy googleClientId from the browser PKCE flow is unused.",
+      "googleWebClientId": "",
+      "googleClientId": "664943790951-2tbkvpouvao38e2og6rjj4obnsdgrtt7.apps.googleusercontent.com"
+    }
   }
 }

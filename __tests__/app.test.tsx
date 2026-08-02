@@ -28,11 +28,11 @@ describe('useAppStore', () => {
     expect(useAppStore.getState().model).toBe('Gemini 2.5 Pro');
   });
 
-  it('toggles a health connection', () => {
-    expect(useAppStore.getState().connections.appleHealth).toBe(true);
-    useAppStore.getState().toggleConnection('appleHealth');
-    expect(useAppStore.getState().connections.appleHealth).toBe(false);
-    useAppStore.getState().toggleConnection('appleHealth');
-    expect(useAppStore.getState().connections.appleHealth).toBe(true);
+  it('sets the Google Health connection state', () => {
+    expect(useAppStore.getState().connections.googleHealth).toBe(false);
+    useAppStore.getState().setConnection('googleHealth', true);
+    expect(useAppStore.getState().connections.googleHealth).toBe(true);
+    useAppStore.getState().setConnection('googleHealth', false);
+    expect(useAppStore.getState().connections.googleHealth).toBe(false);
   });
 });

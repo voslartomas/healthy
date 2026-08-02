@@ -10,7 +10,9 @@ describe('App', () => {
     // The default tab renders the dashboard greeting; goals hydrate from the
     // (mocked) SQLite layer without throwing.
     await waitFor(() =>
-      expect(screen.getByText('Good morning, Tomas')).toBeOnTheScreen(),
+      expect(
+        screen.getByText(/Good (morning|afternoon|evening)/),
+      ).toBeOnTheScreen(),
     );
   });
 });

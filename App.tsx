@@ -9,7 +9,13 @@ import { useColorScheme } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { RootStack } from './src/app/navigation/RootStack';
+import { registerGoogleHealthAuth } from './src/health/googleAuth';
+import { initCalorieGoals } from './src/state/calorieGoalsService';
+import { initCommonFoods } from './src/state/commonFoodsService';
+import { initDailyEnergy } from './src/state/dailyEnergyService';
+import { initGoalHistory } from './src/state/goalHistoryService';
 import { initGoals } from './src/state/goalsService';
+import { initHealth } from './src/state/useHealthStore';
 import { colors } from './src/theme/colors';
 
 const lightTheme = {
@@ -38,9 +44,23 @@ export default function App() {
   const scheme = useColorScheme();
   const isDark = scheme === 'dark';
 
-  // Load persisted goals from SQLite once on startup.
+  // Load persisted goals from SQLite and the live health snapshot on startup.
   useEffect(() => {
+    registerGoogleHealthAuth();
     initGoals().catch(err => console.warn('Failed to load goals', err));
+    initCalorieGoals().catch(err =>
+      console.warn('Failed to load calorie goals', err),
+    );
+    initCommonFoods().catch(err =>
+      console.warn('Failed to load common foods', err),
+    );
+    initDailyEnergy().catch(err =>
+      console.warn('Failed to load daily energy', err),
+    );
+    initGoalHistory().catch(err =>
+      console.warn('Failed to load goal history', err),
+    );
+    initHealth().catch(err => console.warn('Failed to load health data', err));
   }, []);
 
   return (

@@ -3,6 +3,13 @@ import { createGoal, initGoals, removeGoal } from '../src/state/goalsService';
 import { useGoalsStore } from '../src/state/useGoalsStore';
 
 jest.mock('../src/db/goalsRepository');
+// Goal-history persistence is exercised in its own tests; stub it here so
+// create/remove don't reach SQLite via the fire-and-forget history sync.
+jest.mock('../src/db/goalHistoryRepository');
+jest.mock('../src/state/goalHistoryService', () => ({
+  initGoalHistory: jest.fn().mockResolvedValue(undefined),
+  syncGoalHistory: jest.fn().mockResolvedValue(undefined),
+}));
 const mockedRepo = repo as jest.Mocked<typeof repo>;
 
 describe('goalsService', () => {
@@ -35,6 +42,25 @@ describe('goalsService', () => {
     expect(mockedRepo.insertGoal).toHaveBeenCalledWith(goal);
     expect(useGoalsStore.getState().goals).toContainEqual(goal);
     expect(goal.id).toMatch(/^g_/);
+  });
+
+  it('persists an activity goal with a match + minimum duration', async () => {
+    mockedRepo.insertGoal.mockResolvedValue();
+
+    const goal = await createGoal({
+      name: 'Core ≥15m',
+      target: 5,
+      match: { field: 'displayName', value: 'Trénink středu těla' },
+      minDurationMin: 15,
+    });
+
+    expect(goal.match).toEqual({
+      field: 'displayName',
+      value: 'Trénink středu těla',
+    });
+    expect(goal.minDurationMin).toBe(15);
+    expect(goal.source).toBeUndefined();
+    expect(mockedRepo.insertGoal).toHaveBeenCalledWith(goal);
   });
 
   it('deletes from the repository then the store', async () => {

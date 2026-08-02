@@ -4,6 +4,7 @@ import React from 'react';
 import { CardioScreen } from '../../features/cardio/CardioScreen';
 import { RecoveryScreen } from '../../features/recovery/RecoveryScreen';
 import { SettingsScreen } from '../../features/settings/SettingsScreen';
+import { SleepScreen } from '../../features/sleep/SleepScreen';
 import { RootTabs } from './RootTabs';
 import { asScreen, RootStackParamList } from './types';
 
@@ -20,6 +21,7 @@ export function RootStack() {
       <Stack.Screen name="Tabs" component={RootTabs} />
       <Stack.Screen name="Recovery" component={asScreen(RecoveryScreen)} />
       <Stack.Screen name="Cardio" component={asScreen(CardioScreen)} />
+      <Stack.Screen name="Sleep" component={asScreen(SleepScreen)} />
       <Stack.Screen name="Settings" component={asScreen(SettingsScreen)} />
     </Stack.Navigator>
   );

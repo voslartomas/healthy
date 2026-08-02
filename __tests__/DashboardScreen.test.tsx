@@ -8,7 +8,9 @@ describe('DashboardScreen', () => {
   it('renders the core health metrics and recovery hero', async () => {
     await renderWithProviders(<DashboardScreen navigation={mockNav()} />);
 
-    expect(screen.getByText('Good morning, Tomas')).toBeOnTheScreen();
+    expect(
+      screen.getByText(/Good (morning|afternoon|evening)/),
+    ).toBeOnTheScreen();
     expect(screen.getByText('Sleep')).toBeOnTheScreen();
     expect(screen.getByText('HRV')).toBeOnTheScreen();
     expect(screen.getByText('Recovery')).toBeOnTheScreen();
