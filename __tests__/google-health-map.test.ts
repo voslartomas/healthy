@@ -47,7 +47,7 @@ describe('exerciseTypeToHc', () => {
 });
 
 describe('mapGoogleHealthRaw', () => {
-  it('prefers the explicit RMSSD field over the generic average HRV', () => {
+  it('prefers the daily-average HRV (what the Health app shows)', () => {
     const raw = mapGoogleHealthRaw(
       {
         ...emptyPayloads(),
@@ -65,11 +65,11 @@ describe('mapGoogleHealthRaw', () => {
       NOW,
     );
     expect(raw.hrvRmssd).toHaveLength(1);
-    expect(raw.hrvRmssd[0].value).toBe(58); // RMSSD, not the 40 average
+    expect(raw.hrvRmssd[0].value).toBe(40); // daily average, not the 58 deep-sleep RMSSD
     expect(raw.hrvRmssd[0].source).toBe('Pixel Watch');
   });
 
-  it('falls back to average HRV only when RMSSD is absent', () => {
+  it('falls back to deep-sleep RMSSD only when the average is absent', () => {
     const raw = mapGoogleHealthRaw(
       {
         ...emptyPayloads(),
@@ -77,7 +77,7 @@ describe('mapGoogleHealthRaw', () => {
           {
             dailyHeartRateVariability: {
               date: { year: 2026, month: 7, day: 19 },
-              averageHeartRateVariabilityMilliseconds: 41,
+              deepSleepRootMeanSquareOfSuccessiveDifferencesMilliseconds: 41,
             },
           },
         ],
@@ -178,6 +178,84 @@ describe('mapGoogleHealthRaw', () => {
     expect(raw.activeEnergy[0].kcal).toBe(480);
   });
 
+  it('parses civil start/end times when RFC3339 startTime is absent', () => {
+    const raw = mapGoogleHealthRaw(
+      {
+        ...emptyPayloads(),
+        calories: [
+          {
+            civilStartTime: { date: { year: 2026, month: 8, day: 1 }, time: {} },
+            civilEndTime: {
+              date: { year: 2026, month: 8, day: 1 },
+              time: { hours: 23, minutes: 59, seconds: 59 },
+            },
+            totalCalories: { kcalSum: 2544.5 },
+          },
+        ],
+      },
+      NOW,
+    );
+    // The point has no startTime/endTime — must still map via civil times.
+    expect(raw.totalEnergy).toHaveLength(1);
+    expect(raw.totalEnergy[0].kcal).toBeCloseTo(2544.5);
+    expect(raw.totalEnergy[0].start).toBe(Date.UTC(2026, 7, 1, 0, 0, 0));
+  });
+
+  it('maps sleep stage minutes from stagesSummary', () => {
+    const raw = mapGoogleHealthRaw(
+      {
+        ...emptyPayloads(),
+        sleep: [
+          {
+            sleep: {
+              interval: {
+                startTime: '2026-07-31T23:00:00Z',
+                endTime: '2026-08-01T07:00:00Z',
+              },
+              summary: {
+                minutesAsleep: '420',
+                stagesSummary: [
+                  { type: 'DEEP', minutes: '90' },
+                  { type: 'REM', minutes: '100' },
+                  { type: 'LIGHT', minutes: '210' },
+                  { type: 'AWAKE', minutes: '20' },
+                ],
+              },
+            },
+          },
+        ],
+      },
+      NOW,
+    );
+    expect(raw.sleep[0].stages).toEqual({
+      deepMin: 90,
+      remMin: 100,
+      lightMin: 210,
+      awakeMin: 20,
+    });
+  });
+
+  it('leaves sleep stages null when there is no stagesSummary', () => {
+    const raw = mapGoogleHealthRaw(
+      {
+        ...emptyPayloads(),
+        sleep: [
+          {
+            sleep: {
+              interval: {
+                startTime: '2026-07-31T23:00:00Z',
+                endTime: '2026-08-01T07:00:00Z',
+              },
+              summary: { minutesAsleep: '420' },
+            },
+          },
+        ],
+      },
+      NOW,
+    );
+    expect(raw.sleep[0].stages).toBeNull();
+  });
+
   it('maps exercise activeDuration ("Ns") to minutes and the type to HC enum', () => {
     const raw = mapGoogleHealthRaw(
       {
@@ -201,6 +279,79 @@ describe('mapGoogleHealthRaw', () => {
     expect(raw.exercise[0].durationMin).toBe(45);
     expect(raw.exercise[0].exerciseType).toBe(56);
     expect(raw.exercise[0].energyKcal).toBe(420);
+  });
+
+  it('maps the exercise displayName (localized title) through', () => {
+    const raw = mapGoogleHealthRaw(
+      {
+        ...emptyPayloads(),
+        exercise: [
+          {
+            exercise: {
+              interval: {
+                startTime: '2026-07-19T06:00:00Z',
+                endTime: '2026-07-19T06:30:00Z',
+              },
+              exerciseType: 'WORKOUT',
+              displayName: 'Trénink středu těla',
+              activeDuration: '1800s',
+            },
+          },
+        ],
+      },
+      NOW,
+    );
+    expect(raw.exercise[0].displayName).toBe('Trénink středu těla');
+    expect(raw.exercise[0].typeName).toBe('WORKOUT');
+    expect(raw.exercise[0].exerciseType).toBe(0);
+  });
+
+  it('maps exercise HR-zone durations into per-session minutes', () => {
+    const raw = mapGoogleHealthRaw(
+      {
+        ...emptyPayloads(),
+        exercise: [
+          {
+            exercise: {
+              interval: { startTime: '2026-07-19T06:00:00Z', endTime: '2026-07-19T07:00:00Z' },
+              exerciseType: 'RUNNING',
+              activeDuration: '3600s',
+              metricsSummary: {
+                caloriesKcal: 500,
+                heartRateZoneDurations: { lightTime: '600s', moderateTime: '1200s', vigorousTime: '300s', peakTime: '0s' },
+              },
+            },
+          },
+        ],
+      },
+      NOW,
+    );
+    expect(raw.exercise[0].hrZones).toEqual({
+      lightMin: 10,
+      moderateMin: 20,
+      vigorousMin: 5,
+      peakMin: 0,
+    });
+    expect(raw.exercise[0].energyKcal).toBe(500);
+  });
+
+  it('leaves hrZones null when the exercise has no zone durations', () => {
+    const raw = mapGoogleHealthRaw(
+      {
+        ...emptyPayloads(),
+        exercise: [
+          {
+            exercise: {
+              interval: { startTime: '2026-07-19T06:00:00Z', endTime: '2026-07-19T06:30:00Z' },
+              exerciseType: 'STRENGTH_TRAINING',
+              activeDuration: '1800s',
+            },
+          },
+        ],
+      },
+      NOW,
+    );
+    expect(raw.exercise[0].hrZones).toBeNull();
   });
 
   it('skips malformed / zero-length records', () => {
@@ -277,8 +428,8 @@ describe('Google Health → deriveSnapshot end to end', () => {
     const snapshot = deriveSnapshot(mapGoogleHealthRaw(payloads, NOW), NOW);
 
     expect(snapshot.live).toBe(true);
-    expect(snapshot.hrv?.algorithm).toBe('RMSSD');
-    expect(snapshot.hrv?.value).toBe(56); // most recent day (d=1) RMSSD
+    expect(snapshot.hrv?.algorithm).toBe('SDNN');
+    expect(snapshot.hrv?.value).toBe(56); // most recent day (d=1), deep-sleep fallback (no average)
     expect(snapshot.restingHr?.value).toBe(55);
     expect(snapshot.sleep?.hours).toBeCloseTo(7.5);
     expect(snapshot.stepsToday).toBe(9000);
@@ -330,8 +481,12 @@ describe('fetchGoogleHealthRaw (injected fetch)', () => {
 
     expect(raw.steps[0].count).toBe(7200);
     expect(raw.restingHr[0].value).toBe(52);
-    // 5 GET lists (hrv, rhr, sleep, exercise, nutrition) + 2 POST rollups (steps, calories).
+    // 5 GET lists (hrv, rhr, sleep, exercise [1 page — stub returns no
+    // nextPageToken], nutrition) + 2 POST rollups (steps, calories).
     expect(calls.length).toBe(7);
+    expect(calls.some(u => u.includes('exercise') && u.includes('filter='))).toBe(
+      true,
+    );
     expect(calls.some((u) => u.includes(':dailyRollUp'))).toBe(true);
     expect(calls.some((u) => u.includes('nutrition-log'))).toBe(true);
   });

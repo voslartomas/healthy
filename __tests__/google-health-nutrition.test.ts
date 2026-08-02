@@ -108,15 +108,18 @@ describe('food write payload + writeFoodEntry', () => {
       { name: 'Apple', kcal: 95, at: NOW },
       NOW,
     );
-    const log = body.dataPoint.nutritionLog as Record<string, unknown>;
+    const log = body.nutritionLog as Record<string, unknown>;
     expect(log.foodDisplayName).toBe('Apple');
     expect(log.energy).toEqual({ kcal: 95 });
-    expect(log.interval).toEqual({
-      startTime: '2026-07-20T18:00:00.000Z',
-      endTime: '2026-07-20T18:00:00.000Z',
-    });
+    const interval = log.interval as Record<string, unknown>;
+    expect(interval.startTime).toBe('2026-07-20T18:00:00.000Z');
+    // end is a minute after start (the API requires start < end).
+    expect(interval.endTime).toBe('2026-07-20T18:01:00.000Z');
+    // SessionTimeInterval requires start/end UTC offsets (equal for an instant).
+    expect(typeof interval.startUtcOffset).toBe('string');
+    expect(interval.startUtcOffset).toBe(interval.endUtcOffset);
     // no macros provided → keys absent (not null)
-    expect(log).not.toHaveProperty('totalProtein');
+    expect(log).not.toHaveProperty('nutrients');
     expect(log).not.toHaveProperty('mealType');
   });
 
@@ -125,11 +128,14 @@ describe('food write payload + writeFoodEntry', () => {
       { name: 'Shake', kcal: 220, mealType: 'SNACK', proteinG: 30, carbsG: 8, fatG: 3 },
       NOW,
     );
-    const log = body.dataPoint.nutritionLog as Record<string, unknown>;
+    const log = body.nutritionLog as Record<string, unknown>;
     expect(log.mealType).toBe('SNACK');
-    expect(log.totalProtein).toEqual({ grams: 30 });
     expect(log.totalCarbohydrate).toEqual({ grams: 8 });
     expect(log.totalFat).toEqual({ grams: 3 });
+    // Protein has no dedicated field — it lives in nutrients[].
+    expect(log.nutrients).toEqual([
+      { nutrient: 'PROTEIN', quantity: { grams: 30 } },
+    ]);
   });
 
   it('POSTs to the nutrition-log endpoint and returns true on ok', async () => {
@@ -152,7 +158,7 @@ describe('food write payload + writeFoodEntry', () => {
     );
     expect(seenMethod).toBe('POST');
     expect(seenAuth).toBe('Bearer tok-123');
-    expect(JSON.parse(seenBody).dataPoint.nutritionLog.foodDisplayName).toBe('Egg');
+    expect(JSON.parse(seenBody).nutritionLog.foodDisplayName).toBe('Egg');
   });
 
   it('returns false on a non-ok response and never throws on network error', async () => {

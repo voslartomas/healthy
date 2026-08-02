@@ -14,23 +14,31 @@ interface GoalRow {
   source: string;
   name: string;
   target: number;
+  match_field: string | null;
+  match_value: string | null;
+  min_duration_min: number | null;
   sort_order: number;
 }
 
 function rowToGoal(row: GoalRow): WeeklyGoal {
-  return {
-    id: row.id,
-    source: row.source as GoalSourceKey,
-    name: row.name,
-    target: row.target,
-  };
+  const goal: WeeklyGoal = { id: row.id, name: row.name, target: row.target };
+  if (row.match_field && row.match_value) {
+    goal.match = {
+      field: row.match_field === 'displayName' ? 'displayName' : 'type',
+      value: row.match_value,
+    };
+    if (row.min_duration_min != null) goal.minDurationMin = row.min_duration_min;
+  } else if (row.source) {
+    goal.source = row.source as GoalSourceKey;
+  }
+  return goal;
 }
 
 /** Load all goals ordered by their saved position. */
 export async function loadGoals(): Promise<WeeklyGoal[]> {
   const db = await getDb();
   const rows = await db.getAllAsync<GoalRow>(
-    'SELECT id, source, name, target, sort_order FROM goals ORDER BY sort_order ASC, created_at ASC;',
+    'SELECT id, source, name, target, match_field, match_value, min_duration_min, sort_order FROM goals ORDER BY sort_order ASC, created_at ASC;',
   );
   return rows.map(rowToGoal);
 }
@@ -43,12 +51,16 @@ export async function insertGoal(goal: WeeklyGoal): Promise<void> {
     'SELECT COALESCE(MAX(sort_order) + 1, 0) AS next FROM goals;',
   );
   await db.runAsync(
-    `INSERT INTO goals (id, source, name, target, sort_order, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?);`,
+    `INSERT INTO goals
+       (id, source, name, target, match_field, match_value, min_duration_min, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
     goal.id,
-    goal.source,
+    goal.source ?? '',
     goal.name,
     goal.target,
+    goal.match?.field ?? null,
+    goal.match?.value ?? null,
+    goal.minDurationMin ?? null,
     order?.next ?? 0,
     now,
     now,

@@ -75,8 +75,8 @@ export function SettingsScreen({ navigation }: ScreenProps) {
       }
       if (!clientConfigured) {
         Alert.alert(
-          'Google Health not configured',
-          'A Google OAuth client ID is required. Add it to app config (expo.extra.googleClientId) to connect your account.',
+          'Google Health unavailable',
+          'Native Google sign-in is only available on Android and iOS builds.',
         );
         return;
       }
@@ -160,7 +160,7 @@ export function SettingsScreen({ navigation }: ScreenProps) {
       <Text style={[styles.dinfo, { color: t.colors.muted }]}>
         {clientConfigured
           ? 'Google Health is your data source — activities auto-fill your weekly goals, and food you log is written back to it.'
-          : 'Add a Google OAuth client ID (expo.extra.googleClientId) to connect your account. Until then the app shows sample data.'}
+          : 'Native Google sign-in is only available on Android and iOS builds. Until you connect, metrics show "-".'}
       </Text>
 
       <SectionLabel>AI coach provider</SectionLabel>

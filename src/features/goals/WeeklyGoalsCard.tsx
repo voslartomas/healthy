@@ -2,11 +2,10 @@ import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { Card } from '../../components/Card';
-import { Icon } from '../../components/Icon';
+import { Icon, IconName } from '../../components/Icon';
 import { ProgressBar } from '../../components/ProgressBar';
 import { Ring } from '../../components/Ring';
 import { GOAL_SOURCES } from '../../data/goalSources';
-import { dashboard } from '../../data/health';
 import { removeGoal } from '../../state/goalsService';
 import { useHealthStore } from '../../state/useHealthStore';
 import {
@@ -33,22 +32,44 @@ function headline(avg: number, count: number): string {
   return "Let's get moving";
 }
 
+/** "This week · N days left" — week runs Monday–Sunday. */
+function weekLabel(): string {
+  const dayIdx = (new Date().getDay() + 6) % 7; // Mon=0 … Sun=6
+  const left = 6 - dayIdx;
+  return `This week · ${left} day${left === 1 ? '' : 's'} left`;
+}
+
+/** Icon for an activity goal (no aggregate source): a light heuristic on the
+ * matched value/name so strength / core / cardio read differently. */
+function goalIcon(goal: WeeklyGoal): IconName {
+  const v = `${goal.match?.value ?? ''} ${goal.name}`.toLowerCase();
+  if (/strength|weight|posil/.test(v)) return 'strength';
+  if (/core|stred|střed|abs|pilates|jádr/.test(v)) return 'core';
+  return 'zone2';
+}
+
 export function WeeklyGoalsCard() {
   const t = useTheme();
   const goals = useGoalsStore(s => s.goals);
   const tracked = useHealthStore(s => s.snapshot.tracked);
+  const activities = useHealthStore(s => s.snapshot.activities);
   const [editing, setEditing] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
 
-  const total = goals.reduce((sum, g) => sum + goalProgress(g, tracked), 0);
+  const total = goals.reduce(
+    (sum, g) => sum + goalProgress(g, tracked, activities),
+    0,
+  );
   const avg = goals.length ? total / goals.length : 0;
-  const doneCount = goals.filter(g => isGoalComplete(g, tracked)).length;
+  const doneCount = goals.filter(g =>
+    isGoalComplete(g, tracked, activities),
+  ).length;
 
   return (
     <Card>
       <View style={styles.head}>
         <Text style={[styles.week, { color: t.colors.muted }]}>
-          {dashboard.weekLabel}
+          {weekLabel()}
         </Text>
         <Pressable
           onPress={() => setEditing(e => !e)}
@@ -122,9 +143,12 @@ function GoalRow({
 }) {
   const t = useTheme();
   const tracked = useHealthStore(s => s.snapshot.tracked);
-  const done = isGoalComplete(goal, tracked);
-  const src = GOAL_SOURCES[goal.source];
-  const cur = goalCurrent(goal, tracked);
+  const activities = useHealthStore(s => s.snapshot.activities);
+  const done = isGoalComplete(goal, tracked, activities);
+  const src = goal.source ? GOAL_SOURCES[goal.source] : undefined;
+  const icon: IconName = src?.icon ?? goalIcon(goal);
+  const unit = src?.unit ?? '';
+  const cur = goalCurrent(goal, tracked, activities);
 
   return (
     <View
@@ -142,7 +166,7 @@ function GoalRow({
           { backgroundColor: done ? t.colors.recStateBg : t.colors.surface2 },
         ]}
       >
-        <Icon name={src.icon} size={19} color={t.colors.accent} />
+        <Icon name={icon} size={19} color={t.colors.accent} />
       </View>
       <View style={styles.gmain}>
         <View style={styles.grow}>
@@ -163,7 +187,8 @@ function GoalRow({
           <Text style={[styles.gval, { color: t.colors.muted }]}>
             <Text style={{ color: t.colors.fg }}>{fmt(cur)}</Text> /{' '}
             {fmt(goal.target)}
-            {src.unit}
+            {unit}
+            {goal.minDurationMin ? ` · ≥${goal.minDurationMin}m` : ''}
           </Text>
         </View>
         <ProgressBar

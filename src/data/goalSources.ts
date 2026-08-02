@@ -59,16 +59,3 @@ export const GOAL_SOURCE_ORDER: GoalSourceKey[] = [
   'zone2',
   'calories',
 ];
-
-/**
- * Current week's auto-tracked totals per source. In the shipping app these come
- * from Google/Apple Health; here they are static sample values matching the
- * prototype so the dashboard renders meaningful progress.
- */
-export const TRACKED: Record<GoalSourceKey, number> = {
-  steps: 41200,
-  strength: 2,
-  core: 3,
-  zone2: 64,
-  calories: 2380,
-};

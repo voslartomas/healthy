@@ -1,4 +1,6 @@
+import * as SecureStore from 'expo-secure-store';
 import { create } from 'zustand';
+import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { IconName } from '../components/Icon';
 
@@ -73,17 +75,41 @@ interface AppState {
   setConnection: (source: HealthSource, connected: boolean) => void;
 }
 
-export const useAppStore = create<AppState>(set => ({
-  aiProvider: 'anthropic',
-  model: PROVIDERS.anthropic.models[0],
-  apiKey: '',
-  connections: { googleHealth: false },
-  setAiProvider: provider =>
-    set({ aiProvider: provider, model: PROVIDERS[provider].models[0] }),
-  setModel: model => set({ model }),
-  setApiKey: apiKey => set({ apiKey }),
-  setConnection: (source, connected) =>
-    set(state => ({
-      connections: { ...state.connections, [source]: connected },
-    })),
-}));
+/** SecureStore-backed storage for zustand persist. The API key is a secret, so
+ * it lives in the encrypted keychain, not plain AsyncStorage. */
+const secureStorage = {
+  getItem: (name: string) => SecureStore.getItemAsync(name),
+  setItem: (name: string, value: string) =>
+    SecureStore.setItemAsync(name, value),
+  removeItem: (name: string) => SecureStore.deleteItemAsync(name),
+};
+
+export const useAppStore = create<AppState>()(
+  persist(
+    set => ({
+      aiProvider: 'anthropic',
+      model: PROVIDERS.anthropic.models[0],
+      apiKey: '',
+      connections: { googleHealth: false },
+      setAiProvider: provider =>
+        set({ aiProvider: provider, model: PROVIDERS[provider].models[0] }),
+      setModel: model => set({ model }),
+      setApiKey: apiKey => set({ apiKey }),
+      setConnection: (source, connected) =>
+        set(state => ({
+          connections: { ...state.connections, [source]: connected },
+        })),
+    }),
+    {
+      name: 'app-settings',
+      storage: createJSONStorage(() => secureStorage),
+      // Persist only the coach config; the health connection state is re-derived
+      // from the sign-in SDK on launch, so it is intentionally not stored.
+      partialize: state => ({
+        aiProvider: state.aiProvider,
+        model: state.model,
+        apiKey: state.apiKey,
+      }),
+    },
+  ),
+);

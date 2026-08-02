@@ -1,155 +1,120 @@
 import Constants from 'expo-constants';
-import * as AuthSession from 'expo-auth-session';
-import * as SecureStore from 'expo-secure-store';
+import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import { Platform } from 'react-native';
 
 import { GOOGLE_HEALTH_SCOPES } from './GoogleHealthApi';
 import { setGoogleHealthTokenProvider } from './index';
 
 /**
- * Google OAuth 2.0 (PKCE, no client secret) for the Google Health cloud API.
+ * Native Google Sign-In for the Google Health cloud API.
  *
- * This is the piece that turns the token provider in {@link ./index} on. It runs
- * the Authorization-Code + PKCE flow with `expo-auth-session`, persists the
- * resulting tokens in the platform keychain via `expo-secure-store`, and
- * transparently refreshes the access token when it expires. Nothing here ever
- * writes a secret to source or logs — the client ID is public by design and the
- * PKCE flow uses NO client secret (the reference web dashboard's secret must not
- * ship in a mobile app; HEA-18 blocker note).
+ * Uses the Google Play services auth flow (one-tap consent sheet, no browser,
+ * no redirect URI) via `@react-native-google-signin/google-signin`. Access
+ * tokens for {@link GOOGLE_HEALTH_SCOPES} are issued and refreshed by Play
+ * services, so there is no client secret, no PKCE dance and no refresh-token
+ * storage — {@link getAccessToken} just asks the SDK for the current token.
  *
- * The mobile OAuth client ID comes from `app.json` → `expo.extra.googleClientId`
- * (or an EAS/app-config override). When it is absent the flow is disabled and
- * {@link ./index.readSnapshot} cleanly renders sample data.
+ * Setup requirements (Google Cloud Console):
+ *  - An Android OAuth client for package `cz.healthapp` + this build's SHA-1
+ *    (debug keystore for dev, Play App Signing for release).
+ *  - The OAuth consent screen must list the googlehealth.* scopes, and the
+ *    signed-in account must be a test user while the app is unverified.
+ * No client ID is needed in app config on Android; `expo.extra.googleWebClientId`
+ * is only used for iOS/offline-access if ever provided.
  */
 
-// Google's OpenID endpoints. Hardcoded (rather than fetched) so the flow works
-// offline-first and has no discovery round-trip; these are stable.
-const DISCOVERY: AuthSession.DiscoveryDocument = {
-  authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
-  tokenEndpoint: 'https://oauth2.googleapis.com/token',
-  revocationEndpoint: 'https://oauth2.googleapis.com/revoke',
-};
-
-const STORE_KEY = 'googleHealth.tokens.v1';
-
-interface StoredTokens {
-  accessToken: string;
-  refreshToken: string | null;
-  /** Epoch ms when the access token expires. */
-  expiresAt: number;
+function webClientId(): string | undefined {
+  const id = (
+    Constants.expoConfig?.extra as { googleWebClientId?: string } | undefined
+  )?.googleWebClientId;
+  return id && id.length > 0 ? id : undefined;
 }
 
-function clientId(): string | null {
-  const id = (Constants.expoConfig?.extra as { googleClientId?: string } | undefined)
-    ?.googleClientId;
-  return id && id.length > 0 ? id : null;
-}
-
-/** True when a mobile OAuth client ID has been provisioned in app config. */
+/** True when native Google sign-in is available on this platform. */
 export function isGoogleHealthClientConfigured(): boolean {
-  return clientId() != null;
+  return Platform.OS === 'android' || Platform.OS === 'ios';
 }
 
-function redirectUri(): string {
-  // Uses the app's custom scheme ("healthapp://") registered in app.json.
-  return AuthSession.makeRedirectUri({ scheme: 'healthapp' });
-}
-
-async function loadTokens(): Promise<StoredTokens | null> {
-  const raw = await SecureStore.getItemAsync(STORE_KEY);
-  if (!raw) return null;
+/**
+ * Run the interactive native sign-in flow.
+ * Returns true on success, false when the user cancels or Play services is
+ * unavailable.
+ */
+export async function connectGoogleHealth(): Promise<boolean> {
+  if (!isGoogleHealthClientConfigured()) return false;
   try {
-    return JSON.parse(raw) as StoredTokens;
-  } catch {
-    return null;
+    await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
+    const response = await GoogleSignin.signIn();
+    console.log('[GoogleHealth] signIn response type:', response.type);
+    if (response.type !== 'success') return false;
+    // Which of the requested scopes did the user actually grant? Missing health
+    // scopes here is the usual reason a request 403s ("insufficient
+    // authentication scopes"). The nutrition WRITE scope in particular is often
+    // absent on first consent.
+    let granted = response.data.scopes ?? [];
+    console.log('[GoogleHealth] granted scopes:', granted);
+    let missing = GOOGLE_HEALTH_SCOPES.filter(s => !granted.includes(s));
+    if (missing.length > 0) {
+      // signIn reuses the cached grant and won't re-prompt for a scope added
+      // later, so explicitly request the missing ones via incremental consent.
+      console.warn('[GoogleHealth] requesting missing scopes:', missing);
+      try {
+        const added = await GoogleSignin.addScopes({ scopes: missing });
+        if (added?.type === 'success') granted = added.data.scopes ?? granted;
+      } catch (err) {
+        console.warn('[GoogleHealth] addScopes failed', err);
+      }
+      missing = GOOGLE_HEALTH_SCOPES.filter(s => !granted.includes(s));
+    }
+    if (missing.length > 0) {
+      // Still missing after an explicit request → the scope isn't grantable for
+      // this account: it must be added to the OAuth consent screen in Cloud
+      // Console and the account added as a test user (restricted scope).
+      console.warn('[GoogleHealth] STILL missing after addScopes:', missing);
+    }
+    return true;
+  } catch (err) {
+    console.warn('Google sign-in failed', err);
+    return false;
   }
 }
 
-async function saveTokens(t: StoredTokens): Promise<void> {
-  await SecureStore.setItemAsync(STORE_KEY, JSON.stringify(t));
-}
-
-function toStored(res: AuthSession.TokenResponse, prevRefresh?: string | null): StoredTokens {
-  const expiresInMs = (res.expiresIn ?? 3600) * 1000;
-  return {
-    accessToken: res.accessToken,
-    // Google only returns a refresh token on the first consent; keep the old one.
-    refreshToken: res.refreshToken ?? prevRefresh ?? null,
-    expiresAt: (res.issuedAt ? res.issuedAt * 1000 : Date.now()) + expiresInMs,
-  };
-}
-
 /**
- * Run the interactive OAuth consent flow and persist the tokens.
- * Returns true on success. No-op → false when no client ID is configured.
+ * Disconnect from Google Health. Revokes the OAuth grant (not just a local
+ * sign-out) so that reconnecting forces a fresh consent screen — this is what
+ * lets the user grant a newly-added scope (e.g. nutrition write). `signOut`
+ * alone keeps the cached grant, so the next sign-in would silently reuse the
+ * old (read-only) permissions.
  */
-export async function connectGoogleHealth(): Promise<boolean> {
-  const id = clientId();
-  if (!id) return false;
-
-  const request = new AuthSession.AuthRequest({
-    clientId: id,
-    scopes: [...GOOGLE_HEALTH_SCOPES],
-    redirectUri: redirectUri(),
-    usePKCE: true,
-    // offline + consent so Google returns a refresh token we can persist.
-    extraParams: { access_type: 'offline', prompt: 'consent' },
-  });
-
-  const result = await request.promptAsync(DISCOVERY);
-  if (result.type !== 'success' || !result.params.code) return false;
-
-  const token = await AuthSession.exchangeCodeAsync(
-    {
-      clientId: id,
-      code: result.params.code,
-      redirectUri: redirectUri(),
-      extraParams: request.codeVerifier
-        ? { code_verifier: request.codeVerifier }
-        : undefined,
-    },
-    DISCOVERY,
-  );
-
-  await saveTokens(toStored(token));
-  return true;
-}
-
-/** Forget the stored Google Health tokens (disconnect). */
 export async function disconnectGoogleHealth(): Promise<void> {
-  await SecureStore.deleteItemAsync(STORE_KEY);
+  try {
+    await GoogleSignin.revokeAccess();
+  } catch {
+    // Not signed in, or revoke unsupported — fall through to signOut.
+  }
+  try {
+    await GoogleSignin.signOut();
+  } catch {
+    // Already signed out.
+  }
 }
 
-/** True when we hold tokens for Google Health (connected). */
+/** True when a user is signed in (connected). */
 export async function isGoogleHealthConnected(): Promise<boolean> {
-  return (await loadTokens()) != null;
+  return GoogleSignin.getCurrentUser() != null;
 }
 
 /**
- * Return a valid access token, refreshing it if expired. Null when the user has
- * not connected, no client ID is configured, or a refresh fails (caller then
- * falls back to sample data). Registered as the token provider in {@link init}.
+ * Return a valid access token for the Google Health scopes, or null when no
+ * user is signed in. Play services refreshes expired tokens transparently.
  */
 async function getAccessToken(): Promise<string | null> {
-  const id = clientId();
-  if (!id) return null;
-
-  const stored = await loadTokens();
-  if (!stored) return null;
-
-  // Still valid (60s safety margin)?
-  if (stored.expiresAt - 60_000 > Date.now()) return stored.accessToken;
-
-  // Expired — refresh if we can.
-  if (!stored.refreshToken) return null;
   try {
-    const refreshed = await AuthSession.refreshAsync(
-      { clientId: id, refreshToken: stored.refreshToken },
-      DISCOVERY,
-    );
-    const next = toStored(refreshed, stored.refreshToken);
-    await saveTokens(next);
-    return next.accessToken;
-  } catch {
+    if (GoogleSignin.getCurrentUser() == null) return null;
+    const { accessToken } = await GoogleSignin.getTokens();
+    return accessToken;
+  } catch (err) {
+    console.warn('Google token fetch failed', err);
     return null;
   }
 }
@@ -157,12 +122,15 @@ async function getAccessToken(): Promise<string | null> {
 let registered = false;
 
 /**
- * Wire the Google Health token provider into the health layer. Call once on app
- * start (idempotent). Safe when no client ID is configured — the provider just
- * returns null and the app renders sample data.
+ * Configure the SDK and wire the token provider into the health layer. Call
+ * once on app start (idempotent).
  */
 export function registerGoogleHealthAuth(): void {
   if (registered) return;
   registered = true;
+  GoogleSignin.configure({
+    scopes: [...GOOGLE_HEALTH_SCOPES],
+    webClientId: webClientId(),
+  });
   setGoogleHealthTokenProvider(getAccessToken);
 }

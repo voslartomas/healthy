@@ -3,7 +3,6 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { ScreenProps } from '../../app/navigation/types';
 import { Card } from '../../components/Card';
-import { ProgressBar } from '../../components/ProgressBar';
 import { Ring } from '../../components/Ring';
 import { AppHeader, Screen } from '../../components/Screen';
 import { SectionLabel } from '../../components/SectionLabel';
@@ -14,6 +13,44 @@ import { useHealthStore } from '../../state/useHealthStore';
 import { metricColor } from '../../theme/metricColors';
 import { monoFont, useTheme } from '../../theme/theme';
 import { WeeklyGoalsCard } from '../goals/WeeklyGoalsCard';
+
+const DAY_NAMES = [
+  'Sunday',
+  'Monday',
+  'Tuesday',
+  'Wednesday',
+  'Thursday',
+  'Friday',
+  'Saturday',
+];
+const MONTH_NAMES = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+/** "Saturday, Aug 1" for today. */
+function todayLabel(): string {
+  const d = new Date();
+  return `${DAY_NAMES[d.getDay()]}, ${MONTH_NAMES[d.getMonth()]} ${d.getDate()}`;
+}
+
+/** Time-of-day greeting. */
+function greeting(): string {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 18) return 'Good afternoon';
+  return 'Good evening';
+}
 
 /** Group a number with thousands separators without relying on Intl. */
 function grp(n: number): string {
@@ -43,10 +80,9 @@ function trendOf(delta: number): MiniStat['trend'] {
 }
 
 /**
- * Build the four dashboard mini-stats from a live snapshot, falling back to the
- * sample stat for any metric the read did not surface. Cardio load stays on
- * sample data — a real load figure needs the derivation formula tracked in a
- * follow-up (ADR pending).
+ * Build the four dashboard mini-stats from the snapshot. Any metric the read
+ * did not surface renders "-". Cardio load has no derivation yet (ADR pending),
+ * so it is always "-".
  */
 function liveStats(snap: HealthSnapshot): typeof dashboard.stats {
   const s = dashboard.stats;
@@ -80,14 +116,15 @@ function liveStats(snap: HealthSnapshot): typeof dashboard.stats {
 }
 
 /**
- * Truthful recovery headline/body from the live snapshot. The sample copy is
- * only used as a fallback — never shown alongside live numbers it contradicts
- * (e.g. asserting "HRV is up" when HRV is below baseline). Correctness of the
- * interpretation matters as much as the number (priority #1).
+ * Truthful recovery headline/body from the snapshot. Without a readiness score
+ * there is no interpretation to make — just a connect prompt.
  */
 function recoveryCopy(snap: HealthSnapshot): { headline: string; body: string } {
-  if (!snap.live || !snap.readiness) {
-    return { headline: dashboard.recovery.headline, body: dashboard.recovery.body };
+  if (!snap.readiness) {
+    return {
+      headline: 'No recovery data yet',
+      body: 'Connect Google Health in Settings to see your recovery.',
+    };
   }
   const state = snap.readiness.state;
   const headline =
@@ -126,14 +163,17 @@ function recoveryCopy(snap: HealthSnapshot): { headline: string; body: string } 
 export function DashboardScreen({ navigation }: ScreenProps) {
   const t = useTheme();
   const snap = useHealthStore(s => s.snapshot);
-  const d = dashboard;
   const stats = liveStats(snap);
-  const recoveryPct = snap.readiness?.pct ?? d.recovery.pct;
-  const recoveryState = snap.readiness?.state ?? d.recovery.state;
+  const recoveryPct = snap.readiness?.pct ?? null;
+  const recoveryState = snap.readiness?.state ?? 'No data';
   const recovery = recoveryCopy(snap);
+  const eaten = snap.nutrition?.eaten ?? null;
+  const burned = snap.energyBurnedToday;
+  const hasEnergy = eaten != null || burned > 0;
+  const net = (eaten ?? 0) - burned;
   const syncedNote = snap.live
     ? `Live · Google Health · ${snap.sources.length} source${snap.sources.length === 1 ? '' : 's'}`
-    : d.syncedNote;
+    : 'No health data yet — connect Google Health in Settings.';
 
   const stat = (s: MiniStat, onPress?: () => void, a11y?: string) => (
     <StatCard
@@ -151,8 +191,8 @@ export function DashboardScreen({ navigation }: ScreenProps) {
   return (
     <Screen>
       <AppHeader
-        eyebrow={d.date}
-        title={d.greeting}
+        eyebrow={todayLabel()}
+        title={greeting()}
         onAvatarPress={() => navigation.navigate('Settings')}
       />
 
@@ -160,17 +200,21 @@ export function DashboardScreen({ navigation }: ScreenProps) {
 
       <Card
         onPress={() => navigation.navigate('Recovery')}
-        accessibilityLabel={`Open recovery detail, ${recoveryPct} percent recovered`}
+        accessibilityLabel={
+          recoveryPct != null
+            ? `Open recovery detail, ${recoveryPct} percent recovered`
+            : 'Open recovery detail, no recovery data'
+        }
         style={styles.spaced}
       >
         <View style={styles.heroRing}>
           <Ring
-            progress={recoveryPct / 100}
+            progress={(recoveryPct ?? 0) / 100}
             color={t.colors.rec}
             size={118}
             strokeWidth={10}
-            value={String(recoveryPct)}
-            valueSuffix="%"
+            value={recoveryPct != null ? String(recoveryPct) : '-'}
+            valueSuffix={recoveryPct != null ? '%' : undefined}
             label="Recovery"
           />
           <View style={styles.heroMeta}>
@@ -199,7 +243,11 @@ export function DashboardScreen({ navigation }: ScreenProps) {
 
       <View style={[styles.grid, styles.spaced]}>
         <View style={styles.gridRow}>
-          {stat(stats.sleep)}
+          {stat(
+            stats.sleep,
+            () => navigation.navigate('Sleep'),
+            'Open sleep detail',
+          )}
           {stat(
             stats.load,
             () => navigation.navigate('Cardio'),
@@ -215,7 +263,7 @@ export function DashboardScreen({ navigation }: ScreenProps) {
       <SectionLabel>Energy balance</SectionLabel>
       <Card
         onPress={() => navigation.navigate('Nutrition')}
-        accessibilityLabel="Open nutrition, net minus 800 kilocalories today"
+        accessibilityLabel="Open nutrition"
       >
         <View style={styles.row}>
           <View>
@@ -223,47 +271,28 @@ export function DashboardScreen({ navigation }: ScreenProps) {
               Net today
             </Text>
             <Text style={[styles.bigNum, { color: t.colors.rec }]}>
-              {d.energy.net}
+              {hasEnergy ? grp(net) : '-'}
             </Text>
             <Text style={[styles.smallMuted, { color: t.colors.muted }]}>
-              kcal · target {d.energy.targetNet}
+              kcal
             </Text>
           </View>
           <Ring
-            progress={d.energy.eatenPct}
+            progress={0}
             color={t.colors.rec}
             size={80}
             strokeWidth={9}
-            value={String(d.energy.eaten)}
+            value={eaten != null ? grp(eaten) : '-'}
             label="eaten"
             valueFontSize={18}
           />
         </View>
-        <View style={styles.dbarWrap}>
-          <ProgressBar
-            progress={d.energy.barFill}
-            color={t.colors.rec}
-            height={12}
-          />
-          <View
-            style={[
-              styles.targetMark,
-              {
-                left: `${d.energy.targetMark * 100}%`,
-                backgroundColor: t.colors.fg,
-              },
-            ]}
-          />
-        </View>
         <View style={styles.legend}>
           <Text style={[styles.legendText, { color: t.colors.muted }]}>
-            In {grp(d.energy.eaten)}
+            In {eaten != null ? grp(eaten) : '-'}
           </Text>
           <Text style={[styles.legendText, { color: t.colors.muted }]}>
-            Deficit goal ↑
-          </Text>
-          <Text style={[styles.legendText, { color: t.colors.muted }]}>
-            Out {grp(d.energy.burned)}
+            Out {burned > 0 ? grp(burned) : '-'}
           </Text>
         </View>
       </Card>
@@ -339,21 +368,10 @@ const styles = StyleSheet.create({
     letterSpacing: -1.5,
     marginVertical: 2,
   },
-  dbarWrap: {
-    marginTop: 16,
-    marginBottom: 8,
-    justifyContent: 'center',
-  },
-  targetMark: {
-    position: 'absolute',
-    top: -4,
-    bottom: -4,
-    width: 3,
-    borderRadius: 2,
-  },
   legend: {
     flexDirection: 'row',
     justifyContent: 'space-between',
+    marginTop: 14,
   },
   legendText: {
     fontFamily: monoFont,

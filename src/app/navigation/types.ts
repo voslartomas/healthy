@@ -8,6 +8,7 @@ export type ScreenName =
   | 'Trends'
   | 'Recovery'
   | 'Cardio'
+  | 'Sleep'
   | 'Settings';
 
 /**
@@ -41,6 +42,7 @@ export type RootStackParamList = {
   Tabs: undefined;
   Recovery: undefined;
   Cardio: undefined;
+  Sleep: undefined;
   Settings: undefined;
 };
 

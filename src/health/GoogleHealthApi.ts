@@ -5,6 +5,7 @@ import {
   NutritionEntry,
   RawHealthData,
   SleepRecord,
+  SleepStages,
   StepsRecord,
 } from './types';
 
@@ -46,8 +47,9 @@ export const GOOGLE_HEALTH_SCOPES = [
   'https://www.googleapis.com/auth/googlehealth.sleep.readonly',
   'https://www.googleapis.com/auth/googlehealth.health_metrics_and_measurements.readonly',
   'https://www.googleapis.com/auth/googlehealth.activity_and_fitness.readonly',
-  'https://www.googleapis.com/auth/googlehealth.nutrition.readonly',
-  'https://www.googleapis.com/auth/googlehealth.nutrition',
+  // Nutrition has no `.readonly` scope in the v4 API — only `.writeonly`, which
+  // covers adding food entries plus reading/editing/deleting the ones we added.
+  'https://www.googleapis.com/auth/googlehealth.nutrition.writeonly',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -92,39 +94,95 @@ interface RestingHrDataPoint {
   };
 }
 
+interface SleepStageSummaryEntry {
+  type?: string;
+  minutes?: string;
+  count?: string;
+}
+
 interface SleepDataPoint {
   dataSource?: DataSource;
   sleep?: {
     interval?: { startTime?: string; endTime?: string };
-    summary?: { minutesAsleep?: string };
+    type?: string;
+    stages?: { startTime?: string; endTime?: string; type?: string }[];
+    summary?: {
+      minutesAsleep?: string;
+      minutesInSleepPeriod?: string;
+      minutesAwake?: string;
+      stagesSummary?: SleepStageSummaryEntry[];
+    };
   };
+}
+
+/** A civil (wall-clock) date-time — the rollup endpoints return these instead
+ * of RFC3339 `startTime`/`endTime`. `time` may be empty (⇒ midnight). */
+interface CivilDateTime {
+  date?: CivilDate;
+  time?: { hours?: number; minutes?: number; seconds?: number; nanos?: number };
 }
 
 interface StepsRollupDataPoint {
   startTime?: string;
   endTime?: string;
+  civilStartTime?: CivilDateTime;
+  civilEndTime?: CivilDateTime;
   steps?: { countSum?: string };
 }
 
+/** A kcal sum as the API returns it: a bare number, a numeric string, or an
+ * object carrying `parsedValue`/`source`. Mirrors the reference dashboard's
+ * KcalValue + kcalValue() extractor. */
+type KcalSum = number | string | { parsedValue?: number; source?: string } | null | undefined;
+
+interface KcalField {
+  kcalSum?: KcalSum;
+}
+
+/** A daily-rollup calories point. The sum lands under one of several field
+ * names depending on the source; we read whichever is present (total first). */
 interface CaloriesRollupDataPoint {
   startTime?: string;
   endTime?: string;
-  activeEnergyBurned?: { kcalSum?: number };
-  totalCalories?: { kcalSum?: number };
+  civilStartTime?: CivilDateTime;
+  civilEndTime?: CivilDateTime;
+  totalCalories?: KcalField;
+  totalEnergyBurned?: KcalField;
+  energy?: KcalField;
+  calories?: KcalField;
+  activeCaloriesBurned?: KcalField;
+  activeEnergyBurned?: KcalField;
 }
 
 interface ExerciseDataPoint {
+  /** Some sources put the localized title at the top level of the point. */
+  displayName?: string;
   exercise?: {
     interval?: { startTime?: string; endTime?: string };
     exerciseType?: string;
+    /** Localized workout title, e.g. "Trénink středu těla" / "Posilování". */
+    displayName?: string;
     activeDuration?: string;
-    metricsSummary?: { caloriesKcal?: number; caloriesBurned?: number };
+    metricsSummary?: {
+      caloriesKcal?: number;
+      caloriesBurned?: number;
+      activeZoneMinutes?: string;
+      averageHeartRateBeatsPerMinute?: string;
+      heartRateZoneDurations?: {
+        lightTime?: string;
+        moderateTime?: string;
+        vigorousTime?: string;
+        peakTime?: string;
+      };
+    };
   };
 }
 
 /** A `nutrition-log` data point. Field paths mirror the reference dashboard's
  * NutritionDataPoint (google-health-web-dashboard/src/types/health.ts). */
 interface NutritionDataPoint {
+  /** Data point resource name (id), e.g. "users/me/.../dataPoints/{id}". */
+  name?: string;
   dataSource?: DataSource;
   nutritionLog?: {
     interval?: { startTime?: string; endTime?: string };
@@ -178,6 +236,21 @@ function civilDateToMs(d: CivilDate): number {
   return Date.UTC(d.year, d.month - 1, d.day, 12, 0, 0);
 }
 
+/** A civil date-time (rollup start/end) → epoch ms. Empty `time` ⇒ midnight.
+ * Anchored in UTC to match the day-bucket math in derive.ts. */
+function civilToMs(c: CivilDateTime | undefined): number | null {
+  if (!c?.date) return null;
+  const t = c.time ?? {};
+  return Date.UTC(
+    c.date.year,
+    c.date.month - 1,
+    c.date.day,
+    t.hours ?? 0,
+    t.minutes ?? 0,
+    t.seconds ?? 0,
+  );
+}
+
 /** Parse an RFC3339 timestamp to epoch ms; NaN-safe → null. */
 function isoToMs(iso: string | undefined): number | null {
   if (!iso) return null;
@@ -200,6 +273,39 @@ function sourceLabel(ds: DataSource | undefined): string {
     ds?.application?.packageName ??
     'Google Health'
   );
+}
+
+/** Coerce a `kcalSum` value to a number: a bare number, a numeric string, or an
+ * object carrying `parsedValue`/`source`. 0 when absent/unparseable. Mirrors the
+ * reference dashboard's kcalValue() exactly. */
+function kcalValue(v: KcalSum): number {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  if (typeof v === 'string') return Number(v) || 0;
+  if (v && typeof v === 'object') {
+    if (typeof v.parsedValue === 'number') return v.parsedValue;
+    if (typeof v.source === 'string') return Number(v.source) || 0;
+  }
+  return 0;
+}
+
+/** Per-stage sleep minutes from a `stagesSummary` array, or null when the
+ * source reported no hypnogram. Entries are {type: DEEP|REM|LIGHT|AWAKE,
+ * minutes: string}. */
+function sleepStages(
+  summary: SleepStageSummaryEntry[] | undefined,
+): SleepStages | null {
+  if (!summary || summary.length === 0) return null;
+  const min = (type: string): number => {
+    const hit = summary.find(s => s.type?.toUpperCase() === type);
+    const n = hit?.minutes ? parseFloat(hit.minutes) : NaN;
+    return Number.isFinite(n) ? n : 0;
+  };
+  return {
+    deepMin: min('DEEP'),
+    remMin: min('REM'),
+    lightMin: min('LIGHT'),
+    awakeMin: min('AWAKE'),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -233,15 +339,15 @@ function nutrientGrams(
 /**
  * Map raw Google Health v4 payloads into our normalized {@link RawHealthData}.
  *
- * HRV: prefer the explicit RMSSD field
- * (`deepSleepRootMeanSquareOfSuccessiveDifferencesMilliseconds`) because the
- * derivation layer tags all Android-side HRV as RMSSD and the two algorithms
- * (RMSSD vs the generic average, which is SDNN-like) are NOT interchangeable
- * (HEA-4 landmine). We fall back to the average only when RMSSD is absent — a
- * documented approximation, see ADR-005.
+ * HRV: use the daily average field (`averageHeartRateVariabilityMilliseconds`)
+ * so our number matches what the Google Health app shows the user; fall back to
+ * the deep-sleep RMSSD field only when the average is absent. The derivation
+ * layer tags this as SDNN (the daily average is SDNN-class, not the deep-sleep
+ * RMSSD). Value and baseline come from the same field, so deltas stay
+ * self-consistent — the HEA-4 "never mix algorithms" rule still holds.
  *
- * Active calories: prefer `activeEnergyBurned` over `totalCalories` (the latter
- * includes BMR and would inflate the "active calories" goal).
+ * Calories: total energy expenditure (TDEE) for the deficit; `kcalSum` may be a
+ * number, string, or {parsedValue} object (see {@link kcalValue}).
  */
 export function mapGoogleHealthRaw(
   p: GoogleHealthPayloads,
@@ -254,8 +360,8 @@ export function mapGoogleHealthRaw(
     const h = dp.dailyHeartRateVariability;
     if (!h) continue;
     const value =
-      h.deepSleepRootMeanSquareOfSuccessiveDifferencesMilliseconds ??
-      h.averageHeartRateVariabilityMilliseconds;
+      h.averageHeartRateVariabilityMilliseconds ??
+      h.deepSleepRootMeanSquareOfSuccessiveDifferencesMilliseconds;
     if (value == null) continue;
     const source = sourceLabel(dp.dataSource);
     sources.add(source);
@@ -286,7 +392,13 @@ export function mapGoogleHealthRaw(
       : (end - start) / 60000;
     const source = sourceLabel(dp.dataSource);
     sources.add(source);
-    sleep.push({ start, end, durationMin, source });
+    sleep.push({
+      start,
+      end,
+      durationMin,
+      source,
+      stages: sleepStages(dp.sleep?.summary?.stagesSummary),
+    });
   }
 
   // Rollups are server-aggregated across sources, so they arrive pre-deduped
@@ -295,19 +407,35 @@ export function mapGoogleHealthRaw(
   const steps: StepsRecord[] = [];
   for (const dp of p.steps) {
     const count = dp.steps?.countSum ? parseInt(dp.steps.countSum, 10) : NaN;
-    const start = isoToMs(dp.startTime);
-    const end = isoToMs(dp.endTime);
+    const start = isoToMs(dp.startTime) ?? civilToMs(dp.civilStartTime);
+    const end = isoToMs(dp.endTime) ?? civilToMs(dp.civilEndTime);
     if (!Number.isFinite(count) || start == null || end == null) continue;
     steps.push({ count, start, end, source: 'Google Health' });
   }
 
+  // One calories rollup point can carry BOTH an active-energy figure (for the
+  // "calories" activity goal) and a total figure (TDEE, for the deficit). We
+  // extract both. `kcalSum` may be a number, string, or {parsedValue|source}.
   const activeEnergy: EnergyRecord[] = [];
+  const totalEnergy: EnergyRecord[] = [];
   for (const dp of p.calories) {
-    const kcal = dp.activeEnergyBurned?.kcalSum ?? dp.totalCalories?.kcalSum;
-    const start = isoToMs(dp.startTime);
-    const end = isoToMs(dp.endTime);
-    if (kcal == null || start == null || end == null) continue;
-    activeEnergy.push({ kcal, start, end, source: 'Google Health' });
+    const start = isoToMs(dp.startTime) ?? civilToMs(dp.civilStartTime);
+    const end = isoToMs(dp.endTime) ?? civilToMs(dp.civilEndTime);
+    if (start == null || end == null) continue;
+    const active =
+      kcalValue(dp.activeCaloriesBurned?.kcalSum) ||
+      kcalValue(dp.activeEnergyBurned?.kcalSum);
+    const total =
+      kcalValue(dp.totalCalories?.kcalSum) ||
+      kcalValue(dp.totalEnergyBurned?.kcalSum) ||
+      kcalValue(dp.energy?.kcalSum) ||
+      kcalValue(dp.calories?.kcalSum);
+    if (active > 0) {
+      activeEnergy.push({ kcal: active, start, end, source: 'Google Health' });
+    }
+    if (total > 0) {
+      totalEnergy.push({ kcal: total, start, end, source: 'Google Health' });
+    }
   }
 
   const exercise: ExerciseRecord[] = [];
@@ -321,12 +449,24 @@ export function mapGoogleHealthRaw(
       dp.exercise?.metricsSummary?.caloriesKcal ??
       dp.exercise?.metricsSummary?.caloriesBurned ??
       null;
+    const zoneDur = dp.exercise?.metricsSummary?.heartRateZoneDurations;
+    const hrZones = zoneDur
+      ? {
+          lightMin: durationToMin(zoneDur.lightTime) ?? 0,
+          moderateMin: durationToMin(zoneDur.moderateTime) ?? 0,
+          vigorousMin: durationToMin(zoneDur.vigorousTime) ?? 0,
+          peakMin: durationToMin(zoneDur.peakTime) ?? 0,
+        }
+      : null;
     exercise.push({
       exerciseType: exerciseTypeToHc(dp.exercise?.exerciseType),
+      typeName: dp.exercise?.exerciseType ?? 'WORKOUT',
+      displayName: dp.exercise?.displayName ?? dp.displayName ?? null,
       start,
       end,
       durationMin,
       energyKcal,
+      hrZones,
       source: 'Google Health',
     });
   }
@@ -349,6 +489,7 @@ export function mapGoogleHealthRaw(
       proteinG: nutrientGrams(log, log.totalProtein?.grams, 'PROTEIN'),
       carbsG: nutrientGrams(log, log.totalCarbohydrate?.grams, 'CARBS'),
       fatG: nutrientGrams(log, log.totalFat?.grams, 'FAT'),
+      id: dp.name ?? null,
       source,
     });
   }
@@ -360,6 +501,7 @@ export function mapGoogleHealthRaw(
     steps,
     exercise,
     activeEnergy,
+    totalEnergy,
     nutrition,
     sources: [...sources],
     readAt: now,
@@ -428,29 +570,57 @@ export async function fetchGoogleHealthRaw(
   daysBack = 30,
 ): Promise<RawHealthData> {
   const auth = { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' };
+  // Short label for logs, e.g. "steps" from ".../dataTypes/steps/dataPoints".
+  const label = (path: string) =>
+    path.match(/dataTypes\/([^/]+)/)?.[1] ?? path;
 
   async function getList<T>(path: string): Promise<T[]> {
+    const name = label(path);
     try {
       const res = await fetchImpl(`${BASE_URL}${path}`, { headers: auth });
-      if (!res.ok) return [];
+      if (!res.ok) {
+        const detail = await res.text().catch(() => '');
+        console.warn(
+          `[GoogleHealth] GET ${name} → HTTP ${res.status}`,
+          detail.slice(0, 500),
+        );
+        return [];
+      }
       const body = (await res.json()) as ListResponse<T>;
-      return body.dataPoints ?? [];
-    } catch {
+      const points = body.dataPoints ?? [];
+      console.log(`[GoogleHealth] GET ${name} → ${points.length} points`);
+      return points;
+    } catch (err) {
+      console.warn(`[GoogleHealth] GET ${name} threw`, err);
       return [];
     }
   }
 
   async function postRollup<T>(path: string): Promise<T[]> {
+    const name = label(path);
     try {
       const res = await fetchImpl(`${BASE_URL}${path}`, {
         method: 'POST',
         headers: { ...auth, 'Content-Type': 'application/json' },
-        body: dailyRollupBody(now, daysBack),
+        // total-calories rollups reject windows > 14 days
+        // (INVALID_ROLLUP_QUERY_DURATION, observed as a live 400). Cap the
+        // rollup window — we only need today + this week out of rollups anyway.
+        body: dailyRollupBody(now, Math.min(daysBack, 14)),
       });
-      if (!res.ok) return [];
+      if (!res.ok) {
+        const detail = await res.text().catch(() => '');
+        console.warn(
+          `[GoogleHealth] POST ${name} → HTTP ${res.status}`,
+          detail.slice(0, 500),
+        );
+        return [];
+      }
       const body = (await res.json()) as RollupResponse<T>;
-      return body.rollupDataPoints ?? [];
-    } catch {
+      const points = body.rollupDataPoints ?? [];
+      console.log(`[GoogleHealth] POST ${name} → ${points.length} points`);
+      return points;
+    } catch (err) {
+      console.warn(`[GoogleHealth] POST ${name} threw`, err);
       return [];
     }
   }
@@ -464,6 +634,51 @@ export async function fetchGoogleHealthRaw(
   const sleepFilter = encodeURIComponent(
     `sleep.interval.civil_end_time >= "${isoDaysAgo(now, daysBack)}"`,
   );
+
+  // Exercise (and sleep) are HARD-CAPPED at pageSize 25 by the API — larger
+  // values are silently truncated — and results are newest-first, so a single
+  // read only ever returns the 25 most-recent sessions (~a week for an active
+  // user). To get history we PAGINATE via nextPageToken, bounded by a civil
+  // start-time filter. `exercise.interval.civil_start_time` is the documented
+  // filter field (users.dataTypes.dataPoints.list reference). A ~60-day window
+  // comfortably covers the 6-week goal-history view. (This — not any cloud
+  // retention limit — is why older weeks were previously missing.)
+  const EXERCISE_HISTORY_DAYS = 60;
+  const EXERCISE_MAX_PAGES = 20; // 20 × 25 = 500 sessions — a hard safety bound
+  const exerciseFilter = encodeURIComponent(
+    `exercise.interval.civil_start_time >= "${isoDaysAgo(now, EXERCISE_HISTORY_DAYS)}"`,
+  );
+  async function getExercise(): Promise<ExerciseDataPoint[]> {
+    const out: ExerciseDataPoint[] = [];
+    let pageToken: string | undefined;
+    for (let page = 0; page < EXERCISE_MAX_PAGES; page++) {
+      const tokenParam = pageToken
+        ? `&pageToken=${encodeURIComponent(pageToken)}`
+        : '';
+      const url = `${BASE_URL}/users/me/dataTypes/exercise/dataPoints?filter=${exerciseFilter}&pageSize=25${tokenParam}`;
+      try {
+        const res = await fetchImpl(url, { headers: auth });
+        if (!res.ok) {
+          const detail = await res.text().catch(() => '');
+          console.warn(
+            `[GoogleHealth] GET exercise p${page} → HTTP ${res.status}`,
+            detail.slice(0, 300),
+          );
+          break;
+        }
+        const body = (await res.json()) as ListResponse<ExerciseDataPoint>;
+        const pts = body.dataPoints ?? [];
+        out.push(...pts);
+        pageToken = body.nextPageToken || undefined;
+        if (!pageToken || pts.length === 0) break;
+      } catch (err) {
+        console.warn(`[GoogleHealth] GET exercise p${page} threw`, err);
+        break;
+      }
+    }
+    console.log(`[GoogleHealth] exercise → ${out.length} sessions (paginated)`);
+    return out;
+  }
 
   const [hrv, restingHr, sleep, steps, calories, exercise, nutrition] =
     await Promise.all([
@@ -482,13 +697,17 @@ export async function fetchGoogleHealthRaw(
       postRollup<CaloriesRollupDataPoint>(
         '/users/me/dataTypes/total-calories/dataPoints:dailyRollUp',
       ),
-      getList<ExerciseDataPoint>(
-        '/users/me/dataTypes/exercise/dataPoints?page_size=100',
-      ),
+      getExercise(),
       getList<NutritionDataPoint>(
         '/users/me/dataTypes/nutrition-log/dataPoints?page_size=100',
       ),
     ]);
+
+  // Diagnostic: dump the first calories rollup point so the exact field/value
+  // shape is visible in logs if burned calories ever looks wrong.
+  if (calories.length > 0) {
+    console.log('[GoogleHealth] calories[0] raw:', JSON.stringify(calories[0]));
+  }
 
   return mapGoogleHealthRaw(
     { hrv, restingHr, sleep, steps, calories, exercise, nutrition },
@@ -524,36 +743,79 @@ function msToIso(ms: number): string {
   return new Date(ms).toISOString();
 }
 
-/** Build the `nutrition-log` create body for a single food entry (pure). */
+/** The device's UTC offset at `ms` as a protobuf duration (e.g. "7200s",
+ * "-18000s"). Required by the API's SessionTimeInterval. */
+function utcOffsetString(ms: number): string {
+  // getTimezoneOffset returns minutes to ADD to local time to reach UTC, so the
+  // actual offset from UTC is its negation.
+  return `${-new Date(ms).getTimezoneOffset() * 60}s`;
+}
+
+/**
+ * Build the create body for one food entry — a v4 `DataPoint` carrying a
+ * `nutritionLog` (verified against the health:v4 discovery doc). Notes: the body
+ * is the DataPoint itself (no `dataPoint` wrapper); protein has no dedicated
+ * field, so it goes in `nutrients[]` as a `PROTEIN` `NutrientQuantity`; the
+ * interval is a SessionTimeInterval and needs start/end UTC offsets.
+ */
 export function buildNutritionLogPayload(
   input: FoodEntryInput,
   now: number,
-): { dataPoint: { nutritionLog: Record<string, unknown> } } {
+): { nutritionLog: Record<string, unknown> } {
   const at = input.at ?? now;
+  // The API rejects an interval whose start equals its end ("start time must be
+  // strictly earlier than end time"), so give the entry a nominal 1-minute span.
+  const endAt = at + 60_000;
+  const offset = utcOffsetString(at);
   const log: Record<string, unknown> = {
-    interval: { startTime: msToIso(at), endTime: msToIso(at) },
+    interval: {
+      startTime: msToIso(at),
+      endTime: msToIso(endAt),
+      startUtcOffset: offset,
+      endUtcOffset: offset,
+    },
     foodDisplayName: input.name,
     energy: { kcal: input.kcal },
   };
   if (input.mealType) log.mealType = input.mealType;
-  if (input.proteinG != null) log.totalProtein = { grams: input.proteinG };
   if (input.carbsG != null) log.totalCarbohydrate = { grams: input.carbsG };
   if (input.fatG != null) log.totalFat = { grams: input.fatG };
-  return { dataPoint: { nutritionLog: log } };
+  if (input.proteinG != null) {
+    log.nutrients = [
+      { nutrient: 'PROTEIN', quantity: { grams: input.proteinG } },
+    ];
+  }
+  return { nutritionLog: log };
+}
+
+/** Result of a food-log write: whether it succeeded and, when the API echoes
+ * it, the created data point's resource name — needed to update/delete the
+ * entry later (see {@link deleteFoodEntry}). */
+export interface FoodLogResult {
+  ok: boolean;
+  /** Resource name, e.g. "users/me/dataTypes/nutrition-log/dataPoints/{id}". */
+  name?: string;
+  /** Failure reason for diagnostics + user messaging (unset on success). */
+  error?: string;
 }
 
 /**
- * Write one food entry to the signed-in user's Google Health nutrition log.
- * Returns true on a 2xx. `accessToken` must carry the `googlehealth.nutrition`
- * (write) scope. Never throws for a normal API failure — resolves false — so a
- * failed log never crashes the screen.
+ * Create one food entry in the signed-in user's Google Health nutrition log and
+ * return the created data point's resource name (when present) so the caller can
+ * later edit or delete it. `accessToken` must carry the `googlehealth.nutrition`
+ * (write) scope. Never throws for a normal API failure — resolves `{ok:false}` —
+ * so a failed log never crashes the screen.
+ *
+ * The create response shape is NOT contract-verified against a live sample (the
+ * reference dashboard is read-only), so the resource name is read defensively;
+ * when it is absent the entry is still logged, only later edits are unavailable.
  */
-export async function writeFoodEntry(
+export async function createFoodEntry(
   accessToken: string,
   input: FoodEntryInput,
   now: number,
   fetchImpl: FetchLike,
-): Promise<boolean> {
+): Promise<FoodLogResult> {
   try {
     const res = await fetchImpl(
       `${BASE_URL}/users/me/dataTypes/nutrition-log/dataPoints`,
@@ -567,8 +829,84 @@ export async function writeFoodEntry(
         body: JSON.stringify(buildNutritionLogPayload(input, now)),
       },
     );
+    if (!res.ok) {
+      let detail = '';
+      try {
+        detail = (await res.text()).slice(0, 300);
+      } catch {
+        detail = '';
+      }
+      console.warn(
+        `[GoogleHealth] POST nutrition-log → HTTP ${res.status}`,
+        detail,
+      );
+      return {
+        ok: false,
+        error: `HTTP ${res.status}${detail ? `: ${detail}` : ''}`,
+      };
+    }
+    let name: string | undefined;
+    try {
+      const body = (await res.json()) as {
+        name?: string;
+        dataPoint?: { name?: string };
+      };
+      name = body?.name ?? body?.dataPoint?.name;
+    } catch {
+      name = undefined;
+    }
+    return { ok: true, name };
+  } catch (err) {
+    console.warn('[GoogleHealth] food write threw', err);
+    return {
+      ok: false,
+      error: `network error: ${String((err as Error)?.message ?? err)}`,
+    };
+  }
+}
+
+/**
+ * Delete a previously created nutrition-log data point by its resource `name`
+ * (as returned by {@link createFoodEntry}). Used to edit an entry (delete + re-
+ * create). Never throws — resolves false on any failure. Like the write path
+ * this endpoint is not live-contract-verified.
+ */
+export async function deleteFoodEntry(
+  accessToken: string,
+  name: string,
+  fetchImpl: FetchLike,
+): Promise<boolean> {
+  try {
+    // The v4 API has no per-resource DELETE; deletion is the batchDelete method
+    // (POST …/dataPoints:batchDelete with the resource names).
+    const res = await fetchImpl(
+      `${BASE_URL}/users/me/dataTypes/nutrition-log/dataPoints:batchDelete`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+        },
+        body: JSON.stringify({ names: [name] }),
+      },
+    );
     return res.ok;
   } catch {
     return false;
   }
+}
+
+/**
+ * Write one food entry to the signed-in user's Google Health nutrition log.
+ * Returns true on a 2xx. Thin boolean-returning wrapper over
+ * {@link createFoodEntry} for callers that don't need the created id.
+ */
+export async function writeFoodEntry(
+  accessToken: string,
+  input: FoodEntryInput,
+  now: number,
+  fetchImpl: FetchLike,
+): Promise<boolean> {
+  return (await createFoodEntry(accessToken, input, now, fetchImpl)).ok;
 }
