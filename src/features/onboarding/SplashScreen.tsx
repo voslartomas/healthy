@@ -43,6 +43,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 26,
   },
-  word: { marginBottom: 14 },
+  // A little horizontal breathing room so iOS doesn't clip the trailing glyph's
+  // ink (the right edge of the wordmark) past its measured advance width.
+  word: { marginBottom: 14, paddingHorizontal: 4 },
   rule: { width: 28, height: 3, borderRadius: 2, marginBottom: 14 },
 });

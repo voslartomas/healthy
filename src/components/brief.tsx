@@ -35,7 +35,12 @@ export function txt(
   } = {},
 ): TextStyle {
   const s: TextStyle = { fontFamily: family, fontSize: size };
-  if (opts.lh != null) s.lineHeight = opts.lh;
+  // iOS clips the top of tall glyphs (caps, accents) in some custom faces — most
+  // visibly Hanken Grotesk ExtraBold — when no lineHeight is set and layout falls
+  // back to the font's own slightly-too-tight metrics. Default to a roomy line
+  // box so ascenders are never cut; callers pass an explicit `lh` when they need
+  // a precise rhythm (e.g. the oversized hero numbers), and that always wins.
+  s.lineHeight = opts.lh ?? Math.ceil(size * 1.3);
   if (opts.ls != null) s.letterSpacing = opts.ls;
   if (opts.color != null) s.color = opts.color;
   if (opts.upper) s.textTransform = 'uppercase';
@@ -194,7 +199,9 @@ export function BigStat({
           styles.big,
           { color: valueColor ?? t.colors.ink },
           M(800, 64, { ls: -4 }),
-          { lineHeight: 58 },
+          // lineHeight must stay >= fontSize or iOS clips the tops of the digits
+          // (a shorter line box crops the glyph). Keep it snug but not clipping.
+          { lineHeight: 70 },
         ]}
       >
         {value}

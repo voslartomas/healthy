@@ -507,7 +507,7 @@ export function TrendsScreen(_props: ScreenProps) {
 
 const styles = StyleSheet.create({
   heroRow: { flexDirection: 'row', alignItems: 'flex-end', marginTop: 6 },
-  hero: { lineHeight: 63 },
+  hero: { lineHeight: 77 }, // >= the 70px fontSize so iOS doesn't clip digit tops
   avgLine: { marginTop: 6, lineHeight: 16 },
   segScroll: {
     marginTop: 20,
