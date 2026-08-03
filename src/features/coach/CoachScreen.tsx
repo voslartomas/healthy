@@ -38,6 +38,7 @@ import { ConversationDrawer } from './ConversationDrawer';
 import { buildDataContext } from './dataContext';
 import { makeFoodToolset } from './foodTool';
 import { languageDirective } from './languages';
+import { llamaEngine } from './ondevice/llamaEngine';
 import { useVoiceInput, VoiceState } from './useVoiceInput';
 
 /** Format a model response time, e.g. "820 MS" / "3.4 S". */
@@ -99,6 +100,20 @@ export function CoachScreen({ navigation }: ScreenProps) {
   useEffect(() => {
     if (!currentId) createConversation();
   }, [currentId]);
+
+  // Free the ~2.7 GB coach model when leaving this modal so it isn't held
+  // resident across the rest of the app. Skipped while a reply is generating —
+  // releasing a live native context can crash — so it's freed on the next close
+  // instead; either way it's reloaded on demand on the next message.
+  const busyRef = useRef(false);
+  useEffect(() => {
+    busyRef.current = busy;
+  }, [busy]);
+  useEffect(() => {
+    return () => {
+      if (!busyRef.current) void llamaEngine.release().catch(() => undefined);
+    };
+  }, []);
 
   // Burger button in the header opens the conversation list.
   useLayoutEffect(() => {

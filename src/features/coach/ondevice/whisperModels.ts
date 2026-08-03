@@ -26,17 +26,19 @@ export interface WhisperModel {
 }
 
 /**
- * Whisper small, q5_1 quantized, multilingual (from the canonical whisper.cpp
- * GGML repo). The sweet spot for phone STT: solid accuracy on food names,
- * numbers and non-English speech at ~190 MB — trivial next to the 2.7 GB coach
- * model. `.en` variants are deliberately avoided since the coach is multilingual.
+ * Whisper medium, q5_0 quantized, multilingual (from the canonical whisper.cpp
+ * GGML repo). Noticeably better accuracy on food names, numbers and non-English
+ * speech than the small tier, at ~540 MB / ~0.9 GB resident. Viable on-device
+ * because the context is released right after each transcription (see
+ * {@link ./useWhisperStore}), so it never lingers alongside the coach model.
+ * `.en` variants are deliberately avoided since the coach is multilingual.
  */
 export const WHISPER_MODEL: WhisperModel = {
-  id: 'whisper-small-q5_1',
-  label: 'Whisper Small',
-  url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q5_1.bin',
-  filename: 'ggml-small-q5_1.bin',
-  sizeBytes: 190_085_487,
+  id: 'whisper-medium-q5_0',
+  label: 'Whisper Medium',
+  url: 'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-medium-q5_0.bin',
+  filename: 'ggml-medium-q5_0.bin',
+  sizeBytes: 539_212_467,
 };
 
 /**

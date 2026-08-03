@@ -26,6 +26,10 @@ export type WhisperStatus = 'absent' | 'downloading' | 'ready' | 'error';
 const MODELS_DIR = `${FS.documentDirectory ?? ''}models/`;
 const MODEL_PATH = MODELS_DIR + WHISPER_MODEL.filename;
 
+/** Voice-model files from earlier tiers, deleted on `check` so a model bump
+ * doesn't orphan a few-hundred-MB download on disk. */
+const LEGACY_FILENAMES = ['ggml-small-q5_1.bin'];
+
 /** In-flight resumable handle, kept out of store state (not serializable). */
 let resumable: FS.DownloadResumable | null = null;
 
@@ -65,6 +69,14 @@ export const useWhisperStore = create<WhisperState>((set, get) => ({
   isReady: () => get().status === 'ready',
 
   check: async () => {
+    // Sweep away superseded model files (idempotent; a no-op once gone).
+    for (const name of LEGACY_FILENAMES) {
+      if (name !== WHISPER_MODEL.filename) {
+        await FS.deleteAsync(MODELS_DIR + name, { idempotent: true }).catch(
+          () => undefined,
+        );
+      }
+    }
     try {
       const info = await FS.getInfoAsync(MODEL_PATH);
       set({ status: info.exists ? 'ready' : 'absent' });
