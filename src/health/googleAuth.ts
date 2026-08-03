@@ -30,6 +30,18 @@ function webClientId(): string | undefined {
   return id && id.length > 0 ? id : undefined;
 }
 
+/**
+ * iOS OAuth client ID. Required by the native SDK on iOS (in lieu of a
+ * GoogleService-Info.plist) so `configure` can resolve the client; must match
+ * the reversed-client-id URL scheme registered via the google-signin plugin.
+ */
+function iosClientId(): string | undefined {
+  const id = (
+    Constants.expoConfig?.extra as { googleIosClientId?: string } | undefined
+  )?.googleIosClientId;
+  return id && id.length > 0 ? id : undefined;
+}
+
 /** True when native Google sign-in is available on this platform. */
 export function isGoogleHealthClientConfigured(): boolean {
   return Platform.OS === 'android' || Platform.OS === 'ios';
@@ -131,6 +143,7 @@ export function registerGoogleHealthAuth(): void {
   GoogleSignin.configure({
     scopes: [...GOOGLE_HEALTH_SCOPES],
     webClientId: webClientId(),
+    iosClientId: iosClientId(),
   });
   setGoogleHealthTokenProvider(getAccessToken);
 }

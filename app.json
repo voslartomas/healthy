@@ -9,7 +9,8 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "cz.healthapp"
+      "bundleIdentifier": "cz.healthapp",
+      "appleTeamId": "3KS75QPJSR"
     },
     "android": {
       "package": "cz.healthapp"
@@ -18,7 +19,12 @@
       "expo-sqlite",
       "expo-secure-store",
       "expo-web-browser",
-      "@react-native-google-signin/google-signin",
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "com.googleusercontent.apps.664943790951-4p7fv3l3vo9bh8s16kn8vohc1k7dr5le"
+        }
+      ],
       [
         "llama.rn",
         {
@@ -32,13 +38,16 @@
           "image": "./assets/splash-icon.png",
           "imageWidth": 200,
           "backgroundColor": "#FAF6EF",
-          "dark": { "backgroundColor": "#161209" }
+          "dark": {
+            "backgroundColor": "#161209"
+          }
         }
       ]
     ],
     "extra": {
-      "//": "Google Sign-In on Android needs no client ID in app config — the Android OAuth client is bound in Cloud Console via package name (cz.healthapp) + SHA-1 signing fingerprint. googleWebClientId below is only used for iOS/offline-access if ever provided; the legacy googleClientId from the browser PKCE flow is unused.",
+      "//": "Google Sign-In on Android needs no client ID in app config — the Android OAuth client is bound in Cloud Console via package name (cz.healthapp) + SHA-1 signing fingerprint. iOS needs googleIosClientId below (an iOS OAuth client bound to bundle id cz.healthapp) passed to GoogleSignin.configure, plus the matching reversed-client-id URL scheme registered via the google-signin plugin's iosUrlScheme above. googleWebClientId is only used for offline-access if ever provided; the legacy googleClientId from the browser PKCE flow is unused.",
       "googleWebClientId": "",
+      "googleIosClientId": "664943790951-4p7fv3l3vo9bh8s16kn8vohc1k7dr5le.apps.googleusercontent.com",
       "googleClientId": "664943790951-2tbkvpouvao38e2og6rjj4obnsdgrtt7.apps.googleusercontent.com"
     }
   }
