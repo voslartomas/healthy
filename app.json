@@ -25,6 +25,7 @@
           "enableEntitlements": true
         }
       ],
+      "./plugins/withRnllamaGradleProps",
       [
         "expo-splash-screen",
         {
