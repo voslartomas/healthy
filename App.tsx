@@ -19,6 +19,7 @@ import { WelcomeScreen } from './src/features/onboarding/WelcomeScreen';
 import { registerGoogleHealthAuth } from './src/health/googleAuth';
 import { initCalorieGoals } from './src/state/calorieGoalsService';
 import { initCommonFoods } from './src/state/commonFoodsService';
+import { initConversations } from './src/state/conversationsService';
 import { initDailyEnergy } from './src/state/dailyEnergyService';
 import { initGoalHistory } from './src/state/goalHistoryService';
 import { initGoals } from './src/state/goalsService';
@@ -94,6 +95,9 @@ export default function App() {
     );
     initCommonFoods().catch(err =>
       console.warn('Failed to load common foods', err),
+    );
+    initConversations().catch(err =>
+      console.warn('Failed to load conversations', err),
     );
     initDailyEnergy().catch(err =>
       console.warn('Failed to load daily energy', err),

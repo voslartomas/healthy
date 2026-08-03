@@ -19,11 +19,12 @@ describe('CoachScreen', () => {
 
 describe('useAppStore', () => {
   afterEach(() => {
-    useAppStore.getState().setAiProvider('anthropic');
+    useAppStore.getState().setAiProvider('ondevice');
   });
 
   it('updates the selected AI provider and resets the model', () => {
-    expect(useAppStore.getState().aiProvider).toBe('anthropic');
+    useAppStore.getState().setAiProvider('anthropic');
+    expect(useAppStore.getState().model).toBe('Claude Sonnet 4.5');
 
     useAppStore.getState().setAiProvider('gemini');
     expect(useAppStore.getState().aiProvider).toBe('gemini');

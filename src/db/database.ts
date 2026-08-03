@@ -88,6 +88,13 @@ async function ensureSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS conversations (
+      id         TEXT PRIMARY KEY NOT NULL,
+      title      TEXT NOT NULL,
+      messages   TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
   `);
   await ensureGoalColumns(db);
   await runMigrations(db);

@@ -20,5 +20,5 @@ export function renderWithProviders(
 
 /** Minimal navigation stub for screens typed against AppNav. */
 export function mockNav() {
-  return { navigate: jest.fn(), goBack: jest.fn() };
+  return { navigate: jest.fn(), goBack: jest.fn(), setOptions: jest.fn() };
 }

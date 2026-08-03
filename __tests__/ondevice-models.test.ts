@@ -42,6 +42,15 @@ describe('buildSystemPreamble', () => {
     expect(p).toContain('log_food');
     expect(p).toContain('TOOL_RESULT');
   });
+
+  it('uses a minimal reply-only protocol when there are no tools', () => {
+    const p = buildSystemPreamble('Write a brief.', []);
+    expect(p).toContain('Write a brief.');
+    expect(p).toContain('"reply"');
+    // No tool machinery when nothing can be called.
+    expect(p).not.toContain('log_food');
+    expect(p).not.toContain('TOOL_RESULT');
+  });
 });
 
 describe('renderGemmaPrompt', () => {

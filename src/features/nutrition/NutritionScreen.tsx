@@ -20,14 +20,9 @@ import {
   Section,
 } from '../../components/brief';
 import { FoodEntryInput, NutritionSummary } from '../../health';
-import {
-  createCalorieGoal,
-  removeCalorieGoal,
-} from '../../state/calorieGoalsService';
 import { removeCommonFood } from '../../state/commonFoodsService';
 import {
   activeCalorieGoal,
-  isCalorieGoalHit,
   useCalorieGoalsStore,
 } from '../../state/useCalorieGoalsStore';
 import {
@@ -36,51 +31,6 @@ import {
 } from '../../state/useCommonFoodsStore';
 import { useHealthStore } from '../../state/useHealthStore';
 import { useTheme } from '../../theme/theme';
-
-const MONTHS = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-];
-
-function shortDate(ms: number): string {
-  const d = new Date(ms);
-  return `${MONTHS[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
-}
-
-function todayInput(): string {
-  const d = new Date();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${mm}-${dd}`;
-}
-
-function parseDateInput(s: string): number | null {
-  const m = s.trim().match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (!m) return null;
-  const y = +m[1],
-    mo = +m[2],
-    d = +m[3];
-  const dt = new Date(y, mo - 1, d);
-  if (
-    dt.getFullYear() !== y ||
-    dt.getMonth() !== mo - 1 ||
-    dt.getDate() !== d
-  ) {
-    return null;
-  }
-  dt.setHours(0, 0, 0, 0);
-  return dt.getTime();
-}
 
 function grp(n: number): string {
   return Math.round(n)
@@ -107,6 +57,7 @@ function titleCase(s: string): string {
 function buildMeals(live: NutritionSummary | null) {
   return live
     ? live.meals.map(m => ({
+        id: m.id ?? null,
         name: m.name,
         tag: (m.mealType ? titleCase(m.mealType) : 'Logged').toUpperCase(),
         kcal: m.kcal,
@@ -120,7 +71,9 @@ export function NutritionScreen(_props: ScreenProps) {
   const c = t.colors;
   const snap = useHealthStore(s => s.snapshot);
   const logFood = useHealthStore(s => s.logFood);
+  const removeFoodEntry = useHealthStore(s => s.removeFoodEntry);
   const commonFoods = useCommonFoodsStore(s => s.foods);
+  const [removingId, setRemovingId] = React.useState<string | null>(null);
 
   const eaten = snap.nutrition?.eaten ?? null;
   const burned = snap.energyBurnedToday;
@@ -128,16 +81,9 @@ export function NutritionScreen(_props: ScreenProps) {
   const net = (eaten ?? 0) - burned;
   const meals = buildMeals(snap.nutrition);
 
-  const calorieGoals = useCalorieGoalsStore(s => s.goals);
-  const activeGoal = activeCalorieGoal(calorieGoals);
-  const todayNet = (eaten ?? 0) - burned;
-  const goalHit =
-    activeGoal && eaten != null && burned > 0
-      ? isCalorieGoalHit(activeGoal.targetNet, todayNet)
-      : null;
-  const goalHistory = [...calorieGoals].sort(
-    (a, b) => b.effectiveFrom - a.effectiveFrom,
-  );
+  // The active calorie goal drives the hero + target quad here; setting/editing
+  // goals lives on the Setup tab (CalorieGoalSection).
+  const activeGoal = activeCalorieGoal(useCalorieGoalsStore(s => s.goals));
 
   // Hero: kcal left toward the goal's daily allowance when possible.
   let heroValue = '—';
@@ -161,16 +107,7 @@ export function NutritionScreen(_props: ScreenProps) {
   const [busy, setBusy] = React.useState(false);
   const [commonBusy, setCommonBusy] = React.useState(false);
 
-  // Calorie-goal editor.
-  const [goalEditing, setGoalEditing] = React.useState(false);
-  const [goalMode, setGoalMode] = React.useState<'deficit' | 'surplus'>(
-    'deficit',
-  );
-  const [goalMag, setGoalMag] = React.useState('');
-  const [goalDate, setGoalDate] = React.useState(todayInput);
-  const [goalBusy, setGoalBusy] = React.useState(false);
-
-  const submit = React.useCallback(async () => {
+  const submit = async () => {
     const kcalNum = parseInt(kcal, 10);
     if (!name.trim() || !Number.isFinite(kcalNum) || kcalNum <= 0) {
       Alert.alert('Add food', 'Enter a name and a calorie amount.');
@@ -189,7 +126,7 @@ export function NutritionScreen(_props: ScreenProps) {
         'Connect Google Health in Setup to save food entries.',
       );
     }
-  }, [name, kcal, logFood]);
+  };
 
   const logCommon = React.useCallback(
     async (food: CommonFood) => {
@@ -212,6 +149,30 @@ export function NutritionScreen(_props: ScreenProps) {
     [commonBusy, logFood],
   );
 
+  const confirmRemoveMeal = React.useCallback(
+    (id: string, name: string) => {
+      Alert.alert('Delete entry', `Delete “${name}” from your food log?`, [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            setRemovingId(id);
+            const ok = await removeFoodEntry(id);
+            setRemovingId(null);
+            if (!ok) {
+              Alert.alert(
+                'Not deleted',
+                'Could not remove the entry. Make sure Google Health is connected in Setup.',
+              );
+            }
+          },
+        },
+      ]);
+    },
+    [removeFoodEntry],
+  );
+
   const confirmRemoveCommon = React.useCallback((food: CommonFood) => {
     Alert.alert('Remove food', `Remove "${food.name}" from common foods?`, [
       { text: 'Cancel', style: 'cancel' },
@@ -222,33 +183,6 @@ export function NutritionScreen(_props: ScreenProps) {
       },
     ]);
   }, []);
-
-  const submitGoal = React.useCallback(async () => {
-    const mag = parseInt(goalMag, 10);
-    if (!Number.isFinite(mag) || mag < 0) {
-      Alert.alert('Set goal', 'Enter a kcal amount (e.g. 400).');
-      return;
-    }
-    const effectiveFrom = parseDateInput(goalDate);
-    if (effectiveFrom == null) {
-      Alert.alert('Set goal', 'Enter a valid date as YYYY-MM-DD.');
-      return;
-    }
-    setGoalBusy(true);
-    try {
-      await createCalorieGoal({
-        effectiveFrom,
-        targetNet: goalMode === 'deficit' ? -mag : mag,
-      });
-      setGoalMag('');
-      setGoalDate(todayInput());
-      setGoalEditing(false);
-    } catch {
-      Alert.alert('Not saved', 'Could not save the calorie goal.');
-    } finally {
-      setGoalBusy(false);
-    }
-  }, [goalMag, goalDate, goalMode]);
 
   const inputStyle = {
     ...S(600, 14, { color: c.ink }),
@@ -411,7 +345,7 @@ export function NutritionScreen(_props: ScreenProps) {
 
         {meals.map((m, i) => (
           <View
-            key={`${m.name}-${i}`}
+            key={m.id ?? `${m.name}-${i}`}
             style={[styles.meal, { borderBottomColor: c.hair }]}
           >
             <Text
@@ -427,144 +361,20 @@ export function NutritionScreen(_props: ScreenProps) {
             <Text style={[M(800, 12, { color: c.ink }), styles.mealKcal]}>
               {grp(m.kcal)}
             </Text>
-          </View>
-        ))}
-      </Section>
-
-      {/* ── 05 Calorie goal ──────────────────────────────────────────── */}
-      <Section
-        n="05"
-        title="Calorie goal"
-        titleRight={
-          <Pressable
-            onPress={() => setGoalEditing(e => !e)}
-            accessibilityRole="button"
-            accessibilityLabel="Set calorie goal"
-          >
-            <Text style={M(700, 10.5, { ls: 1, color: c.acc })}>
-              {goalEditing ? 'CANCEL' : '+ NEW GOAL'}
-            </Text>
-          </Pressable>
-        }
-      >
-        {activeGoal ? (
-          <View style={styles.goalHead}>
-            <Text style={M(800, 22, { ls: -0.5, color: c.ink })}>
-              {signed(activeGoal.targetNet)}
-              <Text style={M(700, 12, { color: c.fnt })}> KCAL/DAY</Text>
-            </Text>
-            {goalHit != null ? (
-              <Text
-                style={M(700, 10.5, {
-                  ls: 0.5,
-                  color: goalHit ? c.grn : c.fnt,
-                })}
+            {m.id ? (
+              <Pressable
+                onPress={() => confirmRemoveMeal(m.id!, m.name)}
+                disabled={removingId === m.id}
+                accessibilityRole="button"
+                accessibilityLabel={`Delete ${m.name}`}
+                hitSlop={8}
+                style={{ opacity: removingId === m.id ? 0.4 : 1 }}
               >
-                {goalHit ? 'ON TRACK' : 'OFF TARGET'}
-              </Text>
+                <Text style={M(700, 15, { color: c.fnt })}>×</Text>
+              </Pressable>
             ) : null}
           </View>
-        ) : (
-          <Text style={[S(600, 13, { color: c.mut }), styles.empty]}>
-            No calorie goal set. Add one to track your daily deficit or surplus.
-          </Text>
-        )}
-
-        {goalEditing ? (
-          <View style={styles.goalForm}>
-            <View style={styles.modeRow}>
-              {(['deficit', 'surplus'] as const).map(mode => {
-                const on = goalMode === mode;
-                return (
-                  <Pressable
-                    key={mode}
-                    onPress={() => setGoalMode(mode)}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: on }}
-                    style={[
-                      styles.modeBtn,
-                      {
-                        borderColor: on ? c.ink : c.hair,
-                        backgroundColor: on ? c.ink : 'transparent',
-                      },
-                    ]}
-                  >
-                    <Text
-                      style={M(700, 11, { ls: 0.5, color: on ? c.inv : c.mut })}
-                    >
-                      {mode.toUpperCase()}
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </View>
-            <View style={styles.form}>
-              <TextInput
-                value={goalDate}
-                onChangeText={setGoalDate}
-                placeholder="YYYY-MM-DD"
-                placeholderTextColor={c.fnt}
-                autoCapitalize="none"
-                accessibilityLabel="Goal start date"
-                style={[
-                  inputStyle,
-                  styles.formName,
-                  { fontFamily: M(600, 13).fontFamily },
-                ]}
-              />
-              <TextInput
-                value={goalMag}
-                onChangeText={setGoalMag}
-                placeholder="kcal"
-                placeholderTextColor={c.fnt}
-                keyboardType="number-pad"
-                style={[
-                  inputStyle,
-                  styles.formKcal,
-                  { fontFamily: M(600, 14).fontFamily },
-                ]}
-              />
-              <Pressable
-                onPress={submitGoal}
-                disabled={goalBusy}
-                accessibilityRole="button"
-                accessibilityLabel="Save calorie goal"
-                style={[
-                  styles.formBtn,
-                  { backgroundColor: c.ink, opacity: goalBusy ? 0.5 : 1 },
-                ]}
-              >
-                <Text style={M(700, 16, { color: c.inv })}>+</Text>
-              </Pressable>
-            </View>
-          </View>
-        ) : null}
-
-        {goalHistory.length > 0 ? (
-          <View style={styles.history}>
-            {goalHistory.map(g => (
-              <View
-                key={g.id}
-                style={[styles.histRow, { borderTopColor: c.hair }]}
-              >
-                <Text style={[S(600, 12.5, { color: c.ink }), styles.histDate]}>
-                  {shortDate(g.effectiveFrom)}
-                </Text>
-                <Text style={M(700, 12, { color: c.mut })}>
-                  {signed(g.targetNet)}
-                </Text>
-                <Pressable
-                  onPress={() => removeCalorieGoal(g.id)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Remove goal from ${shortDate(g.effectiveFrom)}`}
-                  hitSlop={8}
-                >
-                  <Text style={M(700, 13, { color: c.fnt })}>×</Text>
-                </Pressable>
-              </View>
-            ))}
-          </View>
-        ) : null}
+        ))}
       </Section>
     </BriefScreen>
   );
@@ -604,28 +414,4 @@ const styles = StyleSheet.create({
   },
   mealName: { flex: 1, minWidth: 0 },
   mealKcal: { textAlign: 'right' },
-  goalHead: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
-    marginTop: 14,
-  },
-  goalForm: { marginTop: 6 },
-  modeRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
-  modeBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 999,
-    borderWidth: 1,
-    alignItems: 'center',
-  },
-  history: { marginTop: 16 },
-  histRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 11,
-    borderTopWidth: 1,
-  },
-  histDate: { flex: 1 },
 });

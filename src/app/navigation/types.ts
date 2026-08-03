@@ -1,4 +1,4 @@
-import type { ComponentType } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 
 /** Every navigable destination in the app. */
 export type ScreenName =
@@ -20,6 +20,9 @@ export type ScreenName =
 export interface AppNav {
   navigate: (screen: ScreenName) => void;
   goBack: () => void;
+  /** Set screen options at runtime, e.g. a header button. Typed minimally to
+   * what our screens use; the real navigator's setOptions is a superset. */
+  setOptions: (options: { headerLeft?: () => ReactNode }) => void;
 }
 
 export interface ScreenProps {

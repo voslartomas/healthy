@@ -31,9 +31,9 @@ export interface GemmaModel {
   sizeBytes: number;
 }
 
-/** Available Gemma tiers, best-quality first. The 4B build is the default
- * (best food/macro estimates that still fit a modern phone); the 1B build is a
- * lighter fallback. Both are Q4_K_M quantizations from unsloth's GGUF repos. */
+/** The on-device coach model: Gemma 3 4B (Q4_K_M from unsloth's GGUF repo) —
+ * the best food/macro accuracy that still fits a modern phone. A single model
+ * keeps setup to one tap (Download); no tier to choose. */
 export const GEMMA_MODELS: GemmaModel[] = [
   {
     id: 'gemma-3-4b-it-q4',
@@ -41,13 +41,6 @@ export const GEMMA_MODELS: GemmaModel[] = [
     url: 'https://huggingface.co/unsloth/gemma-3-4b-it-GGUF/resolve/main/gemma-3-4b-it-Q4_K_M.gguf',
     filename: 'gemma-3-4b-it-Q4_K_M.gguf',
     sizeBytes: 2_700_000_000,
-  },
-  {
-    id: 'gemma-3-1b-it-q4',
-    label: 'Gemma 3 1B',
-    url: 'https://huggingface.co/unsloth/gemma-3-1b-it-GGUF/resolve/main/gemma-3-1b-it-Q4_K_M.gguf',
-    filename: 'gemma-3-1b-it-Q4_K_M.gguf',
-    sizeBytes: 850_000_000,
   },
 ];
 
@@ -99,6 +92,15 @@ ws     ::= [ \t\n]*
  * turn by {@link renderGemmaPrompt}.
  */
 export function buildSystemPreamble(system: string, tools: ToolSpec[]): string {
+  // No tools → pure text generation (e.g. the daily brief). Keep the action
+  // protocol minimal so the model just writes a reply.
+  if (tools.length === 0) {
+    return [
+      system,
+      '',
+      'Reply with EXACTLY ONE JSON object and nothing else — no markdown, no code fences — of the form {"reply": "<your message>"}.',
+    ].join('\n');
+  }
   const toolLines = tools
     .map(
       t =>
@@ -116,11 +118,16 @@ export function buildSystemPreamble(system: string, tools: ToolSpec[]): string {
     toolLines,
     '',
     'RULES:',
-    '- Never call a tool with empty or missing args. Fill in every value yourself.',
-    '- For log_food, the "entries" array MUST contain at least one object, and each object MUST have "name" and "kcal". Estimate kcal and macros (proteinG, carbsG, fatG) from the food yourself using standard nutrition values.',
-    '- Do not ask the user for calories or macros — you estimate them.',
+    '- Default to just talking. Answer questions and give advice with {"reply": ...}. Only call a tool when the user CLEARLY asks you to log, add, track, change, remove, or save a food.',
+    '- If the user is only asking a question or mentioning food without asking to log it, do NOT call any tool — reply in words.',
+    '- When you DO call log_food, the "entries" array MUST contain at least one object, and each object MUST have "name" and "kcal". Estimate kcal and macros (proteinG, carbsG, fatG) yourself. Never call a tool with empty args, and never ask the user for calories or macros.',
     '',
-    'EXAMPLE. User: "I had 2 eggs and a slice of toast for breakfast"',
+    'EXAMPLE A — the user asks a question, so just reply (no tool):',
+    'User: "how much protein should I eat to build muscle?"',
+    'You: {"reply": "Aim for roughly 1.6–2.2 g of protein per kg of bodyweight a day, spread across your meals."}',
+    '',
+    'EXAMPLE B — the user explicitly asks to log, so use the tool:',
+    'User: "log 2 eggs and a slice of toast for breakfast"',
     'You (turn 1): {"tool": "log_food", "args": {"entries": [{"name": "2 eggs + toast", "kcal": 240, "proteinG": 18, "carbsG": 15, "fatG": 12, "mealType": "BREAKFAST"}]}}',
     'TOOL_RESULT log_food: {"ok": true}',
     'You (turn 2): {"reply": "Logged breakfast — 240 kcal, 18g protein, 15g carbs, 12g fat."}',

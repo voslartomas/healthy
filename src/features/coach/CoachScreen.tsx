@@ -1,4 +1,10 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -15,43 +21,51 @@ import Svg, { Path } from 'react-native-svg';
 
 import { ScreenProps } from '../../app/navigation/types';
 import { M, S } from '../../components/brief';
+import {
+  appendMessage,
+  createConversation,
+  GREETING,
+} from '../../state/conversationsService';
 import { PROVIDERS, useAppStore } from '../../state/useAppStore';
-import { useHealthStore } from '../../state/useHealthStore';
+import {
+  currentConversation,
+  StoredMessage,
+  useConversationsStore,
+} from '../../state/useConversationsStore';
 import { useTheme } from '../../theme/theme';
 import { CoachError, CoachMessage, runCoach } from './aiClient';
+import { ConversationDrawer } from './ConversationDrawer';
+import { buildDataContext } from './dataContext';
 import { makeFoodToolset } from './foodTool';
+import { languageDirective } from './languages';
 
-const GREETING =
-  "Hey! Tell me what you ate and I'll log the calories and macros to Google Health for you — e.g. “Breakfast: 4 eggs and 2 slices of toast.” You can also ask me to tweak something I just logged.";
-
-interface ChatBubble {
-  id: string;
-  from: 'ai' | 'me' | 'system';
-  text: string;
+/** Format a model response time, e.g. "820 MS" / "3.4 S". */
+function formatMs(ms: number): string {
+  return ms < 1000 ? `${ms} MS` : `${(ms / 1000).toFixed(1)} S`;
 }
 
-/** Build the coach system prompt, grounding it in today's logged nutrition. */
+/** Build the coach system prompt, grounding it in the user's live health data
+ * (recovery, body, sleep, activity, nutrition, goals) so it can both log food
+ * and talk about how the user is doing. */
 function buildSystemPrompt(): string {
-  const n = useHealthStore.getState().snapshot.nutrition;
-  const eaten = n
-    ? `So far today the user has logged ${Math.round(n.eaten)} kcal ` +
-      `(${Math.round(n.proteinG)}g protein, ${Math.round(n.carbsG)}g carbs, ${Math.round(n.fatG)}g fat).`
-    : 'The user has not logged any food yet today.';
-  return [
-    'You are the in-app nutrition coach for a health-tracking app.',
-    'Help the user log meals and understand their calories and macros.',
-    'When the user says what they ate, estimate calories and macros and call the log_food tool to save it to Google Health, then confirm what you logged in plain language with the numbers.',
-    'If the user wants to change or remove a meal, call list_food_log to find its id, then update_food_log (with corrected full values) or delete_food_log using that id.',
-    'If the user asks to save or remember a food for quick re-use later, call save_common_food (this saves it to their Common Foods list but does not log it for today).',
-    'Keep replies short and concrete. Use grams for macros and kcal for energy.',
-    eaten,
+  const instructions = [
+    'You are the in-app health & nutrition coach for a health-tracking app.',
+    languageDirective(useAppStore.getState().coachLanguage),
+    'Chat naturally: answer the user’s questions about their recovery, sleep, activity, body metrics, nutrition, and goals, and give practical advice grounded in their real numbers below.',
+    'Only change the food log when the user EXPLICITLY asks you to — e.g. “log…”, “add…”, “track…”, “change…”, “remove…”, “delete…”, “save…”. Do not log food just because the user mentions eating it or asks a question.',
+    'To log a meal, estimate its calories and macros and call log_food, then confirm what you logged with the numbers.',
+    'To change or remove a meal, call list_food_log to find its id, then update_food_log (with corrected full values) or delete_food_log using that id.',
+    'To save a food for quick re-use later (not log it for today), call save_common_food.',
+    'If the user is just chatting or asking a question, reply in words and do not call any tool.',
+    'Keep replies short and concrete. Use grams for macros and kcal for energy. Do not invent numbers that are not in the data.',
   ].join(' ');
+  return `${instructions}\n\n=== The user's current health data ===\n${buildDataContext()}`;
 }
 
 /** AI coach chat, presented as a native modal screen. A live, provider-backed
  * conversation that logs food to Google Health via tool calls. Provider, model
  * and key come from Setup. */
-export function CoachScreen(_props: ScreenProps) {
+export function CoachScreen({ navigation }: ScreenProps) {
   const t = useTheme();
   const c = t.colors;
   const insets = useSafeAreaInsets();
@@ -60,13 +74,32 @@ export function CoachScreen(_props: ScreenProps) {
   const headerHeight = React.useContext(HeaderHeightContext) ?? 0;
   const provider = useAppStore(s => s.aiProvider);
 
-  const idRef = useRef(1);
-  const [messages, setMessages] = useState<ChatBubble[]>([
-    { id: '0', from: 'ai', text: GREETING },
-  ]);
+  // Messages come from the active conversation (persisted history); appends go
+  // through the service which write-throughs to SQLite.
+  const conv = useConversationsStore(currentConversation);
+  const currentId = useConversationsStore(s => s.currentId);
+  const messages: StoredMessage[] = conv?.messages ?? [
+    { id: 'greeting', from: 'ai', text: GREETING },
+  ];
+
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+
+  // Always keep a backing conversation (on first open, or after deleting all).
+  useEffect(() => {
+    if (!currentId) createConversation();
+  }, [currentId]);
+
+  // Burger button in the header opens the conversation list.
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerLeft: () => (
+        <BurgerButton color={c.acc} onPress={() => setMenuOpen(true)} />
+      ),
+    });
+  }, [navigation, c.acc]);
 
   const scrollToEnd = useCallback(
     () =>
@@ -76,29 +109,31 @@ export function CoachScreen(_props: ScreenProps) {
     [],
   );
 
-  const addBubble = useCallback((from: ChatBubble['from'], text: string) => {
-    setMessages(prev => [...prev, { id: String(idRef.current++), from, text }]);
-  }, []);
-
   const send = useCallback(
     async (raw: string) => {
       const value = raw.trim();
       if (!value || busy) return;
       setInput('');
 
-      const history: CoachMessage[] = messages
+      // Build history from the live conversation (fresh from the store).
+      const prior =
+        currentConversation(useConversationsStore.getState())?.messages ?? [];
+      const history: CoachMessage[] = prior
         .filter(m => m.from === 'ai' || m.from === 'me')
         .map(m => ({
           role: m.from === 'me' ? 'user' : 'assistant',
           content: m.text,
         }));
 
-      addBubble('me', value);
+      appendMessage('me', value);
       setBusy(true);
       scrollToEnd();
 
       const { apiKey, model, aiProvider } = useAppStore.getState();
-      const toolset = makeFoodToolset(summary => addBubble('system', summary));
+      const toolset = makeFoodToolset(summary =>
+        appendMessage('system', summary),
+      );
+      const started = Date.now();
 
       try {
         const reply = await runCoach(
@@ -110,148 +145,187 @@ export function CoachScreen(_props: ScreenProps) {
             exec: toolset.exec,
           },
         );
-        if (reply) addBubble('ai', reply);
+        if (reply) appendMessage('ai', reply, Date.now() - started);
       } catch (err) {
         const msg =
           err instanceof CoachError
             ? err.message
-            : 'Something went wrong reaching the AI provider. Check your connection and try again.';
-        addBubble('system', msg);
+            : 'Something went wrong reaching the coach. Check your connection and try again.';
+        appendMessage('system', msg);
       } finally {
         setBusy(false);
         scrollToEnd();
       }
     },
-    [busy, messages, addBubble, scrollToEnd],
+    [busy, scrollToEnd],
   );
 
   return (
-    <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={headerHeight}
-      style={[styles.root, { backgroundColor: c.bg }]}
-    >
-      <View style={[styles.status, { borderBottomColor: c.hair }]}>
-        <Sparkle color={c.acc} size={14} />
-        <Text numberOfLines={1} style={M(600, 9, { ls: 1, color: c.fnt })}>
-          {PROVIDERS[provider].name.toUpperCase()}
-        </Text>
-      </View>
-
-      <ScrollView
-        ref={scrollRef}
-        style={styles.chat}
-        contentContainerStyle={styles.chatContent}
-        showsVerticalScrollIndicator={false}
-        keyboardDismissMode="interactive"
-        onContentSizeChange={scrollToEnd}
+    <View style={styles.root}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={headerHeight}
+        style={[styles.root, { backgroundColor: c.bg }]}
       >
-        {messages.map(m =>
-          m.from === 'system' ? (
-            <View key={m.id} style={styles.sysNote}>
-              <Text
-                selectable
-                style={M(700, 11, { color: c.mut, align: 'center' })}
+        <View style={[styles.status, { borderBottomColor: c.hair }]}>
+          <Sparkle color={c.acc} size={14} />
+          <Text numberOfLines={1} style={M(600, 9, { ls: 1, color: c.fnt })}>
+            {PROVIDERS[provider].name.toUpperCase()}
+          </Text>
+        </View>
+
+        <ScrollView
+          ref={scrollRef}
+          style={styles.chat}
+          contentContainerStyle={styles.chatContent}
+          showsVerticalScrollIndicator={false}
+          keyboardDismissMode="interactive"
+          onContentSizeChange={scrollToEnd}
+        >
+          {messages.map(m =>
+            m.from === 'system' ? (
+              <View key={m.id} style={styles.sysNote}>
+                <Text
+                  selectable
+                  style={M(700, 11, { color: c.mut, align: 'center' })}
+                >
+                  {m.text}
+                </Text>
+              </View>
+            ) : (
+              <View
+                key={m.id}
+                style={[
+                  styles.bubble,
+                  m.from === 'me'
+                    ? {
+                        alignSelf: 'flex-end',
+                        backgroundColor: c.ink,
+                        borderBottomRightRadius: 4,
+                      }
+                    : {
+                        alignSelf: 'flex-start',
+                        borderWidth: 1,
+                        borderColor: c.hair,
+                        borderBottomLeftRadius: 4,
+                      },
+                ]}
               >
-                {m.text}
-              </Text>
-            </View>
-          ) : (
+                <Text
+                  selectable
+                  style={S(400, 13, {
+                    lh: 19,
+                    color: m.from === 'me' ? c.inv : c.ink,
+                  })}
+                >
+                  {m.text}
+                </Text>
+                {m.from === 'ai' && m.ms != null ? (
+                  <Text
+                    style={[
+                      M(600, 8.5, { ls: 0.6, color: c.fnt }),
+                      styles.timing,
+                    ]}
+                  >
+                    {formatMs(m.ms)}
+                  </Text>
+                ) : null}
+              </View>
+            ),
+          )}
+          {busy ? (
             <View
-              key={m.id}
               style={[
                 styles.bubble,
-                m.from === 'me'
-                  ? {
-                      alignSelf: 'flex-end',
-                      backgroundColor: c.ink,
-                      borderBottomRightRadius: 4,
-                    }
-                  : {
-                      alignSelf: 'flex-start',
-                      borderWidth: 1,
-                      borderColor: c.hair,
-                      borderBottomLeftRadius: 4,
-                    },
+                styles.typing,
+                { alignSelf: 'flex-start', borderColor: c.hair },
               ]}
             >
-              <Text
-                selectable
-                style={S(400, 13, {
-                  lh: 19,
-                  color: m.from === 'me' ? c.inv : c.ink,
-                })}
-              >
-                {m.text}
-              </Text>
+              {[0, 1, 2].map(i => (
+                <View
+                  key={i}
+                  style={[styles.typingDot, { backgroundColor: c.fnt }]}
+                />
+              ))}
             </View>
-          ),
-        )}
-        {busy ? (
-          <View
-            style={[
-              styles.bubble,
-              styles.typing,
-              { alignSelf: 'flex-start', borderColor: c.hair },
-            ]}
-          >
-            {[0, 1, 2].map(i => (
-              <View
-                key={i}
-                style={[styles.typingDot, { backgroundColor: c.fnt }]}
-              />
-            ))}
-          </View>
-        ) : null}
-      </ScrollView>
+          ) : null}
+        </ScrollView>
 
-      <View
-        style={[
-          styles.composer,
-          { borderTopColor: c.hair, paddingBottom: insets.bottom + 12 },
-        ]}
-      >
-        <TextInput
-          value={input}
-          onChangeText={setInput}
-          onSubmitEditing={() => send(input)}
-          placeholder="Tell coach what you ate…"
-          placeholderTextColor={c.fnt}
-          accessibilityLabel="Message your coach"
-          returnKeyType="send"
-          editable={!busy}
+        <View
           style={[
-            styles.input,
-            S(500, 13.5, { color: c.ink }),
-            { borderColor: c.hair },
-          ]}
-        />
-        <Pressable
-          onPress={() => send(input)}
-          disabled={!input.trim() || busy}
-          accessibilityRole="button"
-          accessibilityLabel="Send"
-          style={[
-            styles.send,
-            {
-              backgroundColor: c.ink,
-              opacity: !input.trim() || busy ? 0.45 : 1,
-            },
+            styles.composer,
+            { borderTopColor: c.hair, paddingBottom: insets.bottom + 12 },
           ]}
         >
-          <Svg width={18} height={18} viewBox="0 0 24 24">
-            <Path
-              d="M4 12l16-8-6 8 6 8z"
-              fill="none"
-              stroke={c.inv}
-              strokeWidth={2}
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </Svg>
-        </Pressable>
-      </View>
-    </KeyboardAvoidingView>
+          <TextInput
+            value={input}
+            onChangeText={setInput}
+            onSubmitEditing={() => send(input)}
+            placeholder="Tell coach what you ate…"
+            placeholderTextColor={c.fnt}
+            accessibilityLabel="Message your coach"
+            returnKeyType="send"
+            editable={!busy}
+            style={[
+              styles.input,
+              S(500, 13.5, { color: c.ink }),
+              { borderColor: c.hair },
+            ]}
+          />
+          <Pressable
+            onPress={() => send(input)}
+            disabled={!input.trim() || busy}
+            accessibilityRole="button"
+            accessibilityLabel="Send"
+            style={[
+              styles.send,
+              {
+                backgroundColor: c.ink,
+                opacity: !input.trim() || busy ? 0.45 : 1,
+              },
+            ]}
+          >
+            <Svg width={18} height={18} viewBox="0 0 24 24">
+              <Path
+                d="M4 12l16-8-6 8 6 8z"
+                fill="none"
+                stroke={c.inv}
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </Svg>
+          </Pressable>
+        </View>
+      </KeyboardAvoidingView>
+
+      {menuOpen ? (
+        <ConversationDrawer onClose={() => setMenuOpen(false)} />
+      ) : null}
+    </View>
+  );
+}
+
+/** Header burger button that opens the conversation list. */
+function BurgerButton({
+  color,
+  onPress,
+}: {
+  color: string;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      hitSlop={12}
+      accessibilityRole="button"
+      accessibilityLabel="Conversations"
+      style={styles.burger}
+    >
+      {[0, 1, 2].map(i => (
+        <View key={i} style={[styles.burgerLine, { backgroundColor: color }]} />
+      ))}
+    </Pressable>
   );
 }
 
@@ -275,6 +349,9 @@ export function Sparkle({
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
+  burger: { paddingHorizontal: 4, paddingVertical: 4, gap: 4 },
+  burgerLine: { width: 18, height: 2, borderRadius: 1 },
+  timing: { marginTop: 5 },
   status: {
     flexDirection: 'row',
     alignItems: 'center',

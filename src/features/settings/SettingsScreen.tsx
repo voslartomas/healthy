@@ -1,29 +1,19 @@
 import React from 'react';
-import {
-  Alert,
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ScreenProps } from '../../app/navigation/types';
 import { BriefScreen, M, S, Section } from '../../components/brief';
+import { LanguageSelect } from '../coach/LanguageSelect';
 import { formatBytes, modelByLabel } from '../coach/ondevice/models';
 import { useModelStore } from '../coach/ondevice/useModelStore';
+import { CalorieGoalSection } from '../nutrition/CalorieGoalSection';
 import {
   connectGoogleHealth,
   disconnectGoogleHealth,
   isGoogleHealthClientConfigured,
   isGoogleHealthConnected,
 } from '../../health/googleAuth';
-import {
-  AiProvider,
-  PROVIDER_ORDER,
-  PROVIDERS,
-  useAppStore,
-} from '../../state/useAppStore';
+import { PROVIDERS, useAppStore } from '../../state/useAppStore';
 import { useHealthStore } from '../../state/useHealthStore';
 import { useTheme } from '../../theme/theme';
 
@@ -31,27 +21,20 @@ import { useTheme } from '../../theme/theme';
 export function SettingsScreen(_props: ScreenProps) {
   const t = useTheme();
   const c = t.colors;
-  const { aiProvider, model, apiKey } = useAppStore();
+  const model = useAppStore(s => s.model);
+  const aiProvider = useAppStore(s => s.aiProvider);
   const connected = useAppStore(s => s.connections.googleHealth);
   const setAiProvider = useAppStore(s => s.setAiProvider);
-  const setModel = useAppStore(s => s.setModel);
-  const setApiKey = useAppStore(s => s.setApiKey);
   const setConnection = useAppStore(s => s.setConnection);
   const refreshHealth = useHealthStore(s => s.refresh);
-  const provider = PROVIDERS[aiProvider];
-  const isOnDevice = aiProvider === 'ondevice';
   const clientConfigured = isGoogleHealthClientConfigured();
 
-  // Selecting a model sets the coach's model and, for on-device, points the
-  // download store at that tier (re-checking whether it's already on disk).
-  const selectModel = React.useCallback(
-    (label: string) => {
-      setModel(label);
-      const m = modelByLabel(label);
-      if (m) void useModelStore.getState().select(m.id);
-    },
-    [setModel],
-  );
+  // The coach is on-device only now — migrate any legacy cloud selection so the
+  // download card always reflects the local Gemma provider.
+  React.useEffect(() => {
+    if (aiProvider !== 'ondevice') setAiProvider('ondevice');
+  }, [aiProvider, setAiProvider]);
+  const modelLabel = modelByLabel(model)?.label ?? PROVIDERS.ondevice.models[0];
 
   React.useEffect(() => {
     isGoogleHealthConnected()
@@ -119,85 +102,18 @@ export function SettingsScreen(_props: ScreenProps) {
 
       {/* ── 02 AI coach ─────────────────────────────────────────────── */}
       <Section n="02" title="AI coach">
-        <View style={styles.providers}>
-          {PROVIDER_ORDER.map(key => (
-            <ProviderRow
-              key={key}
-              providerKey={key}
-              selected={key === aiProvider}
-              onSelect={() => setAiProvider(key)}
-            />
-          ))}
-        </View>
-
-        {!isOnDevice && (
-          <>
-            <Text
-              style={[M(700, 10, { ls: 1.6, color: c.fnt }), styles.fieldLabel]}
-            >
-              API KEY
-            </Text>
-            <TextInput
-              value={apiKey}
-              onChangeText={setApiKey}
-              secureTextEntry
-              autoCapitalize="none"
-              autoCorrect={false}
-              placeholder={provider.keyPlaceholder}
-              placeholderTextColor={c.fnt}
-              style={{
-                ...M(600, 13, { color: c.ink }),
-                borderWidth: 1,
-                borderColor: c.hair,
-                borderRadius: 12,
-                paddingHorizontal: 14,
-                paddingVertical: 12,
-              }}
-            />
-          </>
-        )}
-
-        <Text
-          style={[
-            M(700, 10, { ls: 1.6, color: c.fnt }),
-            styles.fieldLabel,
-            styles.modelGap,
-          ]}
-        >
-          MODEL
+        <Text style={[M(600, 10.5, { color: c.fnt }), styles.coachNote]}>
+          YOUR COACH RUNS FULLY ON YOUR PHONE — PRIVATE, NO API KEY, WORKS
+          OFFLINE ONCE THE MODEL IS DOWNLOADED.
         </Text>
-        <View style={styles.models}>
-          {provider.models.map(m => {
-            const on = m === model;
-            return (
-              <Pressable
-                key={m}
-                onPress={() => selectModel(m)}
-                style={[
-                  styles.modelPill,
-                  {
-                    borderColor: on ? c.ink : c.hair,
-                    backgroundColor: on ? c.ink : 'transparent',
-                  },
-                ]}
-              >
-                <Text
-                  style={M(700, 10.5, { ls: 0.4, color: on ? c.inv : c.mut })}
-                >
-                  {m.toUpperCase()}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-        {isOnDevice ? (
-          <OnDeviceModelCard modelLabel={model} />
-        ) : (
-          <Text style={[M(600, 10.5, { color: c.fnt }), styles.note]}>
-            KEY STAYS ON-DEVICE · USED ONLY FOR COACH
-          </Text>
-        )}
+
+        <OnDeviceModelCard modelLabel={modelLabel} />
+
+        <LanguageSelect />
       </Section>
+
+      {/* ── 03 Calorie goal ─────────────────────────────────────────── */}
+      <CalorieGoalSection n="03" />
     </BriefScreen>
   );
 }
@@ -328,43 +244,6 @@ function Toggle({
   );
 }
 
-function ProviderRow({
-  providerKey,
-  selected,
-  onSelect,
-}: {
-  providerKey: AiProvider;
-  selected: boolean;
-  onSelect: () => void;
-}) {
-  const t = useTheme();
-  const c = t.colors;
-  const p = PROVIDERS[providerKey];
-  return (
-    <Pressable
-      onPress={onSelect}
-      accessibilityRole="radio"
-      accessibilityState={{ selected }}
-      style={[styles.provRow, { borderBottomColor: c.hair }]}
-    >
-      <View style={[styles.radio, { borderColor: selected ? c.ink : c.hair }]}>
-        <View
-          style={[
-            styles.radioDot,
-            { backgroundColor: selected ? c.acc : 'transparent' },
-          ]}
-        />
-      </View>
-      <View style={styles.provText}>
-        <Text style={S(600, 13.5, { color: c.ink })}>{p.name}</Text>
-        <Text style={[M(600, 9.5, { ls: 1, color: c.fnt }), styles.status]}>
-          {p.tagline.toUpperCase()}
-        </Text>
-      </View>
-    </Pressable>
-  );
-}
-
 const styles = StyleSheet.create({
   conn: {
     flexDirection: 'row',
@@ -387,33 +266,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   knob: { width: 19, height: 19, borderRadius: 999 },
-  providers: { marginTop: 6 },
-  provRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 13,
-    borderBottomWidth: 1,
-  },
-  provText: { flex: 1, minWidth: 0 },
-  radio: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    borderWidth: 1.5,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  radioDot: { width: 8, height: 8, borderRadius: 4 },
-  fieldLabel: { marginTop: 16, marginBottom: 8 },
-  modelGap: { marginTop: 16 },
-  models: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  modelPill: {
-    paddingVertical: 10,
-    paddingHorizontal: 13,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
+  coachNote: { marginTop: 4, lineHeight: 16 },
   modelCard: {
     marginTop: 16,
     borderWidth: 1,

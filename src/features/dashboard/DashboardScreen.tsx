@@ -15,6 +15,7 @@ import { HealthSnapshot } from '../../health';
 import { useHealthStore } from '../../state/useHealthStore';
 import { useTheme } from '../../theme/theme';
 import { WeeklyGoalsCard } from '../goals/WeeklyGoalsCard';
+import { DailyBriefCard } from './DailyBriefCard';
 
 /** Decimal hours → "7:42". */
 function hoursToHm(hours: number): string {
@@ -132,6 +133,8 @@ export function DashboardScreen({ navigation }: ScreenProps) {
             : 'Open recovery detail, no recovery data'
         }
       />
+
+      <DailyBriefCard />
 
       {/* ── 01 Body ─────────────────────────────────────────────────── */}
       <Section n="01" title="Body" first>

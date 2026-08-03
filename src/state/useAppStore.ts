@@ -68,6 +68,9 @@ interface AppState {
   aiProvider: AiProvider;
   model: string;
   apiKey: string;
+  /** Language the coach replies in (English name, e.g. "Czech"); "Automatic"
+   * mirrors whatever language the user writes in. See features/coach/languages. */
+  coachLanguage: string;
   /** Connection state for health data sources (true once OAuth-connected). */
   connections: Record<HealthSource, boolean>;
   /** True once the user has passed the first-run Welcome screen. Persisted, so
@@ -76,6 +79,7 @@ interface AppState {
   setAiProvider: (provider: AiProvider) => void;
   setModel: (model: string) => void;
   setApiKey: (key: string) => void;
+  setCoachLanguage: (language: string) => void;
   setConnection: (source: HealthSource, connected: boolean) => void;
   setOnboarded: (onboarded: boolean) => void;
 }
@@ -92,9 +96,13 @@ const secureStorage = {
 export const useAppStore = create<AppState>()(
   persist(
     set => ({
-      aiProvider: 'anthropic',
-      model: PROVIDERS.anthropic.models[0],
+      // The coach runs fully on-device (Gemma via llama.rn) — no cloud provider,
+      // no API key. Cloud providers remain in PROVIDERS for the client but are
+      // no longer offered in Settings.
+      aiProvider: 'ondevice',
+      model: PROVIDERS.ondevice.models[0],
       apiKey: '',
+      coachLanguage: 'Automatic',
       connections: { googleHealth: false },
       onboarded: false,
       setOnboarded: onboarded => set({ onboarded }),
@@ -102,6 +110,7 @@ export const useAppStore = create<AppState>()(
         set({ aiProvider: provider, model: PROVIDERS[provider].models[0] }),
       setModel: model => set({ model }),
       setApiKey: apiKey => set({ apiKey }),
+      setCoachLanguage: language => set({ coachLanguage: language }),
       setConnection: (source, connected) =>
         set(state => ({
           connections: { ...state.connections, [source]: connected },
@@ -116,6 +125,7 @@ export const useAppStore = create<AppState>()(
         aiProvider: state.aiProvider,
         model: state.model,
         apiKey: state.apiKey,
+        coachLanguage: state.coachLanguage,
         onboarded: state.onboarded,
       }),
     },
