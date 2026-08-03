@@ -2,21 +2,21 @@
  * Voice-input hook for the coach composer: hold the mic, speak, and get the
  * transcript dropped into the text field for review before sending.
  *
- * Records a 16 kHz mono PCM WAV with expo-audio (the format whisper.cpp consumes
- * natively) and hands the file to {@link ./ondevice/useWhisperStore}'s
- * `transcribe`, which lazy-loads the on-device Whisper model. The transcription
- * language tracks the coach's selected language ({@link ./ondevice/whisperModels}
- * maps it to a Whisper code, or `'auto'`).
+ * Captures 16 kHz mono 16-bit audio and hands it to
+ * {@link ./ondevice/useWhisperStore}'s `transcribe`, which lazy-loads the
+ * on-device Whisper model. The transcription language tracks the coach's selected
+ * language ({@link ./ondevice/whisperModels} maps it to a Whisper code, or 'auto').
  *
- * Recording lives here rather than in the store because expo-audio's recorder is
- * a React hook; the store owns only the model file and the decode call.
- *
- * NOTE: iOS produces a true 16 kHz WAV via LINEARPCM. Android's expo-audio
- * recorder has no PCM/WAV output format, so Android voice input needs the
- * whisper.rn realtime PCM path (a follow-up) — this hook targets iOS today.
+ * Capture is platform-split because the two platforms expose PCM differently:
+ *  - iOS: expo-audio's LINEARPCM recorder writes a real WAV file → its URI.
+ *  - Android: expo-audio has no PCM output format, so we stream raw PCM off the
+ *    mic ({@link ./pcmRecorder}) and wrap it as a `data:audio/wav;base64,…` URI.
+ * Both feed the same engine. Recording lives here (not the store) because
+ * expo-audio's recorder is a React hook; the store owns only the model + decode.
  */
 
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 import {
   AudioQuality,
   IOSOutputFormat,
@@ -30,6 +30,9 @@ import {
 import { useAppStore } from '../../state/useAppStore';
 import { useWhisperStore } from './ondevice/useWhisperStore';
 import { whisperLangCode } from './ondevice/whisperModels';
+import { createPcmRecorder, PcmRecorder } from './pcmRecorder';
+
+const IS_ANDROID = Platform.OS === 'android';
 
 export type VoiceState = 'idle' | 'recording' | 'transcribing';
 
@@ -67,7 +70,10 @@ export interface VoiceInput {
 }
 
 export function useVoiceInput(onTranscript: (text: string) => void): VoiceInput {
+  // iOS records through this expo-audio recorder; on Android it's unused (the
+  // hook must still be called unconditionally to satisfy the rules of hooks).
   const recorder = useAudioRecorder(WAV_16K);
+  const pcmRef = useRef<PcmRecorder | null>(null);
   const ready = useWhisperStore(s => s.status === 'ready');
   const [state, setState] = useState<VoiceState>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -79,17 +85,27 @@ export function useVoiceInput(onTranscript: (text: string) => void): VoiceInput 
       setError('Microphone access is off. Enable it in Settings to use voice.');
       return;
     }
-    await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
-    await recorder.prepareToRecordAsync();
-    recorder.record();
+    if (IS_ANDROID) {
+      pcmRef.current ??= createPcmRecorder();
+      pcmRef.current.start();
+    } else {
+      await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
+      await recorder.prepareToRecordAsync();
+      recorder.record();
+    }
     setState('recording');
   }, [recorder]);
 
   const stopAndTranscribe = useCallback(async () => {
     setState('transcribing');
     try {
-      await recorder.stop();
-      const uri = recorder.uri;
+      let uri: string | null;
+      if (IS_ANDROID) {
+        uri = (await pcmRef.current?.stop()) ?? null;
+      } else {
+        await recorder.stop();
+        uri = recorder.uri;
+      }
       if (!uri) throw new Error('No audio was recorded.');
       const lang = whisperLangCode(useAppStore.getState().coachLanguage);
       const text = await useWhisperStore.getState().transcribe(uri, lang);
@@ -97,8 +113,12 @@ export function useVoiceInput(onTranscript: (text: string) => void): VoiceInput 
     } catch (err) {
       setError(String((err as Error)?.message ?? err));
     } finally {
-      // Give the audio session back so it doesn't hold the recording route.
-      await setAudioModeAsync({ allowsRecording: false }).catch(() => undefined);
+      // iOS only: give the audio session back so it doesn't hold the mic route.
+      if (!IS_ANDROID) {
+        await setAudioModeAsync({ allowsRecording: false }).catch(
+          () => undefined,
+        );
+      }
       setState('idle');
     }
   }, [recorder, onTranscript]);
