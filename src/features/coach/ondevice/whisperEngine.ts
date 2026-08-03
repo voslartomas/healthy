@@ -23,7 +23,7 @@
 interface WhisperCtx {
   transcribe(
     path: string,
-    opts: { language?: string },
+    opts: { language?: string; temperature?: number; beamSize?: number },
   ): { stop: () => Promise<void>; promise: Promise<{ result: string }> };
   release(): Promise<void>;
 }
@@ -94,6 +94,10 @@ class WhisperEngine implements SpeechToText {
     if (!this.ctx) throw new Error('No speech model loaded — call load() first.');
     const { promise } = this.ctx.transcribe(audioPath, {
       language: opts.language ?? 'auto',
+      // Deterministic decoding plus a small beam search: both lift accuracy on
+      // short utterances at a modest cost, which is fine for one-shot dictation.
+      temperature: 0,
+      beamSize: 2,
     });
     const { result } = await promise;
     return result.trim();

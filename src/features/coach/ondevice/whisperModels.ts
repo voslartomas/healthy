@@ -121,3 +121,30 @@ export function whisperLangCode(coachLanguage: string): string {
   if (!coachLanguage || coachLanguage === AUTOMATIC) return 'auto';
   return WHISPER_LANG[coachLanguage] ?? 'auto';
 }
+
+/**
+ * The device's language as a Whisper code, or `'auto'` if it can't be read.
+ * Derived from the resolved Intl locale (e.g. `'en-US'` → `'en'`), which Hermes
+ * provides without an extra dependency.
+ */
+export function deviceWhisperLang(): string {
+  try {
+    const locale = Intl.DateTimeFormat().resolvedOptions().locale;
+    const primary = locale.split(/[-_]/)[0]?.toLowerCase();
+    return primary && /^[a-z]{2}$/.test(primary) ? primary : 'auto';
+  } catch {
+    return 'auto';
+  }
+}
+
+/**
+ * Resolve the language to transcribe in. Prefers the coach's explicitly chosen
+ * language; when that's "Automatic", pins to the device language rather than
+ * letting Whisper auto-detect — its per-clip detection is unreliable on short
+ * utterances, so a stable prior (the user's own language) gives better results.
+ * Falls back to `'auto'` only when the device language is unknown.
+ */
+export function resolveVoiceLang(coachLanguage: string): string {
+  const code = whisperLangCode(coachLanguage);
+  return code === 'auto' ? deviceWhisperLang() : code;
+}

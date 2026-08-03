@@ -1,5 +1,7 @@
 import { AUTOMATIC, COACH_LANGUAGES } from '../src/features/coach/languages';
 import {
+  deviceWhisperLang,
+  resolveVoiceLang,
   WHISPER_MODEL,
   whisperLangCode,
 } from '../src/features/coach/ondevice/whisperModels';
@@ -31,5 +33,24 @@ describe('whisperLangCode', () => {
       const code = whisperLangCode(name);
       expect(code === 'auto' || /^[a-z]{2}$/.test(code)).toBe(true);
     }
+  });
+});
+
+describe('resolveVoiceLang', () => {
+  it('always yields a 2-letter code or auto', () => {
+    expect(deviceWhisperLang()).toMatch(/^([a-z]{2}|auto)$/);
+  });
+
+  it('prefers the explicit coach language over the device language', () => {
+    expect(resolveVoiceLang('Czech')).toBe('cs');
+    expect(resolveVoiceLang('German')).toBe('de');
+  });
+
+  it('falls back to the device language (never leaves it as auto-detect when known)', () => {
+    // In the Node/Jest runtime Intl resolves a locale, so Automatic pins to that
+    // device language rather than Whisper's per-clip auto-detect.
+    const auto = resolveVoiceLang(AUTOMATIC);
+    expect(auto).toMatch(/^([a-z]{2}|auto)$/);
+    expect(auto).toBe(deviceWhisperLang());
   });
 });

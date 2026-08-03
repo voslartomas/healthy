@@ -29,7 +29,7 @@ import {
 
 import { useAppStore } from '../../state/useAppStore';
 import { useWhisperStore } from './ondevice/useWhisperStore';
-import { whisperLangCode } from './ondevice/whisperModels';
+import { resolveVoiceLang } from './ondevice/whisperModels';
 import { createPcmRecorder, PcmRecorder } from './pcmRecorder';
 
 const IS_ANDROID = Platform.OS === 'android';
@@ -107,7 +107,7 @@ export function useVoiceInput(onTranscript: (text: string) => void): VoiceInput 
         uri = recorder.uri;
       }
       if (!uri) throw new Error('No audio was recorded.');
-      const lang = whisperLangCode(useAppStore.getState().coachLanguage);
+      const lang = resolveVoiceLang(useAppStore.getState().coachLanguage);
       const text = await useWhisperStore.getState().transcribe(uri, lang);
       if (text) onTranscript(text);
     } catch (err) {
