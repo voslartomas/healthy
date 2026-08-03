@@ -6,6 +6,7 @@ const GoogleSignin = {
   configure: jest.fn(),
   hasPlayServices: jest.fn(async () => true),
   signIn: jest.fn(async () => ({ type: 'cancelled', data: null })),
+  signInSilently: jest.fn(async () => ({ type: 'noSavedCredentialFound' })),
   signOut: jest.fn(async () => null),
   getCurrentUser: jest.fn(() => null),
   getTokens: jest.fn(async () => ({ idToken: null, accessToken: 'test-access' })),

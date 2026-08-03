@@ -111,18 +111,50 @@ export async function disconnectGoogleHealth(): Promise<void> {
   }
 }
 
-/** True when a user is signed in (connected). */
+/**
+ * Restore a persisted sign-in into the current process.
+ *
+ * The native SDK keeps the signed-in account across app launches, but
+ * `getCurrentUser()` stays null on a fresh start until `signInSilently()` runs —
+ * so without this, tokens (and therefore the health snapshot) are unavailable
+ * after every restart even though the user is still connected. De-duped via a
+ * shared promise so the concurrent startup reads trigger only one silent sign-in;
+ * a failed attempt isn't cached, so a later retry (or a fresh connect) can still
+ * succeed.
+ */
+let restoring: Promise<boolean> | null = null;
+async function ensureSignedIn(): Promise<boolean> {
+  if (GoogleSignin.getCurrentUser() != null) return true;
+  if (!restoring) {
+    restoring = (async () => {
+      try {
+        const res = await GoogleSignin.signInSilently();
+        return res?.type === 'success' || GoogleSignin.getCurrentUser() != null;
+      } catch {
+        // No saved credential, or silent sign-in unavailable — treat as signed out.
+        return false;
+      } finally {
+        restoring = null;
+      }
+    })();
+  }
+  return restoring;
+}
+
+/** True when a user is signed in (connected), restoring a persisted session
+ * first so it survives an app restart. */
 export async function isGoogleHealthConnected(): Promise<boolean> {
-  return GoogleSignin.getCurrentUser() != null;
+  return ensureSignedIn();
 }
 
 /**
  * Return a valid access token for the Google Health scopes, or null when no
- * user is signed in. Play services refreshes expired tokens transparently.
+ * user is signed in. Restores a persisted session first (so it works on a fresh
+ * launch), then Play services refreshes expired tokens transparently.
  */
 async function getAccessToken(): Promise<string | null> {
   try {
-    if (GoogleSignin.getCurrentUser() == null) return null;
+    if (!(await ensureSignedIn())) return null;
     const { accessToken } = await GoogleSignin.getTokens();
     return accessToken;
   } catch (err) {
@@ -146,4 +178,7 @@ export function registerGoogleHealthAuth(): void {
     iosClientId: iosClientId(),
   });
   setGoogleHealthTokenProvider(getAccessToken);
+  // Kick off session restore up-front so the first health read after launch
+  // already has a token instead of returning an empty snapshot.
+  void ensureSignedIn();
 }

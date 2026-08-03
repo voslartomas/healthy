@@ -47,7 +47,10 @@ function BriefTabBar({ state, navigation }: BottomTabBarProps) {
         {
           backgroundColor: c.bg,
           borderTopColor: c.hair,
-          paddingBottom: insets.bottom + 12,
+          // Sit closer to the home indicator than the full safe-area inset — the
+          // inset over-reserves for a tab bar. Trim it, but keep a floor so the
+          // labels never touch the indicator (or the edge on non-notched phones).
+          paddingBottom: Math.max(insets.bottom - 16, 6),
         },
       ]}
     >
@@ -130,6 +133,6 @@ const styles = StyleSheet.create({
     flex: 1,
     alignItems: 'center',
     gap: 5,
-    paddingVertical: 6,
+    paddingVertical: 2,
   },
 });
