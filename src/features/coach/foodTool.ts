@@ -21,7 +21,8 @@ const MEAL_TYPES = ['BREAKFAST', 'LUNCH', 'DINNER', 'SNACK'];
 const ENTRY_FIELDS = {
   name: {
     type: 'string',
-    description: 'Short meal description, e.g. "Breakfast — 4 eggs, 2 slices of bread".',
+    description:
+      'Short meal description, e.g. "Breakfast — 4 eggs, 2 slices of bread".',
   },
   kcal: { type: 'number', description: 'Total calories for this entry.' },
   proteinG: { type: 'number', description: 'Protein in grams.' },
@@ -71,7 +72,7 @@ export const FOOD_TOOLS: ToolSpec[] = [
   {
     name: 'list_food_log',
     description:
-      "List the food entries already logged for today, each with its `id`, name, " +
+      'List the food entries already logged for today, each with its `id`, name, ' +
       'calories and time. Call this before updating or deleting an entry so you can ' +
       'reference it by id.',
     parameters: { type: 'object', properties: {} },
@@ -87,7 +88,8 @@ export const FOOD_TOOLS: ToolSpec[] = [
       properties: {
         id: {
           type: 'string',
-          description: 'The entry id from list_food_log (or a prior log_food result).',
+          description:
+            'The entry id from list_food_log (or a prior log_food result).',
         },
         ...ENTRY_FIELDS,
       },
@@ -104,7 +106,8 @@ export const FOOD_TOOLS: ToolSpec[] = [
       properties: {
         id: {
           type: 'string',
-          description: 'The entry id from list_food_log (or a prior log_food result).',
+          description:
+            'The entry id from list_food_log (or a prior log_food result).',
         },
       },
       required: ['id'],
@@ -176,7 +179,11 @@ export function makeFoodToolset(onLog: (summary: string) => void): FoodToolset {
         ? (args.entries as Record<string, unknown>[])
         : [];
       if (entries.length === 0) {
-        return JSON.stringify({ ok: false, error: 'No entries provided.' });
+        return JSON.stringify({
+          ok: false,
+          error:
+            'No entries provided. Call log_food again with args.entries as a non-empty array, each item having at least "name" and "kcal", e.g. {"entries":[{"name":"oatmeal","kcal":300,"proteinG":10}]}.',
+        });
       }
       const results = [];
       for (const raw of entries) {

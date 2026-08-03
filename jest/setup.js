@@ -8,3 +8,37 @@ jest.mock(
   'react-native-safe-area-context',
   () => require('react-native-safe-area-context/jest/mock').default,
 );
+
+// The native splash module has no behaviour to exercise in tests; stub its
+// async hold/hide calls so importing App doesn't pull the native side in.
+jest.mock('expo-splash-screen', () => ({
+  preventAutoHideAsync: jest.fn(() => Promise.resolve()),
+  hideAsync: jest.fn(() => Promise.resolve()),
+}));
+
+// On-device coach native stack. The engine (llama.rn) is only ever `require`d
+// lazily inside llamaEngine.load(), but stub it so any accidental import is
+// inert. expo-file-system/legacy backs the model download store; the default
+// mock reports "no model on disk" and a no-op resumable — individual tests that
+// exercise download progress override createDownloadResumable themselves.
+jest.mock('llama.rn', () => ({
+  initLlama: jest.fn(() =>
+    Promise.resolve({
+      completion: jest.fn(() => Promise.resolve({ text: '{"reply":"ok"}' })),
+      release: jest.fn(() => Promise.resolve()),
+    }),
+  ),
+}));
+
+jest.mock('expo-file-system/legacy', () => ({
+  documentDirectory: 'file:///doc/',
+  makeDirectoryAsync: jest.fn(() => Promise.resolve()),
+  getInfoAsync: jest.fn(() => Promise.resolve({ exists: false })),
+  deleteAsync: jest.fn(() => Promise.resolve()),
+  createDownloadResumable: jest.fn(() => ({
+    downloadAsync: jest.fn(() =>
+      Promise.resolve({ uri: 'file:///doc/models/model.gguf' }),
+    ),
+    cancelAsync: jest.fn(() => Promise.resolve()),
+  })),
+}));

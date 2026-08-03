@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "HealthApp",
+    "name": "Health Buddy",
     "slug": "healthapp",
     "version": "0.0.1",
     "orientation": "portrait",
@@ -18,7 +18,22 @@
       "expo-sqlite",
       "expo-secure-store",
       "expo-web-browser",
-      "@react-native-google-signin/google-signin"
+      "@react-native-google-signin/google-signin",
+      [
+        "llama.rn",
+        {
+          "enableEntitlements": true
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/splash-icon.png",
+          "imageWidth": 200,
+          "backgroundColor": "#FAF6EF",
+          "dark": { "backgroundColor": "#161209" }
+        }
+      ]
     ],
     "extra": {
       "//": "Google Sign-In on Android needs no client ID in app config — the Android OAuth client is bound in Cloud Console via package name (cz.healthapp) + SHA-1 signing fingerprint. googleWebClientId below is only used for iOS/offline-access if ever provided; the legacy googleClientId from the browser PKCE flow is unused.",

@@ -1,17 +1,19 @@
 import React from 'react';
 import { screen } from '@testing-library/react-native';
 
-import { renderWithProviders } from '../jest/renderWithProviders';
+import { mockNav, renderWithProviders } from '../jest/renderWithProviders';
 import { CoachScreen } from '../src/features/coach/CoachScreen';
 import { useAppStore } from '../src/state/useAppStore';
 
 describe('CoachScreen', () => {
   it('shows the active AI provider in the status line', async () => {
     useAppStore.getState().setAiProvider('anthropic');
-    await renderWithProviders(<CoachScreen />);
+    await renderWithProviders(<CoachScreen navigation={mockNav()} />);
 
-    expect(screen.getByText('Coach')).toBeOnTheScreen();
-    expect(screen.getByText(/Anthropic Claude/)).toBeOnTheScreen();
+    expect(screen.getByText(/ANTHROPIC CLAUDE/)).toBeOnTheScreen();
+    expect(
+      screen.getByPlaceholderText('Tell coach what you ate…'),
+    ).toBeOnTheScreen();
   });
 });
 
@@ -34,5 +36,12 @@ describe('useAppStore', () => {
     expect(useAppStore.getState().connections.googleHealth).toBe(true);
     useAppStore.getState().setConnection('googleHealth', false);
     expect(useAppStore.getState().connections.googleHealth).toBe(false);
+  });
+
+  it('marks the user onboarded once past the Welcome screen', () => {
+    expect(useAppStore.getState().onboarded).toBe(false);
+    useAppStore.getState().setOnboarded(true);
+    expect(useAppStore.getState().onboarded).toBe(true);
+    useAppStore.getState().setOnboarded(false);
   });
 });

@@ -1,13 +1,6 @@
-import { BottomTabBarHeightContext } from '@react-navigation/bottom-tabs';
-import React, {
-  useCallback,
-  useContext,
-  useEffect,
-  useRef,
-  useState,
-} from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import {
-  Keyboard,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
@@ -16,28 +9,28 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { HeaderHeightContext } from '@react-navigation/elements';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Svg, { Path } from 'react-native-svg';
 
-import { Icon } from '../../components/Icon';
+import { ScreenProps } from '../../app/navigation/types';
+import { M, S } from '../../components/brief';
 import { PROVIDERS, useAppStore } from '../../state/useAppStore';
 import { useHealthStore } from '../../state/useHealthStore';
-import { monoFont, radii, useTheme } from '../../theme/theme';
+import { useTheme } from '../../theme/theme';
 import { CoachError, CoachMessage, runCoach } from './aiClient';
 import { makeFoodToolset } from './foodTool';
 
 const GREETING =
-  "Hey! Tell me what you ate and I'll log the calories and macros to Google Health for you — e.g. \u201cBreakfast: 4 eggs and 2 slices of toast.\u201d You can also ask me to tweak something I just logged.";
+  "Hey! Tell me what you ate and I'll log the calories and macros to Google Health for you — e.g. “Breakfast: 4 eggs and 2 slices of toast.” You can also ask me to tweak something I just logged.";
 
-/** A rendered chat line. `system` lines are local notes (log confirmations,
- * errors) — shown to the user but never sent back to the model as history. */
 interface ChatBubble {
   id: string;
   from: 'ai' | 'me' | 'system';
   text: string;
 }
 
-/** Build the coach system prompt, grounding it in today's logged nutrition so
- * it can answer "how much protein left?" without a tool call. */
+/** Build the coach system prompt, grounding it in today's logged nutrition. */
 function buildSystemPrompt(): string {
   const n = useHealthStore.getState().snapshot.nutrition;
   const eaten = n
@@ -55,17 +48,17 @@ function buildSystemPrompt(): string {
   ].join(' ');
 }
 
-/** AI coach chat: a live, provider-backed conversation that can log food to
- * Google Health via tool calls. Provider, model, and key come from Settings. */
-export function CoachScreen() {
+/** AI coach chat, presented as a native modal screen. A live, provider-backed
+ * conversation that logs food to Google Health via tool calls. Provider, model
+ * and key come from Setup. */
+export function CoachScreen(_props: ScreenProps) {
   const t = useTheme();
+  const c = t.colors;
   const insets = useSafeAreaInsets();
+  // Read the context directly (not useHeaderHeight, which throws outside a
+  // navigator) so the screen also renders in isolation under tests.
+  const headerHeight = React.useContext(HeaderHeightContext) ?? 0;
   const provider = useAppStore(s => s.aiProvider);
-  // Offset the keyboard-avoiding view by the tab bar so the composer sits right
-  // above the keyboard. Context is null when rendered outside a tab navigator
-  // (e.g. in tests), so fall back to 0.
-  const tabBarHeight = useContext(BottomTabBarHeightContext) ?? 0;
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   const idRef = useRef(1);
   const [messages, setMessages] = useState<ChatBubble[]>([
@@ -83,102 +76,66 @@ export function CoachScreen() {
     [],
   );
 
-  // Lift the composer above the keyboard. Expo SDK 54+ forces edge-to-edge on
-  // Android, where `adjustResize` no longer shrinks the RN view, so RN's
-  // KeyboardAvoidingView can't detect the keyboard — we track its height and
-  // pad the screen bottom ourselves (minus the tab bar it already covers).
-  useEffect(() => {
-    const showEvt =
-      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvt =
-      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const onShow = Keyboard.addListener(showEvt, e => {
-      setKeyboardHeight(e.endCoordinates?.height ?? 0);
-      scrollToEnd();
-    });
-    const onHide = Keyboard.addListener(hideEvt, () => setKeyboardHeight(0));
-    return () => {
-      onShow.remove();
-      onHide.remove();
-    };
-  }, [scrollToEnd]);
-
   const addBubble = useCallback((from: ChatBubble['from'], text: string) => {
     setMessages(prev => [...prev, { id: String(idRef.current++), from, text }]);
   }, []);
 
-  const send = useCallback(async () => {
-    const value = input.trim();
-    if (!value || busy) return;
-    setInput('');
+  const send = useCallback(
+    async (raw: string) => {
+      const value = raw.trim();
+      if (!value || busy) return;
+      setInput('');
 
-    // Snapshot the model-visible history (user + ai only) before this message.
-    const history: CoachMessage[] = messages
-      .filter(m => m.from === 'ai' || m.from === 'me')
-      .map(m => ({
-        role: m.from === 'me' ? 'user' : 'assistant',
-        content: m.text,
-      }));
+      const history: CoachMessage[] = messages
+        .filter(m => m.from === 'ai' || m.from === 'me')
+        .map(m => ({
+          role: m.from === 'me' ? 'user' : 'assistant',
+          content: m.text,
+        }));
 
-    addBubble('me', value);
-    setBusy(true);
-    scrollToEnd();
-
-    const { apiKey, model, aiProvider } = useAppStore.getState();
-    const toolset = makeFoodToolset(summary => addBubble('system', summary));
-
-    try {
-      const reply = await runCoach(
-        { provider: aiProvider, model, apiKey },
-        {
-          system: buildSystemPrompt(),
-          history: [...history, { role: 'user', content: value }],
-          tools: toolset.tools,
-          exec: toolset.exec,
-        },
-      );
-      if (reply) addBubble('ai', reply);
-    } catch (err) {
-      const msg =
-        err instanceof CoachError
-          ? err.message
-          : 'Something went wrong reaching the AI provider. Check your connection and try again.';
-      addBubble('system', msg);
-    } finally {
-      setBusy(false);
+      addBubble('me', value);
+      setBusy(true);
       scrollToEnd();
-    }
-  }, [input, busy, messages, addBubble, scrollToEnd]);
 
-  const liftBy = Math.max(keyboardHeight - tabBarHeight, 0);
+      const { apiKey, model, aiProvider } = useAppStore.getState();
+      const toolset = makeFoodToolset(summary => addBubble('system', summary));
+
+      try {
+        const reply = await runCoach(
+          { provider: aiProvider, model, apiKey },
+          {
+            system: buildSystemPrompt(),
+            history: [...history, { role: 'user', content: value }],
+            tools: toolset.tools,
+            exec: toolset.exec,
+          },
+        );
+        if (reply) addBubble('ai', reply);
+      } catch (err) {
+        const msg =
+          err instanceof CoachError
+            ? err.message
+            : 'Something went wrong reaching the AI provider. Check your connection and try again.';
+        addBubble('system', msg);
+      } finally {
+        setBusy(false);
+        scrollToEnd();
+      }
+    },
+    [busy, messages, addBubble, scrollToEnd],
+  );
 
   return (
-    <View
-      style={[
-        styles.root,
-        { backgroundColor: t.colors.bg, paddingBottom: liftBy },
-      ]}
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={headerHeight}
+      style={[styles.root, { backgroundColor: c.bg }]}
     >
-      <View
-        style={[
-          styles.head,
-          { borderBottomColor: t.colors.border, paddingTop: insets.top + 8 },
-        ]}
-      >
-        <View style={[styles.cava, { backgroundColor: t.colors.accent }]}>
-          <Icon name="sparkle" size={22} color={t.colors.onAccent} />
-        </View>
-        <View>
-          <Text style={[styles.name, { color: t.colors.fg }]}>Coach</Text>
-          <View style={styles.statusRow}>
-            <View
-              style={[styles.statusDot, { backgroundColor: t.colors.rec }]}
-            />
-            <Text style={[styles.status, { color: t.colors.rec }]}>
-              Nutrition coach · {PROVIDERS[provider].name}
-            </Text>
-          </View>
-        </View>
+      <View style={[styles.status, { borderBottomColor: c.hair }]}>
+        <Sparkle color={c.acc} size={14} />
+        <Text numberOfLines={1} style={M(600, 9, { ls: 1, color: c.fnt })}>
+          {PROVIDERS[provider].name.toUpperCase()}
+        </Text>
       </View>
 
       <ScrollView
@@ -191,195 +148,184 @@ export function CoachScreen() {
       >
         {messages.map(m =>
           m.from === 'system' ? (
-            <SystemNote key={m.id} text={m.text} />
+            <View key={m.id} style={styles.sysNote}>
+              <Text
+                selectable
+                style={M(700, 11, { color: c.mut, align: 'center' })}
+              >
+                {m.text}
+              </Text>
+            </View>
           ) : (
-            <Bubble key={m.id} from={m.from} text={m.text} />
+            <View
+              key={m.id}
+              style={[
+                styles.bubble,
+                m.from === 'me'
+                  ? {
+                      alignSelf: 'flex-end',
+                      backgroundColor: c.ink,
+                      borderBottomRightRadius: 4,
+                    }
+                  : {
+                      alignSelf: 'flex-start',
+                      borderWidth: 1,
+                      borderColor: c.hair,
+                      borderBottomLeftRadius: 4,
+                    },
+              ]}
+            >
+              <Text
+                selectable
+                style={S(400, 13, {
+                  lh: 19,
+                  color: m.from === 'me' ? c.inv : c.ink,
+                })}
+              >
+                {m.text}
+              </Text>
+            </View>
           ),
         )}
-        {busy && (
+        {busy ? (
           <View
             style={[
               styles.bubble,
-              styles.ai,
               styles.typing,
-              { backgroundColor: t.colors.surface, borderColor: t.colors.border },
+              { alignSelf: 'flex-start', borderColor: c.hair },
             ]}
-            accessibilityRole="text"
-            accessibilityLabel="Coach is typing"
           >
             {[0, 1, 2].map(i => (
               <View
                 key={i}
-                style={[styles.typingDot, { backgroundColor: t.colors.faint }]}
+                style={[styles.typingDot, { backgroundColor: c.fnt }]}
               />
             ))}
           </View>
-        )}
+        ) : null}
       </ScrollView>
 
       <View
         style={[
           styles.composer,
-          {
-            borderTopColor: t.colors.border,
-            backgroundColor: t.colors.surface,
-          },
+          { borderTopColor: c.hair, paddingBottom: insets.bottom + 12 },
         ]}
       >
         <TextInput
           value={input}
           onChangeText={setInput}
-          onSubmitEditing={send}
+          onSubmitEditing={() => send(input)}
           placeholder="Tell coach what you ate…"
-          placeholderTextColor={t.colors.faint}
+          placeholderTextColor={c.fnt}
           accessibilityLabel="Message your coach"
           returnKeyType="send"
           editable={!busy}
-          multiline
           style={[
             styles.input,
-            { backgroundColor: t.colors.surface2, color: t.colors.fg },
+            S(500, 13.5, { color: c.ink }),
+            { borderColor: c.hair },
           ]}
         />
         <Pressable
-          onPress={send}
+          onPress={() => send(input)}
           disabled={!input.trim() || busy}
+          accessibilityRole="button"
           accessibilityLabel="Send"
           style={[
-            styles.cbtn,
-            { backgroundColor: t.colors.accent },
-            (!input.trim() || busy) && { opacity: 0.45 },
+            styles.send,
+            {
+              backgroundColor: c.ink,
+              opacity: !input.trim() || busy ? 0.45 : 1,
+            },
           ]}
         >
-          <Icon name="send" size={19} color={t.colors.onAccent} strokeWidth={2} />
+          <Svg width={18} height={18} viewBox="0 0 24 24">
+            <Path
+              d="M4 12l16-8-6 8 6 8z"
+              fill="none"
+              stroke={c.inv}
+              strokeWidth={2}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </Svg>
         </Pressable>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
-function Bubble({ from, text }: { from: 'ai' | 'me'; text: string }) {
-  const t = useTheme();
-  const mine = from === 'me';
+/** A soft four-point AI sparkle (concave sides) — the coach mark. */
+export function Sparkle({
+  color,
+  size = 16,
+}: {
+  color: string;
+  size?: number;
+}) {
   return (
-    <View
-      style={[
-        styles.bubble,
-        mine ? styles.me : styles.ai,
-        mine
-          ? { backgroundColor: t.colors.accent }
-          : {
-              backgroundColor: t.colors.surface,
-              borderColor: t.colors.border,
-              borderWidth: StyleSheet.hairlineWidth,
-            },
-      ]}
-    >
-      <Text
-        selectable
-        style={[
-          styles.bubbleText,
-          { color: mine ? t.colors.onAccent : t.colors.fg },
-        ]}
-      >
-        {text}
-      </Text>
-    </View>
-  );
-}
-
-/** A centered, muted note for log confirmations and errors. */
-function SystemNote({ text }: { text: string }) {
-  const t = useTheme();
-  return (
-    <View style={[styles.sysNote, { backgroundColor: t.colors.surface2 }]}>
-      <Text selectable style={[styles.sysText, { color: t.colors.muted }]}>
-        {text}
-      </Text>
-    </View>
+    <Svg width={size} height={size} viewBox="0 0 24 24">
+      <Path
+        d="M12 3c1 5 3 7 8 9-5 2-7 4-8 9-1-5-3-7-8-9 5-2 7-4 8-9z"
+        fill={color}
+      />
+    </Svg>
   );
 }
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  head: {
+  status: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 18,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
   },
-  cava: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  name: { fontSize: 15, fontWeight: '800' },
-  statusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    marginTop: 1,
-  },
-  statusDot: { width: 7, height: 7, borderRadius: 3.5 },
-  status: { fontSize: 11.5, fontWeight: '700' },
   chat: { flex: 1 },
-  chatContent: { padding: 18, gap: 10 },
+  chatContent: { padding: 20, gap: 10 },
   bubble: {
     maxWidth: '82%',
     paddingVertical: 11,
     paddingHorizontal: 14,
-    borderRadius: 18,
+    borderRadius: 14,
   },
-  ai: { alignSelf: 'flex-start', borderBottomLeftRadius: 5 },
-  me: { alignSelf: 'flex-end', borderBottomRightRadius: 5 },
-  bubbleText: { fontSize: 13.5, lineHeight: 20 },
   sysNote: {
     alignSelf: 'center',
     maxWidth: '90%',
     paddingVertical: 7,
     paddingHorizontal: 12,
-    borderRadius: 12,
-  },
-  sysText: {
-    fontFamily: monoFont,
-    fontSize: 11,
-    fontWeight: '700',
-    textAlign: 'center',
   },
   typing: {
     flexDirection: 'row',
     gap: 5,
     alignItems: 'center',
     paddingVertical: 15,
-    borderWidth: StyleSheet.hairlineWidth,
+    borderWidth: 1,
   },
-  typingDot: { width: 7, height: 7, borderRadius: 3.5 },
+  typingDot: { width: 6, height: 6, borderRadius: 3 },
   composer: {
     flexDirection: 'row',
-    alignItems: 'flex-end',
+    alignItems: 'center',
     gap: 10,
     paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 10,
-    borderTopWidth: StyleSheet.hairlineWidth,
-  },
-  cbtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
+    paddingTop: 12,
+    borderTopWidth: 1,
   },
   input: {
     flex: 1,
-    maxHeight: 120,
-    borderRadius: radii.pill,
+    minWidth: 0,
+    borderWidth: 1,
+    borderRadius: 999,
     paddingVertical: 12,
     paddingHorizontal: 16,
-    fontSize: 14,
+  },
+  send: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

@@ -1,28 +1,83 @@
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import React from 'react';
+import { View } from 'react-native';
 
 import { CardioScreen } from '../../features/cardio/CardioScreen';
+import { CoachOverlay } from '../../features/coach/CoachOverlay';
+import { CoachScreen } from '../../features/coach/CoachScreen';
+import { GoalDefineScreen } from '../../features/goals/GoalDefineScreen';
 import { RecoveryScreen } from '../../features/recovery/RecoveryScreen';
-import { SettingsScreen } from '../../features/settings/SettingsScreen';
 import { SleepScreen } from '../../features/sleep/SleepScreen';
+import { useTheme } from '../../theme/theme';
+import {
+  CardioRight,
+  CardioTitle,
+  RecoveryRight,
+  RecoveryTitle,
+} from './headers';
+import { HeaderClose } from './HeaderClose';
+import { headerOptions } from './headerOptions';
 import { RootTabs } from './RootTabs';
 import { asScreen, RootStackParamList } from './types';
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 
 /**
- * Root navigator: the tab bar plus the detail/settings screens that push over
- * it (Recovery, Cardio, Settings). Detail headers are provided by each screen,
- * so the native header stays hidden.
+ * Root navigator: the numbered tab brief plus the detail screens that push over
+ * it (Recovery, Cardio). Detail screens carry a native header with a back
+ * button; the tab host provides its own per-tab headers. The Coach FAB + sheet
+ * is mounted once on top so it floats over every screen, matching the v3 design.
  */
 export function RootStack() {
+  const t = useTheme();
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="Tabs" component={RootTabs} />
-      <Stack.Screen name="Recovery" component={asScreen(RecoveryScreen)} />
-      <Stack.Screen name="Cardio" component={asScreen(CardioScreen)} />
-      <Stack.Screen name="Sleep" component={asScreen(SleepScreen)} />
-      <Stack.Screen name="Settings" component={asScreen(SettingsScreen)} />
-    </Stack.Navigator>
+    <View style={{ flex: 1 }}>
+      <Stack.Navigator
+        screenOptions={{
+          ...headerOptions(t.colors),
+          headerBackButtonDisplayMode: 'minimal',
+        }}
+      >
+        <Stack.Screen
+          name="Tabs"
+          component={RootTabs}
+          options={{ headerShown: false }}
+        />
+        <Stack.Screen
+          name="Recovery"
+          component={asScreen(RecoveryScreen)}
+          options={{ headerTitle: RecoveryTitle, headerRight: RecoveryRight }}
+        />
+        <Stack.Screen
+          name="Cardio"
+          component={asScreen(CardioScreen)}
+          options={{ headerTitle: CardioTitle, headerRight: CardioRight }}
+        />
+        <Stack.Screen
+          name="Sleep"
+          component={asScreen(SleepScreen)}
+          options={{ title: 'Sleep' }}
+        />
+        <Stack.Screen
+          name="Coach"
+          component={asScreen(CoachScreen)}
+          options={({ navigation }) => ({
+            presentation: 'modal',
+            title: 'Coach',
+            headerRight: () => <HeaderClose onPress={navigation.goBack} />,
+          })}
+        />
+        <Stack.Screen
+          name="DefineGoal"
+          component={asScreen(GoalDefineScreen)}
+          options={({ navigation }) => ({
+            presentation: 'modal',
+            title: 'Define goal',
+            headerRight: () => <HeaderClose onPress={navigation.goBack} />,
+          })}
+        />
+      </Stack.Navigator>
+      <CoachOverlay />
+    </View>
   );
 }

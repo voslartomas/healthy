@@ -3,6 +3,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { IconName } from '../components/Icon';
+import { GEMMA_MODELS } from '../features/coach/ondevice/models';
 
 /** Selectable AI coach providers, mirroring the design's provider list. */
 export type AiProvider = 'anthropic' | 'openai' | 'gemini' | 'ondevice';
@@ -44,10 +45,10 @@ export const PROVIDERS: Record<AiProvider, ProviderInfo> = {
   },
   ondevice: {
     key: 'ondevice',
-    name: 'On-device',
-    tagline: 'Private · no key needed',
+    name: 'On-device Gemma',
+    tagline: 'Private · runs on your phone · no key',
     icon: 'ondevice',
-    models: ['Apple Intelligence', 'Gemini Nano'],
+    models: GEMMA_MODELS.map(m => m.label),
     keyPlaceholder: '',
   },
 };
@@ -69,10 +70,14 @@ interface AppState {
   apiKey: string;
   /** Connection state for health data sources (true once OAuth-connected). */
   connections: Record<HealthSource, boolean>;
+  /** True once the user has passed the first-run Welcome screen. Persisted, so
+   * the brief opens straight to Today on every later launch. */
+  onboarded: boolean;
   setAiProvider: (provider: AiProvider) => void;
   setModel: (model: string) => void;
   setApiKey: (key: string) => void;
   setConnection: (source: HealthSource, connected: boolean) => void;
+  setOnboarded: (onboarded: boolean) => void;
 }
 
 /** SecureStore-backed storage for zustand persist. The API key is a secret, so
@@ -91,6 +96,8 @@ export const useAppStore = create<AppState>()(
       model: PROVIDERS.anthropic.models[0],
       apiKey: '',
       connections: { googleHealth: false },
+      onboarded: false,
+      setOnboarded: onboarded => set({ onboarded }),
       setAiProvider: provider =>
         set({ aiProvider: provider, model: PROVIDERS[provider].models[0] }),
       setModel: model => set({ model }),
@@ -109,6 +116,7 @@ export const useAppStore = create<AppState>()(
         aiProvider: state.aiProvider,
         model: state.model,
         apiKey: state.apiKey,
+        onboarded: state.onboarded,
       }),
     },
   ),

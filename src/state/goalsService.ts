@@ -1,4 +1,4 @@
-import { GoalSourceKey } from '../data/goalSources';
+import { EnergyMetricKey, GoalSourceKey } from '../data/goalSources';
 import { deleteGoalWeeks } from '../db/goalHistoryRepository';
 import { deleteGoal, insertGoal, loadGoals } from '../db/goalsRepository';
 import { syncGoalHistory } from './goalHistoryService';
@@ -33,6 +33,8 @@ export interface NewGoalInput {
   match?: GoalMatch;
   /** Minimum session length (minutes) to count; activity goals only. */
   minDurationMin?: number;
+  /** Energy-balance goal ('deficit'). Set this instead of `source`/`match`. */
+  metric?: EnergyMetricKey;
 }
 
 /** Create a goal: write-through to SQLite, then update the store. */

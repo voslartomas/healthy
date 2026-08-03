@@ -71,7 +71,11 @@ describe('nutrition read mapping', () => {
 });
 
 describe('nutritionToday', () => {
-  const entry = (start: number, kcal: number, name: string): NutritionEntry => ({
+  const entry = (
+    start: number,
+    kcal: number,
+    name: string,
+  ): NutritionEntry => ({
     start,
     end: start,
     name,
@@ -98,7 +102,9 @@ describe('nutritionToday', () => {
     expect(summary!.proteinG).toBe(20);
     expect(summary!.meals.map(m => m.name)).toEqual(['breakfast', 'lunch']);
 
-    expect(nutritionToday([entry(startOfToday - DAY, 500, 'old')], NOW)).toBeNull();
+    expect(
+      nutritionToday([entry(startOfToday - DAY, 500, 'old')], NOW),
+    ).toBeNull();
   });
 });
 
@@ -125,7 +131,14 @@ describe('food write payload + writeFoodEntry', () => {
 
   it('includes macros + mealType when provided', () => {
     const body = buildNutritionLogPayload(
-      { name: 'Shake', kcal: 220, mealType: 'SNACK', proteinG: 30, carbsG: 8, fatG: 3 },
+      {
+        name: 'Shake',
+        kcal: 220,
+        mealType: 'SNACK',
+        proteinG: 30,
+        carbsG: 8,
+        fatG: 3,
+      },
       NOW,
     );
     const log = body.nutritionLog as Record<string, unknown>;
@@ -148,10 +161,20 @@ describe('food write payload + writeFoodEntry', () => {
       seenMethod = init?.method ?? '';
       seenAuth = init?.headers?.Authorization ?? '';
       seenBody = init?.body ?? '';
-      return { ok: true, status: 200, json: async () => ({}), text: async () => '' };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({}),
+        text: async () => '',
+      };
     };
 
-    const ok = await writeFoodEntry('tok-123', { name: 'Egg', kcal: 78 }, NOW, fetchStub);
+    const ok = await writeFoodEntry(
+      'tok-123',
+      { name: 'Egg', kcal: 78 },
+      NOW,
+      fetchStub,
+    );
     expect(ok).toBe(true);
     expect(seenUrl).toBe(
       'https://health.googleapis.com/v4/users/me/dataTypes/nutrition-log/dataPoints',
@@ -168,11 +191,15 @@ describe('food write payload + writeFoodEntry', () => {
       json: async () => ({}),
       text: async () => 'denied',
     });
-    expect(await writeFoodEntry('t', { name: 'x', kcal: 1 }, NOW, denied)).toBe(false);
+    expect(await writeFoodEntry('t', { name: 'x', kcal: 1 }, NOW, denied)).toBe(
+      false,
+    );
 
     const boom: FetchLike = async () => {
       throw new Error('network down');
     };
-    expect(await writeFoodEntry('t', { name: 'x', kcal: 1 }, NOW, boom)).toBe(false);
+    expect(await writeFoodEntry('t', { name: 'x', kcal: 1 }, NOW, boom)).toBe(
+      false,
+    );
   });
 });

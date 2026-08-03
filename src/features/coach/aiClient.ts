@@ -55,9 +55,10 @@ export interface RunOptions {
 /** A user-facing error whose message is safe to show in a chat bubble. */
 export class CoachError extends Error {}
 
-/** Hard cap on tool-call rounds so a misbehaving model can't loop forever. */
-const MAX_TOOL_ROUNDS = 6;
-const MAX_TOKENS = 1024;
+/** Hard cap on tool-call rounds so a misbehaving model can't loop forever.
+ * Exported so the on-device runner shares the exact same bound. */
+export const MAX_TOOL_ROUNDS = 6;
+export const MAX_TOKENS = 1024;
 
 /** Display model name → provider API model id. Falls back to the raw name. */
 const MODEL_IDS: Record<string, string> = {
@@ -85,9 +86,14 @@ export async function runCoach(
   opts: RunOptions,
 ): Promise<string> {
   if (cfg.provider === 'ondevice') {
-    throw new CoachError(
-      "On-device models aren't available yet. Pick Anthropic, OpenAI, or Gemini in Settings and add an API key.",
-    );
+    // Lazily required so the native `llama.rn` / filesystem stack is only pulled
+    // in when the user actually runs the on-device coach (keeps cloud paths and
+    // most tests free of the native runtime). A plain require (not `import()`)
+    // works under both Metro and Jest's CommonJS environment.
+    const { runOnDevice } =
+      // eslint-disable-next-line @typescript-eslint/no-require-imports -- lazy, on purpose
+      require('./ondevice/runner') as typeof import('./ondevice/runner');
+    return runOnDevice(cfg, opts);
   }
   if (!cfg.apiKey.trim()) {
     throw new CoachError(
@@ -128,15 +134,18 @@ async function httpError(
     );
   }
   if (res.status === 429) {
-    return new CoachError(`${provider} rate limit reached. Try again in a moment.`);
+    return new CoachError(
+      `${provider} rate limit reached. Try again in a moment.`,
+    );
   }
   return new CoachError(
     `${provider} request failed (HTTP ${res.status})${detail ? `: ${detail}` : ''}.`,
   );
 }
 
-/** Run a tool call without letting an exception escape the loop. */
-async function safeExec(
+/** Run a tool call without letting an exception escape the loop. Exported so
+ * the on-device runner reuses the same guard. */
+export async function safeExec(
   exec: ToolExecutor,
   name: string,
   args: Record<string, unknown>,
@@ -190,7 +199,13 @@ async function runAnthropic(
     if (!res.ok) throw await httpError(res, 'Anthropic');
 
     const data = (await res.json()) as {
-      content?: { type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }[];
+      content?: {
+        type: string;
+        text?: string;
+        id?: string;
+        name?: string;
+        input?: Record<string, unknown>;
+      }[];
     };
     const blocks = data.content ?? [];
     const toolUses = blocks.filter(b => b.type === 'tool_use');
@@ -210,7 +225,9 @@ async function runAnthropic(
     }
     messages.push({ role: 'user', content: results });
   }
-  throw new CoachError('The coach took too many steps. Try rephrasing your request.');
+  throw new CoachError(
+    'The coach took too many steps. Try rephrasing your request.',
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -277,7 +294,9 @@ async function runOpenAI(cfg: CoachConfig, opts: RunOptions): Promise<string> {
       messages.push({ role: 'tool', tool_call_id: c.id, content: out });
     }
   }
-  throw new CoachError('The coach took too many steps. Try rephrasing your request.');
+  throw new CoachError(
+    'The coach took too many steps. Try rephrasing your request.',
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -345,5 +364,7 @@ async function runGemini(cfg: CoachConfig, opts: RunOptions): Promise<string> {
     }
     contents.push({ role: 'user', parts: responseParts });
   }
-  throw new CoachError('The coach took too many steps. Try rephrasing your request.');
+  throw new CoachError(
+    'The coach took too many steps. Try rephrasing your request.',
+  );
 }

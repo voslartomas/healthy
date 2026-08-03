@@ -17,6 +17,7 @@ import {
   RawHealthData,
   ReadinessMetric,
   SleepRecord,
+  SleepStages,
   StepsRecord,
   TrendPoint,
   TrendSeries,
@@ -86,9 +87,9 @@ function median(values: number[]): number {
  * two sources cover the same time window we keep only the trusted one; equal
  * priority keeps both (they are assumed distinct real events, e.g. two runs).
  */
-export function dedupeIntervals<T extends { start: number; end: number; source: string }>(
-  records: T[],
-): T[] {
+export function dedupeIntervals<
+  T extends { start: number; end: number; source: string },
+>(records: T[]): T[] {
   const sorted = [...records].sort((a, b) => a.start - b.start);
   const kept: T[] = [];
   for (const rec of sorted) {
@@ -116,7 +117,9 @@ export function dedupeIntervals<T extends { start: number; end: number; source: 
 }
 
 /** Most recent sample from the highest-priority source that has any samples. */
-export function latestFromPrimary(samples: InstantSample[]): InstantSample | null {
+export function latestFromPrimary(
+  samples: InstantSample[],
+): InstantSample | null {
   const primary = primarySource(samples);
   if (primary == null) return null;
   const fromPrimary = samples.filter(s => s.source === primary);
@@ -222,8 +225,11 @@ export function trackedFromExercise(
 }
 
 /** How many recent weeks of goal history the snapshot exposes for computation.
- * Bounded by the ~30-day exercise fetch; older weeks live only in SQLite. */
-const HISTORY_WEEKS = 6;
+ * Matches the Trends 12-week grid; the paginated exercise fetch (see
+ * EXERCISE_HISTORY_DAYS in GoogleHealthApi) reaches back far enough to cover it,
+ * and older weeks additionally persist in SQLite. Weeks with no data still read
+ * as "no data" (never a fabricated miss) via {@link WeekCoverage}. */
+const HISTORY_WEEKS = 12;
 
 /** UTC Monday 00:00 for a timestamp — weeks run Mon–Sun, matching the goals UI.
  * (Epoch day 0 = Thursday, so the Monday offset is (dayIndex + 3) mod 7.) */
@@ -291,6 +297,7 @@ export function weeklyGoalHistory(
     const to = Math.min(weekEnd, now);
     const complete = weekEnd <= now;
     const activities = activitiesInWindow(raw.exercise, weekStart, to);
+    const energy = dailyEnergyInWindow(raw, weekStart, to);
     out.push({
       weekStart,
       complete,
@@ -302,10 +309,14 @@ export function weeklyGoalHistory(
         weekStart,
         to,
       ),
+      energy,
       coverage: {
         steps: raw.steps.some(s => s.end > weekStart && s.start < to),
         calories: raw.activeEnergy.some(e => e.end > weekStart && e.start < to),
         activity: complete ? weekStart >= oldest : activities.length > 0,
+        // A deficit needs BOTH sides on at least one day. Judged the same for
+        // complete and in-progress weeks: if no day has both, it's "no data".
+        energy: energy.some(d => d.net != null),
       },
     });
   }
@@ -361,12 +372,15 @@ export function activitiesFromExercise(
     .map(toSummary);
 }
 
-/** How many days of history the goal-definition picker draws its options from. */
-const OPTIONS_WINDOW_MS = 14 * DAY_MS;
+/** How many days of history the goal-definition picker draws its options from.
+ * 12 weeks — matches the exercise fetch window (EXERCISE_HISTORY_DAYS) and the
+ * goal-history grid, so infrequent activities (e.g. an occasional rowing
+ * session) still surface as goal options instead of dropping off after 2 weeks. */
+const OPTIONS_WINDOW_MS = 84 * DAY_MS;
 
 /**
- * Distinct recent activities for the goal-definition picker, from the last ~14
- * days of deduped sessions. Emits one option per exercise *type* and one per
+ * Distinct recent activities for the goal-definition picker, from the last ~12
+ * weeks of deduped sessions. Emits one option per exercise *type* and one per
  * distinct *displayName* the user actually recorded, each carrying a session
  * count and the longest duration seen (so the UI can suggest a min-duration).
  * Ordered most-frequent first — this is what makes the picker reflect real data
@@ -401,7 +415,8 @@ export function activityGoalOptions(
 
   for (const s of sessions) {
     const dur = Math.round(s.durationMin);
-    if (s.typeName) add('type', s.typeName, humanizeExerciseType(s.typeName), dur);
+    if (s.typeName)
+      add('type', s.typeName, humanizeExerciseType(s.typeName), dur);
     if (s.displayName) add('displayName', s.displayName, s.displayName, dur);
   }
 
@@ -583,19 +598,19 @@ export function nutritionToday(
 export const ADHERENCE_DAYS = 14;
 
 /**
- * Per-day energy balance for the last {@link ADHERENCE_DAYS} days (oldest
- * first). `eaten` sums the day's logged food; `burned` sums the day's total-
- * energy bucket; `net = eaten − burned` only when BOTH exist (a partial day
- * can't be judged for adherence, so its net is null).
+ * Per-day energy balance for each whole-day bucket in [from, to) (day-aligned
+ * `from`, oldest first). `eaten` sums the day's logged food; `burned` sums the
+ * day's total-energy bucket; `net = eaten − burned` only when BOTH exist (a
+ * partial day can't be judged, so its net is null). Shared by the adherence
+ * trend and the per-week deficit-goal computation so they never disagree.
  */
-export function dailyEnergySeries(
+export function dailyEnergyInWindow(
   raw: RawHealthData,
-  now: number,
+  from: number,
+  to: number,
 ): DailyEnergy[] {
-  const startOfToday = now - (now % DAY_MS);
   const out: DailyEnergy[] = [];
-  for (let i = ADHERENCE_DAYS - 1; i >= 0; i--) {
-    const dayStart = startOfToday - i * DAY_MS;
+  for (let dayStart = from; dayStart < to; dayStart += DAY_MS) {
     const dayEnd = dayStart + DAY_MS;
     const meals = raw.nutrition.filter(
       e => e.start >= dayStart && e.start < dayEnd,
@@ -613,6 +628,19 @@ export function dailyEnergySeries(
     out.push({ dayStart, eaten, burned, net });
   }
   return out;
+}
+
+/**
+ * Per-day energy balance for the last {@link ADHERENCE_DAYS} days (oldest
+ * first) — the adherence trend's input.
+ */
+export function dailyEnergySeries(
+  raw: RawHealthData,
+  now: number,
+): DailyEnergy[] {
+  const startOfToday = now - (now % DAY_MS);
+  const from = startOfToday - (ADHERENCE_DAYS - 1) * DAY_MS;
+  return dailyEnergyInWindow(raw, from, startOfToday + DAY_MS);
 }
 
 /** One representative value per day from instantaneous samples (primary source,
@@ -641,7 +669,38 @@ export function sleepHoursSeries(sleep: SleepRecord[]): TrendPoint[] {
   }
   return [...byDay.values()]
     .sort((a, b) => a.end - b.end)
-    .map(s => ({ time: s.end, value: Math.round((s.durationMin / 60) * 10) / 10 }));
+    .map(s => ({
+      time: s.end,
+      value: Math.round((s.durationMin / 60) * 10) / 10,
+    }));
+}
+
+/**
+ * Per-night sleep QUALITY (efficiency %) — time actually asleep as a share of
+ * the whole session (deep+REM+light ÷ including awake), from the stage
+ * breakdown. This is distinct from sleep *length*: a long but restless night
+ * scores low. Only nights whose source reported stages produce a point (else we
+ * cannot judge quality, never guess). Oldest first.
+ */
+export function sleepQualitySeries(sleep: SleepRecord[]): TrendPoint[] {
+  const staged = sleep.filter(s => s.stages);
+  const byDay = new Map<number, SleepRecord>();
+  for (const s of dedupeIntervals(staged)) {
+    const day = Math.floor(s.end / DAY_MS);
+    const cur = byDay.get(day);
+    if (!cur || s.end > cur.end) byDay.set(day, s);
+  }
+  return [...byDay.values()]
+    .sort((a, b) => a.end - b.end)
+    .map(s => {
+      const st = s.stages as SleepStages;
+      const asleep = st.deepMin + st.remMin + st.lightMin;
+      const total = asleep + st.awakeMin;
+      return {
+        time: s.end,
+        value: total > 0 ? Math.round((asleep / total) * 100) : 0,
+      };
+    });
 }
 
 /** Per-day readiness, computed from that day's HRV/RHR vs the 30-day baseline
@@ -673,7 +732,7 @@ export function readinessSeries(raw: RawHealthData): TrendPoint[] {
     const sh = sleepDay.get(day);
     const sleep =
       sh != null
-        ? { performancePct: clamp((sh * 60 / SLEEP_NEED_MIN) * 100) }
+        ? { performancePct: clamp(((sh * 60) / SLEEP_NEED_MIN) * 100) }
         : null;
     const r = readiness(hrv, rhr, sleep);
     if (r) out.push({ time: day * DAY_MS, value: r.pct });
@@ -687,12 +746,97 @@ export function buildTrendSeries(raw: RawHealthData): TrendSeries {
     hrv: dailySeries(raw.hrvRmssd),
     restingHr: dailySeries(raw.restingHr),
     sleepHours: sleepHoursSeries(raw.sleep),
+    sleepQuality: sleepQualitySeries(raw.sleep),
     readiness: readinessSeries(raw),
+    weight: dailySeries(raw.weight),
+    bodyFat: dailySeries(raw.bodyFat),
+  };
+}
+
+/** Keep `recent` first (authoritative), then history entries strictly older
+ * than `cutoff` whose key hasn't already been seen — so a session/day present
+ * in both reads (boundary overlap) is counted exactly once. */
+function spliceByKey<T>(
+  history: T[],
+  recent: T[],
+  cutoff: number,
+  timeOf: (t: T) => number,
+  keyOf: (t: T) => string,
+): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const r of recent) {
+    const k = keyOf(r);
+    if (!seen.has(k)) {
+      seen.add(k);
+      out.push(r);
+    }
+  }
+  for (const h of history) {
+    if (timeOf(h) >= cutoff) continue; // recent owns everything from cutoff on
+    const k = keyOf(h);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(h);
+  }
+  return out;
+}
+
+/**
+ * Merge a cached deep-history read with a fresh recent read into one
+ * RawHealthData for {@link deriveSnapshot}. The cheap, wide metrics (HRV, RHR,
+ * sleep, weight, body-fat, nutrition) are taken entirely from `recent` — the
+ * light refresh still fetches those at full 30-day depth. The heavy, sequential
+ * exercise/steps/energy arrays are SPLICED: `history` supplies everything before
+ * `cutoff`, `recent` supplies `cutoff`→now, de-duplicated by natural key so no
+ * session or day is double-counted. This is what lets a routine refresh pull
+ * only the recent slice yet still derive the full 12-week history.
+ */
+export function mergeRaw(
+  history: RawHealthData,
+  recent: RawHealthData,
+  cutoff: number,
+): RawHealthData {
+  return {
+    ...recent,
+    exercise: spliceByKey(
+      history.exercise,
+      recent.exercise,
+      cutoff,
+      e => e.start,
+      e => `${e.start}|${e.typeName}|${e.source}`,
+    ),
+    steps: spliceByKey(
+      history.steps,
+      recent.steps,
+      cutoff,
+      s => s.start,
+      s => `${s.start}|${s.source}`,
+    ),
+    activeEnergy: spliceByKey(
+      history.activeEnergy,
+      recent.activeEnergy,
+      cutoff,
+      e => e.start,
+      e => `${e.start}|${e.source}`,
+    ),
+    totalEnergy: spliceByKey(
+      history.totalEnergy,
+      recent.totalEnergy,
+      cutoff,
+      e => e.start,
+      e => `${e.start}|${e.source}`,
+    ),
+    // Union the source labels seen across both reads.
+    sources: [...new Set([...recent.sources, ...history.sources])],
   };
 }
 
 /** Derive the full snapshot the UI consumes from one raw read. */
-export function deriveSnapshot(raw: RawHealthData, now: number): HealthSnapshot {
+export function deriveSnapshot(
+  raw: RawHealthData,
+  now: number,
+): HealthSnapshot {
   const hrvBase = metricWithBaseline(raw.hrvRmssd);
   // Tagged SDNN: the mapping now uses the daily-average HRV field (what the
   // Google Health app shows), which is SDNN-class, not the deep-sleep RMSSD.
@@ -730,7 +874,12 @@ export function deriveSnapshot(raw: RawHealthData, now: number): HealthSnapshot 
     weeklyHistory: weeklyGoalHistory(raw, now),
     dailyEnergy: dailyEnergySeries(raw, now),
     trends: buildTrendSeries(raw),
-    tracked: trackedFromExercise(raw.exercise, raw.steps, raw.activeEnergy, now),
+    tracked: trackedFromExercise(
+      raw.exercise,
+      raw.steps,
+      raw.activeEnergy,
+      now,
+    ),
     sources: raw.sources,
     readAt: raw.readAt,
     live: true,

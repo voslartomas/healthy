@@ -1,4 +1,4 @@
-import { GoalSourceKey } from '../data/goalSources';
+import { EnergyMetricKey, GoalSourceKey } from '../data/goalSources';
 import { WeeklyGoal } from '../state/useGoalsStore';
 import { getDb } from './database';
 
@@ -17,6 +17,7 @@ interface GoalRow {
   match_field: string | null;
   match_value: string | null;
   min_duration_min: number | null;
+  metric: string | null;
   sort_order: number;
 }
 
@@ -27,7 +28,10 @@ function rowToGoal(row: GoalRow): WeeklyGoal {
       field: row.match_field === 'displayName' ? 'displayName' : 'type',
       value: row.match_value,
     };
-    if (row.min_duration_min != null) goal.minDurationMin = row.min_duration_min;
+    if (row.min_duration_min != null)
+      goal.minDurationMin = row.min_duration_min;
+  } else if (row.metric) {
+    goal.metric = row.metric as EnergyMetricKey;
   } else if (row.source) {
     goal.source = row.source as GoalSourceKey;
   }
@@ -38,7 +42,7 @@ function rowToGoal(row: GoalRow): WeeklyGoal {
 export async function loadGoals(): Promise<WeeklyGoal[]> {
   const db = await getDb();
   const rows = await db.getAllAsync<GoalRow>(
-    'SELECT id, source, name, target, match_field, match_value, min_duration_min, sort_order FROM goals ORDER BY sort_order ASC, created_at ASC;',
+    'SELECT id, source, name, target, match_field, match_value, min_duration_min, metric, sort_order FROM goals ORDER BY sort_order ASC, created_at ASC;',
   );
   return rows.map(rowToGoal);
 }
@@ -52,8 +56,8 @@ export async function insertGoal(goal: WeeklyGoal): Promise<void> {
   );
   await db.runAsync(
     `INSERT INTO goals
-       (id, source, name, target, match_field, match_value, min_duration_min, sort_order, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+       (id, source, name, target, match_field, match_value, min_duration_min, metric, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
     goal.id,
     goal.source ?? '',
     goal.name,
@@ -61,6 +65,7 @@ export async function insertGoal(goal: WeeklyGoal): Promise<void> {
     goal.match?.field ?? null,
     goal.match?.value ?? null,
     goal.minDurationMin ?? null,
+    goal.metric ?? null,
     order?.next ?? 0,
     now,
     now,

@@ -3,6 +3,7 @@ import {
   exerciseTypeToHc,
   fetchGoogleHealthRaw,
   GoogleHealthPayloads,
+  LIGHT_WINDOWS,
   mapGoogleHealthRaw,
 } from '../src/health/GoogleHealthApi';
 
@@ -39,7 +40,13 @@ describe('exerciseTypeToHc', () => {
 
   it('maps cardio + unknown types outside the non-cardio set (counts as zone-2)', () => {
     const nonCardio = new Set([70, 65, 48, 83, 79]);
-    for (const t of ['RUNNING', 'BIKING', 'SWIMMING', 'HIIT', 'MYSTERY_SPORT']) {
+    for (const t of [
+      'RUNNING',
+      'BIKING',
+      'SWIMMING',
+      'HIIT',
+      'MYSTERY_SPORT',
+    ]) {
       expect(nonCardio.has(exerciseTypeToHc(t))).toBe(false);
     }
     expect(exerciseTypeToHc(undefined)).toBe(0);
@@ -105,6 +112,38 @@ describe('mapGoogleHealthRaw', () => {
     expect(raw.restingHr[0].value).toBe(53);
   });
 
+  it('maps weight (kg) and body-fat (%) samples with their sample time', () => {
+    const raw = mapGoogleHealthRaw(
+      {
+        ...emptyPayloads(),
+        weight: [
+          {
+            // Real Withings shape: grams, not kilograms.
+            dataSource: { device: { manufacturer: 'Withings' } },
+            weight: {
+              weightGrams: 74085,
+              sampleTime: { physicalTime: '2026-07-19T07:00:00Z' },
+            },
+          },
+        ],
+        bodyFat: [
+          {
+            bodyFat: {
+              percentage: 17.2,
+              sampleTime: { physicalTime: '2026-07-19T07:00:00Z' },
+            },
+          },
+        ],
+      },
+      NOW,
+    );
+    expect(raw.weight).toHaveLength(1);
+    expect(raw.weight[0].value).toBeCloseTo(74.085);
+    expect(raw.weight[0].source).toBe('Withings');
+    expect(raw.weight[0].time).toBe(Date.UTC(2026, 6, 19, 7, 0, 0));
+    expect(raw.bodyFat[0].value).toBe(17.2);
+  });
+
   it('uses minutesAsleep summary for sleep duration, else the interval', () => {
     const raw = mapGoogleHealthRaw(
       {
@@ -154,8 +193,8 @@ describe('mapGoogleHealthRaw', () => {
       },
       NOW,
     );
-    expect(raw.steps.map((s) => s.count)).toEqual([8400, 5100]);
-    expect(new Set(raw.steps.map((s) => s.source))).toEqual(
+    expect(raw.steps.map(s => s.count)).toEqual([8400, 5100]);
+    expect(new Set(raw.steps.map(s => s.source))).toEqual(
       new Set(['Google Health']),
     );
   });
@@ -184,7 +223,10 @@ describe('mapGoogleHealthRaw', () => {
         ...emptyPayloads(),
         calories: [
           {
-            civilStartTime: { date: { year: 2026, month: 8, day: 1 }, time: {} },
+            civilStartTime: {
+              date: { year: 2026, month: 8, day: 1 },
+              time: {},
+            },
             civilEndTime: {
               date: { year: 2026, month: 8, day: 1 },
               time: { hours: 23, minutes: 59, seconds: 59 },
@@ -313,12 +355,20 @@ describe('mapGoogleHealthRaw', () => {
         exercise: [
           {
             exercise: {
-              interval: { startTime: '2026-07-19T06:00:00Z', endTime: '2026-07-19T07:00:00Z' },
+              interval: {
+                startTime: '2026-07-19T06:00:00Z',
+                endTime: '2026-07-19T07:00:00Z',
+              },
               exerciseType: 'RUNNING',
               activeDuration: '3600s',
               metricsSummary: {
                 caloriesKcal: 500,
-                heartRateZoneDurations: { lightTime: '600s', moderateTime: '1200s', vigorousTime: '300s', peakTime: '0s' },
+                heartRateZoneDurations: {
+                  lightTime: '600s',
+                  moderateTime: '1200s',
+                  vigorousTime: '300s',
+                  peakTime: '0s',
+                },
               },
             },
           },
@@ -342,7 +392,10 @@ describe('mapGoogleHealthRaw', () => {
         exercise: [
           {
             exercise: {
-              interval: { startTime: '2026-07-19T06:00:00Z', endTime: '2026-07-19T06:30:00Z' },
+              interval: {
+                startTime: '2026-07-19T06:00:00Z',
+                endTime: '2026-07-19T06:30:00Z',
+              },
               exerciseType: 'STRENGTH_TRAINING',
               activeDuration: '1800s',
             },
@@ -358,9 +411,16 @@ describe('mapGoogleHealthRaw', () => {
     const raw = mapGoogleHealthRaw(
       {
         ...emptyPayloads(),
-        restingHr: [{ dailyRestingHeartRate: { date: { year: 2026, month: 7, day: 1 } } }],
+        restingHr: [
+          { dailyRestingHeartRate: { date: { year: 2026, month: 7, day: 1 } } },
+        ],
         sleep: [{ sleep: { interval: { startTime: 'x', endTime: 'y' } } }],
-        steps: [{ startTime: '2026-07-19T00:00:00Z', endTime: '2026-07-19T23:59:59Z' }],
+        steps: [
+          {
+            startTime: '2026-07-19T00:00:00Z',
+            endTime: '2026-07-19T23:59:59Z',
+          },
+        ],
       },
       NOW,
     );
@@ -373,13 +433,13 @@ describe('mapGoogleHealthRaw', () => {
 describe('Google Health → deriveSnapshot end to end', () => {
   it('produces a coherent live snapshot from a realistic payload', () => {
     const payloads: GoogleHealthPayloads = {
-      hrv: [3, 2, 1].map((d) => ({
+      hrv: [3, 2, 1].map(d => ({
         dailyHeartRateVariability: {
           date: { year: 2026, month: 7, day: 20 - d },
           deepSleepRootMeanSquareOfSuccessiveDifferencesMilliseconds: 55 + d,
         },
       })),
-      restingHr: [3, 2, 1].map((d) => ({
+      restingHr: [3, 2, 1].map(d => ({
         dailyRestingHeartRate: {
           date: { year: 2026, month: 7, day: 20 - d },
           beatsPerMinute: String(54 + d),
@@ -442,7 +502,10 @@ describe('Google Health → deriveSnapshot end to end', () => {
 describe('fetchGoogleHealthRaw (injected fetch)', () => {
   it('hits list + rollup endpoints with the bearer token and maps the result', async () => {
     const calls: string[] = [];
-    const stubFetch = async (url: string, init?: { headers?: Record<string, string> }) => {
+    const stubFetch = async (
+      url: string,
+      init?: { headers?: Record<string, string> },
+    ) => {
       calls.push(url);
       expect(init?.headers?.Authorization).toBe('Bearer test-token');
       const body: Record<string, unknown> = url.includes(':dailyRollUp')
@@ -477,24 +540,118 @@ describe('fetchGoogleHealthRaw (injected fetch)', () => {
       };
     };
 
-    const raw = await fetchGoogleHealthRaw('test-token', NOW, stubFetch as never);
+    const raw = await fetchGoogleHealthRaw(
+      'test-token',
+      NOW,
+      stubFetch as never,
+    );
 
     expect(raw.steps[0].count).toBe(7200);
     expect(raw.restingHr[0].value).toBe(52);
-    // 5 GET lists (hrv, rhr, sleep, exercise [1 page — stub returns no
-    // nextPageToken], nutrition) + 2 POST rollups (steps, calories).
-    expect(calls.length).toBe(7);
-    expect(calls.some(u => u.includes('exercise') && u.includes('filter='))).toBe(
-      true,
-    );
-    expect(calls.some((u) => u.includes(':dailyRollUp'))).toBe(true);
-    expect(calls.some((u) => u.includes('nutrition-log'))).toBe(true);
+    // 7 GET lists (hrv, rhr, sleep, exercise [1 page — stub returns no
+    // nextPageToken], nutrition, weight, body-fat) + 1 steps rollup + 6
+    // total-calories rollup windows (84 days / 14-day API cap) = 14 calls.
+    expect(calls.length).toBe(14);
+    expect(calls.some(u => u.includes('/weight/'))).toBe(true);
+    expect(calls.some(u => u.includes('/body-fat/'))).toBe(true);
+    expect(
+      calls.some(u => u.includes('exercise') && u.includes('filter=')),
+    ).toBe(true);
+    expect(calls.some(u => u.includes(':dailyRollUp'))).toBe(true);
+    expect(calls.some(u => u.includes('nutrition-log'))).toBe(true);
+  });
+
+  it('assembles total-calories across 14-day windows and dedupes the boundary day', async () => {
+    const DAY = 86_400_000;
+    // Each total-calories window emits its start + end day; window i and i+1
+    // therefore share the boundary day NOW−(i+1)·14d — the dedupe must collapse
+    // it so no day's burned total is double-counted.
+    let calWindow = 0;
+    const stubFetch = async (
+      url: string,
+      _init?: { headers?: Record<string, string> },
+    ) => {
+      let body: Record<string, unknown> = {
+        dataPoints: [],
+        rollupDataPoints: [],
+      };
+      if (url.includes(':dailyRollUp') && url.includes('total-calories')) {
+        const i = calWindow++;
+        const dayA = new Date(NOW - i * 14 * DAY).toISOString();
+        const dayB = new Date(NOW - (i + 1) * 14 * DAY).toISOString();
+        body = {
+          rollupDataPoints: [
+            {
+              startTime: dayA,
+              endTime: dayA,
+              totalCalories: { kcalSum: 2500 },
+            },
+            {
+              startTime: dayB,
+              endTime: dayB,
+              totalCalories: { kcalSum: 2400 },
+            },
+          ],
+        };
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => body,
+        text: async () => JSON.stringify(body),
+      };
+    };
+
+    const raw = await fetchGoogleHealthRaw('t', NOW, stubFetch as never);
+
+    const days = new Set(raw.totalEnergy.map(e => Math.floor(e.start / DAY)));
+    // One record per distinct day — the shared boundary days are not duplicated.
+    expect(raw.totalEnergy.length).toBe(days.size);
+    // History reaches ~12 weeks back, not just the single 14-day window.
+    const minStart = Math.min(...raw.totalEnergy.map(e => e.start));
+    expect(NOW - minStart).toBeGreaterThan(80 * DAY);
+  });
+
+  it('makes far fewer requests on a light (recent-slice) fetch', async () => {
+    const calls: string[] = [];
+    const stubFetch = async (url: string) => {
+      calls.push(url);
+      // Return a step point so getSteps doesn't fall back to a 2nd request;
+      // everything else empty. Isolates the request-count of a light fetch.
+      const body: Record<string, unknown> =
+        url.includes(':dailyRollUp') && url.includes('/steps/')
+          ? {
+              rollupDataPoints: [
+                {
+                  startTime: '2026-07-20T00:00:00Z',
+                  endTime: '2026-07-20T23:59:59Z',
+                  steps: { countSum: '5000' },
+                },
+              ],
+            }
+          : { dataPoints: [], rollupDataPoints: [] };
+      return {
+        ok: true,
+        status: 200,
+        json: async () => body,
+        text: async () => '{}',
+      };
+    };
+    await fetchGoogleHealthRaw('t', NOW, stubFetch as never, LIGHT_WINDOWS);
+    // 7 GET lists + 1 steps rollup + 1 single 14-day calorie window = 9,
+    // vs 14 for the full deep pull (6 calorie windows).
+    expect(calls.length).toBe(9);
   });
 
   it('degrades a failing metric to empty instead of throwing', async () => {
     const stubFetch = async (url: string) => {
       if (url.includes('daily-resting-heart-rate')) {
-        return { ok: false, status: 403, json: async () => ({}), text: async () => 'denied' };
+        return {
+          ok: false,
+          status: 403,
+          json: async () => ({}),
+          text: async () => 'denied',
+        };
       }
       return {
         ok: true,

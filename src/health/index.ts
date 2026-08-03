@@ -5,13 +5,24 @@ import {
   fetchGoogleHealthRaw,
   FoodEntryInput,
   FoodLogResult,
+  FULL_WINDOWS,
+  RawFetchWindows,
   writeFoodEntry,
 } from './GoogleHealthApi';
-import { HealthSnapshot } from './types';
+import { HealthSnapshot, RawHealthData } from './types';
 
 export * from './types';
-export { GOOGLE_HEALTH_SCOPES } from './GoogleHealthApi';
-export type { FoodEntryInput, FoodLogResult } from './GoogleHealthApi';
+export { deriveSnapshot, mergeRaw } from './derive';
+export {
+  GOOGLE_HEALTH_SCOPES,
+  FULL_WINDOWS,
+  LIGHT_WINDOWS,
+} from './GoogleHealthApi';
+export type {
+  FoodEntryInput,
+  FoodLogResult,
+  RawFetchWindows,
+} from './GoogleHealthApi';
 
 /**
  * Empty snapshot — every metric null/zero. Used whenever the live Google
@@ -38,7 +49,15 @@ export const EMPTY_SNAPSHOT: HealthSnapshot = {
   activityOptions: [],
   weeklyHistory: [],
   dailyEnergy: [],
-  trends: { hrv: [], restingHr: [], sleepHours: [], readiness: [] },
+  trends: {
+    hrv: [],
+    restingHr: [],
+    sleepHours: [],
+    sleepQuality: [],
+    readiness: [],
+    weight: [],
+    bodyFat: [],
+  },
   tracked: {},
   sources: [],
   readAt: 0,
@@ -71,48 +90,48 @@ export function isGoogleHealthConfigured(): boolean {
  * so there is no native path.
  */
 export async function readSnapshot(now: number): Promise<HealthSnapshot> {
-  if (!googleTokenProvider) {
-    console.warn('[GoogleHealth] no token provider registered — empty snapshot');
-    return EMPTY_SNAPSHOT;
-  }
+  const raw = await fetchRaw(now, FULL_WINDOWS);
+  if (!raw) return EMPTY_SNAPSHOT;
+  return deriveSnapshot(raw, now);
+}
 
+/**
+ * Fetch RAW multi-source records over the given {@link RawFetchWindows}, or null
+ * when the source is unavailable (no provider, not signed in, or the request
+ * threw). Returning raw — not a derived snapshot — is what lets the store cache
+ * the deep-history read and splice a light recent read onto it
+ * ({@link ./derive.mergeRaw}) instead of re-pulling everything each refresh.
+ */
+export async function fetchRaw(
+  now: number,
+  windows: RawFetchWindows = FULL_WINDOWS,
+): Promise<RawHealthData | null> {
+  if (!googleTokenProvider) {
+    console.warn(
+      '[GoogleHealth] no token provider registered — empty snapshot',
+    );
+    return null;
+  }
   try {
     const token = await googleTokenProvider();
     if (!token) {
-      console.warn('[GoogleHealth] no access token (not signed in) — empty snapshot');
-      return EMPTY_SNAPSHOT;
+      console.warn(
+        '[GoogleHealth] no access token (not signed in) — empty snapshot',
+      );
+      return null;
     }
-    console.log('[GoogleHealth] got access token, fetching…');
-    const raw = await fetchGoogleHealthRaw(token, now, fetch as never);
+    const raw = await fetchGoogleHealthRaw(token, now, fetch as never, windows);
     console.log('[GoogleHealth] raw counts', {
-      hrv: raw.hrvRmssd.length,
-      restingHr: raw.restingHr.length,
-      sleep: raw.sleep.length,
-      steps: raw.steps.length,
       exercise: raw.exercise.length,
-      activeEnergy: raw.activeEnergy.length,
+      steps: raw.steps.length,
+      totalEnergy: raw.totalEnergy.length,
       nutrition: raw.nutrition.length,
-      sources: raw.sources,
+      windows,
     });
-    const snapshot = deriveSnapshot(raw, now);
-    console.log('[GoogleHealth] derived snapshot', {
-      hrv: snapshot.hrv?.value ?? null,
-      restingHr: snapshot.restingHr?.value ?? null,
-      sleepH: snapshot.sleep?.hours ?? null,
-      stepsWeek: snapshot.stepsThisWeek,
-      readiness: snapshot.readiness?.pct ?? null,
-      nutrition: snapshot.nutrition?.eaten ?? null,
-      live: snapshot.live,
-    });
-    console.log('[GoogleHealth] cardio', {
-      hasZoneData: snapshot.cardio.hasZoneData,
-      weekLoad: snapshot.cardio.weekLoad,
-      zones7d: snapshot.cardio.zones7d,
-    });
-    return snapshot;
+    return raw;
   } catch (err) {
     console.warn('[GoogleHealth] read failed', err);
-    return EMPTY_SNAPSHOT;
+    return null;
   }
 }
 

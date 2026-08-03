@@ -30,8 +30,7 @@ export const useCalorieGoalsStore = create<CalorieGoalsState>(set => ({
   goals: [],
   hydrated: false,
   setGoals: goals => set({ goals, hydrated: true }),
-  addGoalLocal: goal =>
-    set(state => ({ goals: [...state.goals, goal] })),
+  addGoalLocal: goal => set(state => ({ goals: [...state.goals, goal] })),
   removeGoalLocal: id =>
     set(state => ({ goals: state.goals.filter(g => g.id !== id) })),
 }));
@@ -43,7 +42,10 @@ export function currentCalorieGoal(
 ): CalorieGoal | null {
   let best: CalorieGoal | null = null;
   for (const g of goals) {
-    if (g.effectiveFrom <= now && (!best || g.effectiveFrom > best.effectiveFrom)) {
+    if (
+      g.effectiveFrom <= now &&
+      (!best || g.effectiveFrom > best.effectiveFrom)
+    ) {
       best = g;
     }
   }

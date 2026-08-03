@@ -2,386 +2,317 @@ import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { ScreenProps } from '../../app/navigation/types';
-import { Card } from '../../components/Card';
-import { Ring } from '../../components/Ring';
-import { AppHeader, Screen } from '../../components/Screen';
-import { SectionLabel } from '../../components/SectionLabel';
-import { StatCard } from '../../components/StatCard';
-import { dashboard, MiniStat } from '../../data/health';
+import {
+  BigStat,
+  BriefScreen,
+  M,
+  MacroBar,
+  PillSpec,
+  Quad,
+  Section,
+} from '../../components/brief';
 import { HealthSnapshot } from '../../health';
 import { useHealthStore } from '../../state/useHealthStore';
-import { metricColor } from '../../theme/metricColors';
-import { monoFont, useTheme } from '../../theme/theme';
+import { useTheme } from '../../theme/theme';
 import { WeeklyGoalsCard } from '../goals/WeeklyGoalsCard';
 
-const DAY_NAMES = [
-  'Sunday',
-  'Monday',
-  'Tuesday',
-  'Wednesday',
-  'Thursday',
-  'Friday',
-  'Saturday',
-];
-const MONTH_NAMES = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-];
-
-/** "Saturday, Aug 1" for today. */
-function todayLabel(): string {
-  const d = new Date();
-  return `${DAY_NAMES[d.getDay()]}, ${MONTH_NAMES[d.getMonth()]} ${d.getDate()}`;
-}
-
-/** Time-of-day greeting. */
-function greeting(): string {
-  const h = new Date().getHours();
-  if (h < 12) return 'Good morning';
-  if (h < 18) return 'Good afternoon';
-  return 'Good evening';
-}
-
-/** Group a number with thousands separators without relying on Intl. */
-function grp(n: number): string {
-  return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-}
-
-/** Format decimal hours as h:mm, e.g. 7.7 → "7:42". */
+/** Decimal hours → "7:42". */
 function hoursToHm(hours: number): string {
   const total = Math.round(hours * 60);
-  const h = Math.floor(total / 60);
-  const m = total % 60;
-  return `${h}:${m.toString().padStart(2, '0')}`;
+  return `${Math.floor(total / 60)}:${(total % 60).toString().padStart(2, '0')}`;
 }
 
-/** "▲ 7 vs 30-day" / "▼ 1 vs 30-day" / "flat vs 30-day" from a baseline delta. */
-function baselineDetail(delta: number, unit = ''): string {
+/** Minutes → "1:10". */
+function minToHm(min: number): string {
+  const m = Math.round(min);
+  return `${Math.floor(m / 60)}:${(m % 60).toString().padStart(2, '0')}`;
+}
+
+function grp(n: number): string {
+  return Math.round(n)
+    .toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+/** Signed kcal with a real minus glyph: "−800" / "+300" / "0". */
+function signed(n: number): string {
+  if (n < 0) return `−${grp(Math.abs(n))}`;
+  if (n > 0) return `+${grp(n)}`;
+  return '0';
+}
+
+/** A colored "▲7" / "▼1" delta node. `goodUp` flips which direction is green. */
+function Delta({ delta, goodUp = true }: { delta: number; goodUp?: boolean }) {
+  const t = useTheme();
   const rounded = Math.round(delta);
-  if (rounded === 0) return 'flat vs 30-day';
-  const arrow = rounded > 0 ? '▲' : '▼';
-  return `${arrow} ${Math.abs(rounded)}${unit} vs 30-day`;
+  if (rounded === 0) return null;
+  const up = rounded > 0;
+  const good = goodUp ? up : !up;
+  return (
+    <Text style={{ color: good ? t.colors.grn : t.colors.red }}>
+      {' '}
+      {up ? '▲' : '▼'}
+      {Math.abs(rounded)}
+    </Text>
+  );
 }
 
-function trendOf(delta: number): MiniStat['trend'] {
-  if (delta > 0) return 'up';
-  if (delta < 0) return 'down';
-  return 'flat';
-}
-
-/**
- * Build the four dashboard mini-stats from the snapshot. Any metric the read
- * did not surface renders "-". Cardio load has no derivation yet (ADR pending),
- * so it is always "-".
- */
-function liveStats(snap: HealthSnapshot): typeof dashboard.stats {
-  const s = dashboard.stats;
-  return {
-    sleep: snap.sleep
-      ? {
-          ...s.sleep,
-          value: hoursToHm(snap.sleep.hours),
-          detail: `${snap.sleep.performancePct}% performance`,
-        }
-      : s.sleep,
-    load: s.load,
-    hrv: snap.hrv
-      ? {
-          ...s.hrv,
-          value: String(Math.round(snap.hrv.value)),
-          detail: baselineDetail(snap.hrv.delta),
-          trend: trendOf(snap.hrv.delta),
-        }
-      : s.hrv,
-    rhr: snap.restingHr
-      ? {
-          ...s.rhr,
-          value: String(Math.round(snap.restingHr.value)),
-          detail: baselineDetail(snap.restingHr.delta),
-          // For RHR, a drop vs baseline is the good direction.
-          trend: trendOf(-snap.restingHr.delta),
-        }
-      : s.rhr,
-  };
-}
-
-/**
- * Truthful recovery headline/body from the snapshot. Without a readiness score
- * there is no interpretation to make — just a connect prompt.
- */
-function recoveryCopy(snap: HealthSnapshot): { headline: string; body: string } {
+/** Recovery pill + short caption from the readiness state. */
+function recoveryChrome(
+  snap: HealthSnapshot,
+  ink: string,
+  inv: string,
+  acc: string,
+  fnt: string,
+): { pill: PillSpec; caption: string } {
   if (!snap.readiness) {
     return {
-      headline: 'No recovery data yet',
-      body: 'Connect Google Health in Settings to see your recovery.',
+      pill: { text: 'NOT CONNECTED', dot: fnt },
+      caption: 'CONNECT A SOURCE TO START',
     };
   }
   const state = snap.readiness.state;
-  const headline =
+  const caption =
     state === 'Recovered'
-      ? "You're ready to push"
+      ? 'READY TO ADD LOAD'
       : state === 'Balanced'
-        ? 'A balanced day'
-        : 'Prioritize recovery today';
-  const advice =
-    state === 'Recovered'
-      ? 'A moderate-to-high cardio load is well within reach.'
-      : state === 'Balanced'
-        ? "Keep today's training load moderate."
-        : 'Favor easy movement and rest today.';
-
-  const signals: string[] = [];
-  if (snap.hrv) {
-    signals.push(
-      snap.hrv.delta >= 0
-        ? 'HRV is at or above your baseline'
-        : 'HRV is below your baseline',
-    );
-  }
-  if (snap.sleep) {
-    signals.push(
-      snap.sleep.performancePct >= 85 ? 'sleep was solid' : 'sleep ran short',
-    );
-  }
-  const prefix = signals.length
-    ? `${signals.join(' and ').replace(/^./, c => c.toUpperCase())}. `
-    : '';
-  return { headline, body: `${prefix}${advice}` };
+        ? 'KEEP LOAD MODERATE'
+        : 'FAVOR REST TODAY';
+  return {
+    pill: { text: state.toUpperCase(), dot: acc, bg: ink, textColor: inv },
+    caption,
+  };
 }
 
-/** The "Today" dashboard: goals, recovery, key metrics, energy balance. */
+/** The "Today" data brief: recovery, body, fuel and the week's goals. */
 export function DashboardScreen({ navigation }: ScreenProps) {
   const t = useTheme();
+  const c = t.colors;
   const snap = useHealthStore(s => s.snapshot);
-  const stats = liveStats(snap);
+
   const recoveryPct = snap.readiness?.pct ?? null;
-  const recoveryState = snap.readiness?.state ?? 'No data';
-  const recovery = recoveryCopy(snap);
+  const { pill, caption } = recoveryChrome(snap, c.ink, c.inv, c.acc, c.fnt);
+
   const eaten = snap.nutrition?.eaten ?? null;
   const burned = snap.energyBurnedToday;
-  const hasEnergy = eaten != null || burned > 0;
+  const hasNet = eaten != null || burned > 0;
   const net = (eaten ?? 0) - burned;
-  const syncedNote = snap.live
-    ? `Live · Google Health · ${snap.sources.length} source${snap.sources.length === 1 ? '' : 's'}`
-    : 'No health data yet — connect Google Health in Settings.';
 
-  const stat = (s: MiniStat, onPress?: () => void, a11y?: string) => (
-    <StatCard
-      label={s.label}
-      dotColor={metricColor(t.colors, s.colorKey)}
-      value={s.value}
-      unit={s.unit}
-      detail={s.detail}
-      trend={s.trend}
-      onPress={onPress}
-      accessibilityLabel={a11y}
-    />
-  );
+  const protein = snap.nutrition?.proteinG ?? null;
+  const fat = snap.nutrition?.fatG ?? null;
+  const PROTEIN_MIN = 165;
+  const FAT_MAX = 62;
+
+  const stages = snap.sleep?.stages ?? null;
+  const stageTotal = stages
+    ? stages.deepMin + stages.remMin + stages.lightMin + stages.awakeMin
+    : 0;
+
+  // Latest body-composition readings from the trend series (occasional samples).
+  const wPts = snap.trends.weight;
+  const latestWeight = wPts.length ? wPts[wPts.length - 1].value : null;
+  const fPts = snap.trends.bodyFat;
+  const latestFat = fPts.length ? fPts[fPts.length - 1].value : null;
+
+  const syncNote = snap.live
+    ? `SYNCED · GOOGLE HEALTH · ${snap.sources.length} SOURCE${snap.sources.length === 1 ? '' : 'S'}`
+    : 'NO HEALTH DATA YET — CONNECT IN SETUP';
 
   return (
-    <Screen>
-      <AppHeader
-        eyebrow={todayLabel()}
-        title={greeting()}
-        onAvatarPress={() => navigation.navigate('Settings')}
-      />
-
-      <WeeklyGoalsCard />
-
-      <Card
+    <BriefScreen>
+      <BigStat
+        value={recoveryPct != null ? String(recoveryPct) : '—'}
+        suffix={recoveryPct != null ? '%' : undefined}
+        pill={pill}
+        caption={caption}
         onPress={() => navigation.navigate('Recovery')}
         accessibilityLabel={
           recoveryPct != null
             ? `Open recovery detail, ${recoveryPct} percent recovered`
             : 'Open recovery detail, no recovery data'
         }
-        style={styles.spaced}
-      >
-        <View style={styles.heroRing}>
-          <Ring
-            progress={(recoveryPct ?? 0) / 100}
-            color={t.colors.rec}
-            size={118}
-            strokeWidth={10}
-            value={recoveryPct != null ? String(recoveryPct) : '-'}
-            valueSuffix={recoveryPct != null ? '%' : undefined}
-            label="Recovery"
-          />
-          <View style={styles.heroMeta}>
-            <View
-              style={[
-                styles.statePill,
-                { backgroundColor: t.colors.recStateBg },
-              ]}
-            >
+      />
+
+      {/* ── 01 Body ─────────────────────────────────────────────────── */}
+      <Section n="01" title="Body" first>
+        <Quad
+          items={[
+            {
+              value: snap.hrv ? String(Math.round(snap.hrv.value)) : '——',
+              color: snap.hrv ? c.ink : c.sand,
+              label: (
+                <Text>
+                  HRV MS
+                  {snap.hrv ? <Delta delta={snap.hrv.delta} /> : null}
+                </Text>
+              ),
+            },
+            {
+              value: snap.restingHr
+                ? String(Math.round(snap.restingHr.value))
+                : '——',
+              color: snap.restingHr ? c.ink : c.sand,
+              label: (
+                <Text>
+                  RHR
+                  {snap.restingHr ? (
+                    <Delta delta={snap.restingHr.delta} goodUp={false} />
+                  ) : null}
+                </Text>
+              ),
+            },
+            {
+              value: snap.cardio.hasZoneData
+                ? String(snap.cardio.todayLoad)
+                : '——',
+              color: c.acc,
+              label: 'LOAD →',
+              onPress: () => navigation.navigate('Cardio'),
+            },
+            {
+              value: latestWeight != null ? latestWeight.toFixed(1) : '——',
+              color: latestWeight != null ? c.ink : c.sand,
+              label: 'WEIGHT KG',
+            },
+            {
+              value: latestFat != null ? latestFat.toFixed(1) : '——',
+              color: latestFat != null ? c.ink : c.sand,
+              label: 'BODYFAT %',
+            },
+          ]}
+        />
+
+        {snap.sleep ? (
+          <View style={styles.sleepHead}>
+            <Text style={M(800, 20, { ls: -1, color: c.ink })}>
+              {hoursToHm(snap.sleep.hours)}
+            </Text>
+            <Text style={M(600, 9, { ls: 1, color: c.fnt })}>
+              SLEEP · {snap.sleep.performancePct}%
+            </Text>
+          </View>
+        ) : null}
+
+        {stages && stageTotal > 0 ? (
+          <>
+            <View style={styles.stageBar}>
+              <View style={{ flex: stages.deepMin, backgroundColor: c.ink }} />
+              <View style={{ flex: stages.remMin, backgroundColor: c.acc }} />
               <View
-                style={[styles.stateDot, { backgroundColor: t.colors.rec }]}
+                style={{ flex: stages.lightMin, backgroundColor: c.sand }}
               />
-              <Text style={[styles.stateText, { color: t.colors.recStateFg }]}>
-                {recoveryState}
+              <View
+                style={{ flex: stages.awakeMin, backgroundColor: c.track }}
+              />
+            </View>
+            <View style={styles.stageLabels}>
+              <Text style={M(600, 9, { color: c.fnt })}>
+                DEEP {minToHm(stages.deepMin)}
+              </Text>
+              <Text style={M(600, 9, { color: c.fnt })}>
+                REM {minToHm(stages.remMin)}
+              </Text>
+              <Text style={M(600, 9, { color: c.fnt })}>
+                LGT {minToHm(stages.lightMin)}
+              </Text>
+              <Text style={M(600, 9, { color: c.fnt })}>
+                WAKE {minToHm(stages.awakeMin)}
               </Text>
             </View>
-            <Text style={[styles.heroTitle, { color: t.colors.fg }]}>
-              {recovery.headline}
-            </Text>
-            <Text style={[styles.heroBody, { color: t.colors.muted }]}>
-              {recovery.body}
-            </Text>
-          </View>
-        </View>
-      </Card>
+          </>
+        ) : null}
+      </Section>
 
-      <View style={[styles.grid, styles.spaced]}>
-        <View style={styles.gridRow}>
-          {stat(
-            stats.sleep,
-            () => navigation.navigate('Sleep'),
-            'Open sleep detail',
-          )}
-          {stat(
-            stats.load,
-            () => navigation.navigate('Cardio'),
-            `Open cardio load detail, ${stats.load.value}`,
-          )}
-        </View>
-        <View style={styles.gridRow}>
-          {stat(stats.hrv)}
-          {stat(stats.rhr)}
-        </View>
-      </View>
-
-      <SectionLabel>Energy balance</SectionLabel>
-      <Card
-        onPress={() => navigation.navigate('Nutrition')}
-        accessibilityLabel="Open nutrition"
+      {/* ── 02 Fuel ─────────────────────────────────────────────────── */}
+      <Section
+        n="02"
+        title="Fuel"
+        onTitlePress={() => navigation.navigate('Nutrition')}
+        titleRight={
+          <Text style={M(700, 10.5, { color: c.fnt })}>
+            {hasNet ? (
+              <>
+                NET{' '}
+                <Text style={{ color: net < 0 ? c.grn : c.ink }}>
+                  {signed(net)}
+                </Text>
+                {' →'}
+              </>
+            ) : (
+              'NO DATA →'
+            )}
+          </Text>
+        }
       >
-        <View style={styles.row}>
-          <View>
-            <Text style={[styles.smallMuted, { color: t.colors.muted }]}>
-              Net today
-            </Text>
-            <Text style={[styles.bigNum, { color: t.colors.rec }]}>
-              {hasEnergy ? grp(net) : '-'}
-            </Text>
-            <Text style={[styles.smallMuted, { color: t.colors.muted }]}>
-              kcal
-            </Text>
-          </View>
-          <Ring
-            progress={0}
-            color={t.colors.rec}
-            size={80}
-            strokeWidth={9}
-            value={eaten != null ? grp(eaten) : '-'}
-            label="eaten"
-            valueFontSize={18}
-          />
-        </View>
-        <View style={styles.legend}>
-          <Text style={[styles.legendText, { color: t.colors.muted }]}>
-            In {eaten != null ? grp(eaten) : '-'}
-          </Text>
-          <Text style={[styles.legendText, { color: t.colors.muted }]}>
-            Out {burned > 0 ? grp(burned) : '-'}
-          </Text>
-        </View>
-      </Card>
+        <MacroBar
+          style={styles.macroGap}
+          label="PROTEIN · MIN 165G"
+          right={
+            <>
+              {protein != null ? Math.round(protein) : '—'}
+              {protein != null && protein < PROTEIN_MIN ? (
+                <Text style={{ color: c.acc }}>
+                  {' '}
+                  · {Math.round(PROTEIN_MIN - protein)} TO GO
+                </Text>
+              ) : null}
+            </>
+          }
+          fill={protein != null ? protein / PROTEIN_MIN : 0}
+          fillColor={c.ink}
+          marker={c.ink}
+        />
+        <MacroBar
+          style={styles.macroGap}
+          label="FAT · MAX 62G"
+          right={
+            <>
+              {fat != null ? Math.round(fat) : '—'}
+              {fat != null && fat < FAT_MAX ? (
+                <Text style={{ color: c.acc }}>
+                  {' '}
+                  · {Math.round(FAT_MAX - fat)} SPARE
+                </Text>
+              ) : null}
+            </>
+          }
+          fill={fat != null ? fat / FAT_MAX : 0}
+          fillColor={c.acc}
+          marker={fat != null && fat > FAT_MAX ? c.red : c.ink}
+        />
+      </Section>
 
-      <Text style={[styles.dinfo, { color: t.colors.muted }]}>
-        {syncedNote}
+      {/* ── 03 Week ─────────────────────────────────────────────────── */}
+      <WeeklyGoalsCard navigation={navigation} />
+
+      <Text
+        style={[M(600, 9.5, { ls: 1, upper: true, color: c.fnt }), styles.sync]}
+      >
+        {syncNote}
       </Text>
-    </Screen>
+    </BriefScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  spaced: {
-    marginTop: 14,
-  },
-  heroRing: {
+  sleepHead: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 18,
+    alignItems: 'baseline',
+    gap: 8,
+    marginTop: 16,
   },
-  heroMeta: {
-    flex: 1,
-  },
-  statePill: {
-    alignSelf: 'flex-start',
+  stageBar: {
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: 999,
-  },
-  stateDot: {
-    width: 8,
     height: 8,
     borderRadius: 4,
-  },
-  stateText: {
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  heroTitle: {
-    fontSize: 16,
-    fontWeight: '800',
-    marginTop: 10,
-    marginBottom: 4,
-    letterSpacing: -0.2,
-  },
-  heroBody: {
-    fontSize: 12.5,
-    lineHeight: 18,
-  },
-  grid: {
-    gap: 12,
-  },
-  gridRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  smallMuted: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  bigNum: {
-    fontFamily: monoFont,
-    fontSize: 34,
-    fontWeight: '800',
-    letterSpacing: -1.5,
-    marginVertical: 2,
-  },
-  legend: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    overflow: 'hidden',
     marginTop: 14,
   },
-  legendText: {
-    fontFamily: monoFont,
-    fontSize: 11,
-    fontWeight: '600',
+  stageLabels: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 7,
   },
-  dinfo: {
-    fontSize: 11,
-    lineHeight: 16,
-    marginTop: 14,
-    paddingHorizontal: 2,
-  },
+  macroGap: { marginTop: 14 },
+  sync: { marginTop: 16, lineHeight: 15 },
 });

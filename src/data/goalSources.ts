@@ -59,3 +59,30 @@ export const GOAL_SOURCE_ORDER: GoalSourceKey[] = [
   'zone2',
   'calories',
 ];
+
+/**
+ * Energy-balance goals are a different KIND from the auto-tracked sources above:
+ * their weekly value is an *average* of a per-day energy metric, not a running
+ * total, and it draws on nutrition + total-energy data rather than the exercise
+ * rollups. Currently the only one is `deficit` — the average daily calorie
+ * deficit (burned − eaten) across the week's days that have both figures.
+ */
+export type EnergyMetricKey = 'deficit';
+
+export interface EnergyMetric {
+  key: EnergyMetricKey;
+  label: string;
+  /** Unit suffix shown after the target, e.g. " kcal". */
+  unit: string;
+  /** Default weekly target (avg kcal/day) used as the input placeholder. */
+  defaultTarget: number;
+}
+
+export const ENERGY_METRICS: Record<EnergyMetricKey, EnergyMetric> = {
+  deficit: {
+    key: 'deficit',
+    label: 'Calorie deficit',
+    unit: ' kcal',
+    defaultTarget: 500,
+  },
+};

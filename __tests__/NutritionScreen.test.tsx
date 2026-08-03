@@ -6,10 +6,10 @@ import { NutritionScreen } from '../src/features/nutrition/NutritionScreen';
 import { useHealthStore } from '../src/state/useHealthStore';
 
 describe('NutritionScreen', () => {
-  it('renders the fuel view and reveals the log-food form on tap', async () => {
+  it('renders the fuel brief and reveals the log-food form on tap', async () => {
     await renderWithProviders(<NutritionScreen navigation={mockNav()} />);
 
-    expect(screen.getByText('Fuel')).toBeOnTheScreen();
+    expect(screen.getByText('Energy')).toBeOnTheScreen();
     expect(screen.getByText('Macros')).toBeOnTheScreen();
 
     // Form is hidden until the user taps "Log food".
@@ -26,10 +26,11 @@ describe('NutritionScreen', () => {
 
     await renderWithProviders(<NutritionScreen navigation={mockNav()} />);
     fireEvent.press(screen.getByLabelText('Log food'));
-    fireEvent.changeText(await screen.findByPlaceholderText('Food name'), 'Banana');
+    fireEvent.changeText(
+      await screen.findByPlaceholderText('Food name'),
+      'Banana',
+    );
     fireEvent.changeText(screen.getByPlaceholderText('kcal'), '105');
-    // Wait for the controlled inputs to commit so the submit handler closes over
-    // the latest values before we press Save.
     await waitFor(() =>
       expect(screen.getByPlaceholderText('kcal').props.value).toBe('105'),
     );

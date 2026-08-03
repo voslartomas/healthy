@@ -1,18 +1,26 @@
 import { EMPTY_SNAPSHOT } from '../src/health';
-import { GoalWeekData } from '../src/health/types';
+import { DailyEnergy, GoalWeekData } from '../src/health/types';
 import {
   countMatchingSessions,
   goalCurrent,
   goalProgress,
   goalWeekly,
+  isAverageGoal,
   isGoalComplete,
   useGoalsStore,
+  weeklyDeficitAvg,
   WeeklyGoal,
 } from '../src/state/useGoalsStore';
 import { useHealthStore } from '../src/state/useHealthStore';
 
 // Auto-tracked weekly totals the goal helpers read from the health snapshot.
-const TRACKED = { steps: 41200, strength: 2, core: 3, zone2: 64, calories: 2380 };
+const TRACKED = {
+  steps: 41200,
+  strength: 2,
+  core: 3,
+  zone2: 64,
+  calories: 2380,
+};
 
 beforeAll(() => {
   useHealthStore.setState({
@@ -81,9 +89,30 @@ describe('goal progress helpers', () => {
 
 describe('activity goals (match by type / displayName + min duration)', () => {
   const activities = [
-    { name: 'Posilování', type: 'STRENGTH_TRAINING', displayName: 'Posilování', durationMin: 42, energyKcal: null, start: 0 },
-    { name: 'Posilování', type: 'STRENGTH_TRAINING', displayName: 'Posilování', durationMin: 20, energyKcal: null, start: 0 },
-    { name: 'Trénink středu těla', type: 'WORKOUT', displayName: 'Trénink středu těla', durationMin: 9, energyKcal: null, start: 0 },
+    {
+      name: 'Posilování',
+      type: 'STRENGTH_TRAINING',
+      displayName: 'Posilování',
+      durationMin: 42,
+      energyKcal: null,
+      start: 0,
+    },
+    {
+      name: 'Posilování',
+      type: 'STRENGTH_TRAINING',
+      displayName: 'Posilování',
+      durationMin: 20,
+      energyKcal: null,
+      start: 0,
+    },
+    {
+      name: 'Trénink středu těla',
+      type: 'WORKOUT',
+      displayName: 'Trénink středu těla',
+      durationMin: 9,
+      energyKcal: null,
+      start: 0,
+    },
   ];
 
   beforeAll(() => {
@@ -142,7 +171,8 @@ describe('activity goals (match by type / displayName + min duration)', () => {
 });
 
 describe('goalWeekly (per-week attainment)', () => {
-  const WEEK = 7 * 24 * 60 * 60 * 1000;
+  const DAY = 24 * 60 * 60 * 1000;
+  const WEEK = 7 * DAY;
   const sess = (dur: number) => ({
     name: 'S',
     type: 'STRENGTH_TRAINING',
@@ -160,9 +190,45 @@ describe('goalWeekly (per-week attainment)', () => {
       match: { field: 'type', value: 'STRENGTH_TRAINING' },
     };
     const history: GoalWeekData[] = [
-      { weekStart: 0, complete: true, activities: [sess(40), sess(50)], tracked: {}, coverage: { steps: true, calories: true, activity: true } },
-      { weekStart: WEEK, complete: true, activities: [sess(40)], tracked: {}, coverage: { steps: true, calories: true, activity: true } },
-      { weekStart: 2 * WEEK, complete: true, activities: [], tracked: {}, coverage: { steps: true, calories: true, activity: false } },
+      {
+        weekStart: 0,
+        complete: true,
+        activities: [sess(40), sess(50)],
+        tracked: {},
+        energy: [],
+        coverage: {
+          steps: true,
+          calories: true,
+          activity: true,
+          energy: false,
+        },
+      },
+      {
+        weekStart: WEEK,
+        complete: true,
+        activities: [sess(40)],
+        tracked: {},
+        energy: [],
+        coverage: {
+          steps: true,
+          calories: true,
+          activity: true,
+          energy: false,
+        },
+      },
+      {
+        weekStart: 2 * WEEK,
+        complete: true,
+        activities: [],
+        tracked: {},
+        energy: [],
+        coverage: {
+          steps: true,
+          calories: true,
+          activity: false,
+          energy: false,
+        },
+      },
     ];
     const weeks = goalWeekly(goal, history);
     expect(weeks[0]).toMatchObject({ current: 2, hit: true, covered: true });
@@ -170,14 +236,134 @@ describe('goalWeekly (per-week attainment)', () => {
     expect(weeks[2].covered).toBe(false); // no activity coverage → not a miss
   });
 
-  it('reads source-goal coverage from the matching source flag', () => {
-    const goal: WeeklyGoal = { id: 'b', name: 'Steps', target: 50000, source: 'steps' };
+  const day = (
+    dayStart: number,
+    eaten: number | null,
+    burned: number | null,
+  ): DailyEnergy => ({
+    dayStart,
+    eaten,
+    burned,
+    net: eaten != null && burned != null ? eaten - burned : null,
+  });
+
+  it('flags deficit goals as average-metric (never mid-week "done")', () => {
+    expect(
+      isAverageGoal({ id: 'd', name: 'D', target: 500, metric: 'deficit' }),
+    ).toBe(true);
+    expect(
+      isAverageGoal({ id: 's', name: 'S', target: 3, source: 'steps' }),
+    ).toBe(false);
+  });
+
+  it('averages the daily deficit over days with both figures', () => {
+    // Deficit = burned − eaten. Days: 500, 300; the half-logged day is skipped.
+    const energy = [
+      day(0, 2000, 2500), // deficit 500
+      day(DAY, 1800, 2100), // deficit 300
+      day(2 * DAY, 2000, null), // no burned → excluded
+    ];
+    expect(weeklyDeficitAvg(energy)).toBe(400);
+    expect(weeklyDeficitAvg([])).toBe(0);
+    // A net surplus reads as a negative average.
+    expect(weeklyDeficitAvg([day(0, 2600, 2000)])).toBe(-600);
+  });
+
+  it('computes hit/miss per week for a deficit goal via energy coverage', () => {
+    const goal: WeeklyGoal = {
+      id: 'd',
+      name: 'Deficit',
+      target: 500,
+      metric: 'deficit',
+    };
     const history: GoalWeekData[] = [
-      { weekStart: 0, complete: true, activities: [], tracked: { steps: 60000 }, coverage: { steps: true, calories: false, activity: false } },
-      { weekStart: WEEK, complete: true, activities: [], tracked: { steps: 10000 }, coverage: { steps: false, calories: false, activity: false } },
+      {
+        weekStart: 0,
+        complete: true,
+        activities: [],
+        tracked: {},
+        energy: [day(0, 2000, 2600), day(DAY, 2000, 2400)], // avg 500
+        coverage: {
+          steps: false,
+          calories: true,
+          activity: false,
+          energy: true,
+        },
+      },
+      {
+        weekStart: WEEK,
+        complete: true,
+        activities: [],
+        tracked: {},
+        energy: [day(WEEK, 2200, 2500)], // avg 300 → miss
+        coverage: {
+          steps: false,
+          calories: true,
+          activity: false,
+          energy: true,
+        },
+      },
+      {
+        weekStart: 2 * WEEK,
+        complete: true,
+        activities: [],
+        tracked: {},
+        energy: [], // no energy data → not covered
+        coverage: {
+          steps: false,
+          calories: false,
+          activity: false,
+          energy: false,
+        },
+      },
     ];
     const weeks = goalWeekly(goal, history);
-    expect(weeks[0]).toMatchObject({ current: 60000, hit: true, covered: true });
+    expect(weeks[0]).toMatchObject({ current: 500, hit: true, covered: true });
+    expect(weeks[1]).toMatchObject({ current: 300, hit: false, covered: true });
+    expect(weeks[2].covered).toBe(false);
+  });
+
+  it('reads source-goal coverage from the matching source flag', () => {
+    const goal: WeeklyGoal = {
+      id: 'b',
+      name: 'Steps',
+      target: 50000,
+      source: 'steps',
+    };
+    const history: GoalWeekData[] = [
+      {
+        weekStart: 0,
+        complete: true,
+        activities: [],
+        tracked: { steps: 60000 },
+        energy: [],
+        coverage: {
+          steps: true,
+          calories: false,
+          activity: false,
+          energy: false,
+        },
+      },
+      {
+        weekStart: WEEK,
+        complete: true,
+        activities: [],
+        tracked: { steps: 10000 },
+        energy: [],
+        coverage: {
+          steps: false,
+          calories: false,
+          activity: false,
+          energy: false,
+        },
+      },
+    ];
+    const weeks = goalWeekly(goal, history);
+    expect(weeks[0]).toMatchObject({
+      current: 60000,
+      hit: true,
+      covered: true,
+    });
     expect(weeks[1].covered).toBe(false); // no steps coverage that week
   });
 });

@@ -44,6 +44,7 @@ async function ensureSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       match_field      TEXT,
       match_value      TEXT,
       min_duration_min REAL,
+      metric           TEXT,
       sort_order       INTEGER NOT NULL DEFAULT 0,
       remote_id        TEXT,
       created_at       INTEGER NOT NULL,
@@ -69,6 +70,11 @@ async function ensureSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       target     REAL NOT NULL,
       updated_at INTEGER NOT NULL,
       PRIMARY KEY (goal_id, week_start)
+    );
+    CREATE TABLE IF NOT EXISTS health_cache (
+      id         INTEGER PRIMARY KEY CHECK (id = 1),
+      raw        TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS common_foods (
       id         TEXT PRIMARY KEY NOT NULL,
@@ -122,6 +128,7 @@ async function ensureGoalColumns(db: SQLite.SQLiteDatabase): Promise<void> {
     ['match_field', 'TEXT'],
     ['match_value', 'TEXT'],
     ['min_duration_min', 'REAL'],
+    ['metric', 'TEXT'],
   ];
   for (const [name, type] of additions) {
     if (!have.has(name)) {

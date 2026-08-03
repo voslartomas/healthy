@@ -9,7 +9,8 @@ export type ScreenName =
   | 'Recovery'
   | 'Cardio'
   | 'Sleep'
-  | 'Settings';
+  | 'Settings'
+  | 'DefineGoal';
 
 /**
  * Minimal navigation surface the screens depend on. React Navigation's own
@@ -43,12 +44,15 @@ export type RootStackParamList = {
   Recovery: undefined;
   Cardio: undefined;
   Sleep: undefined;
-  Settings: undefined;
+  /** Native modal screens. */
+  Coach: undefined;
+  DefineGoal: undefined;
 };
 
+/** The four numbered tabs of the v3 brief (Coach moved to a global FAB). */
 export type RootTabParamList = {
   Today: undefined;
   Nutrition: undefined;
-  Coach: undefined;
   Trends: undefined;
+  Settings: undefined;
 };

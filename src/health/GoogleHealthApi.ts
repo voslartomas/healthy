@@ -133,7 +133,12 @@ interface StepsRollupDataPoint {
 /** A kcal sum as the API returns it: a bare number, a numeric string, or an
  * object carrying `parsedValue`/`source`. Mirrors the reference dashboard's
  * KcalValue + kcalValue() extractor. */
-type KcalSum = number | string | { parsedValue?: number; source?: string } | null | undefined;
+type KcalSum =
+  | number
+  | string
+  | { parsedValue?: number; source?: string }
+  | null
+  | undefined;
 
 interface KcalField {
   kcalSum?: KcalSum;
@@ -152,6 +157,36 @@ interface CaloriesRollupDataPoint {
   calories?: KcalField;
   activeCaloriesBurned?: KcalField;
   activeEnergyBurned?: KcalField;
+}
+
+/** ObservationSampleTime — instantaneous data types (weight, body-fat) carry a
+ * `sampleTime.physicalTime` RFC3339 stamp rather than an interval/civil date. */
+interface ObservationSampleTime {
+  physicalTime?: string;
+}
+
+/** Live payloads report weight as `weightGrams` (e.g. Withings via Health
+ * Connect: 74085 → 74.085 kg), not the docs' `weightKilograms`. Accept both
+ * plus a couple of nested shapes and coerce. */
+interface WeightDataPoint {
+  dataSource?: DataSource;
+  weight?: {
+    weightGrams?: number | string;
+    weightKilograms?: number | string;
+    kilograms?: number | string;
+    weight?: { kilograms?: number | string };
+    value?: { kilograms?: number | string };
+    mass?: { kilograms?: number | string };
+    sampleTime?: ObservationSampleTime;
+  };
+}
+
+interface BodyFatDataPoint {
+  dataSource?: DataSource;
+  bodyFat?: {
+    percentage?: number;
+    sampleTime?: ObservationSampleTime;
+  };
 }
 
 interface ExerciseDataPoint {
@@ -190,7 +225,10 @@ interface NutritionDataPoint {
     totalCarbohydrate?: { grams?: number };
     totalFat?: { grams?: number };
     totalProtein?: { grams?: number };
-    nutrients?: { nutrient?: string; quantity?: { grams?: number; kcal?: number } }[];
+    nutrients?: {
+      nutrient?: string;
+      quantity?: { grams?: number; kcal?: number };
+    }[];
     mealType?: string;
     foodDisplayName?: string;
   };
@@ -258,6 +296,16 @@ function isoToMs(iso: string | undefined): number | null {
   return Number.isNaN(ms) ? null : ms;
 }
 
+/** Coerce a number|string|undefined to a finite number, else null. */
+function numOrNull(v: number | string | undefined): number | null {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'string') {
+    const n = parseFloat(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
 /** Parse a protobuf duration string like "3600s" or "3600.5s" to minutes. */
 function durationToMin(dur: string | undefined): number | null {
   if (!dur) return null;
@@ -320,6 +368,9 @@ export interface GoogleHealthPayloads {
   calories: CaloriesRollupDataPoint[];
   exercise: ExerciseDataPoint[];
   nutrition: NutritionDataPoint[];
+  /** Optional so older callers/tests need not supply them (default []). */
+  weight?: WeightDataPoint[];
+  bodyFat?: BodyFatDataPoint[];
 }
 
 /** Grams for a named nutrient, checking the explicit total field first then the
@@ -494,6 +545,41 @@ export function mapGoogleHealthRaw(
     });
   }
 
+  // Weight (kg) and body fat (%) — instantaneous samples timed by
+  // `sampleTime.physicalTime` (RFC3339), each occasional rather than daily.
+  // Diagnostic: dump the first raw weight point so the exact field shape is
+  // visible in logs if weight reads empty (kept alongside the calories dump).
+  if ((p.weight ?? []).length > 0) {
+    console.log('[GoogleHealth] weight[0] raw:', JSON.stringify(p.weight?.[0]));
+  }
+  const weight: InstantSample[] = [];
+  for (const dp of p.weight ?? []) {
+    const w = dp.weight;
+    const grams = numOrNull(w?.weightGrams);
+    const value =
+      numOrNull(w?.weightKilograms) ??
+      numOrNull(w?.kilograms) ??
+      numOrNull(w?.weight?.kilograms) ??
+      numOrNull(w?.value?.kilograms) ??
+      numOrNull(w?.mass?.kilograms) ??
+      (grams != null ? grams / 1000 : null);
+    const time = isoToMs(w?.sampleTime?.physicalTime);
+    if (value == null || time == null) continue;
+    const source = sourceLabel(dp.dataSource);
+    sources.add(source);
+    weight.push({ value, time, source });
+  }
+
+  const bodyFat: InstantSample[] = [];
+  for (const dp of p.bodyFat ?? []) {
+    const value = dp.bodyFat?.percentage;
+    const time = isoToMs(dp.bodyFat?.sampleTime?.physicalTime);
+    if (value == null || !Number.isFinite(value) || time == null) continue;
+    const source = sourceLabel(dp.dataSource);
+    sources.add(source);
+    bodyFat.push({ value, time, source });
+  }
+
   return {
     hrvRmssd,
     restingHr,
@@ -503,6 +589,8 @@ export function mapGoogleHealthRaw(
     activeEnergy,
     totalEnergy,
     nutrition,
+    weight,
+    bodyFat,
     sources: [...sources],
     readAt: now,
   };
@@ -520,16 +608,38 @@ export type FetchLike = (
     headers?: Record<string, string>;
     body?: string;
   },
-) => Promise<{ ok: boolean; status: number; json(): Promise<unknown>; text(): Promise<string> }>;
+) => Promise<{
+  ok: boolean;
+  status: number;
+  json(): Promise<unknown>;
+  text(): Promise<string>;
+}>;
 
 function isoDaysAgo(now: number, daysBack: number): string {
   return new Date(now - daysBack * 86_400_000).toISOString().split('T')[0];
 }
 
+/** Full RFC3339 timestamp `daysBack` ago — for `sample_time.physical_time`
+ * filters (weight / body-fat), which want a datetime, not a bare date. */
+function isoTimeDaysAgo(now: number, daysBack: number): string {
+  return new Date(now - daysBack * 86_400_000).toISOString();
+}
+
 /** POST body for a 1-day rollup window over the last `daysBack` days. */
 function dailyRollupBody(now: number, daysBack: number): string {
-  const start = new Date(now - daysBack * 86_400_000);
-  const end = new Date(now);
+  return dailyRollupBodyBetween(now, daysBack, 0);
+}
+
+/** POST body for a 1-day rollup window spanning [now−startDaysBack, now−endDaysBack].
+ * Lets callers page a metric (e.g. total-calories, capped at 14-day windows)
+ * across successive windows to assemble a longer history. */
+function dailyRollupBodyBetween(
+  now: number,
+  startDaysBack: number,
+  endDaysBack: number,
+): string {
+  const start = new Date(now - startDaysBack * 86_400_000);
+  const end = new Date(now - endDaysBack * 86_400_000);
   return JSON.stringify({
     range: {
       start: {
@@ -554,6 +664,39 @@ function dailyRollupBody(now: number, daysBack: number): string {
 }
 
 /**
+ * How far back each metric group is fetched. The heavy, SEQUENTIAL pulls —
+ * exercise pagination and the 14-day-capped total-calories windows — dominate
+ * load time, so we let the caller shrink them for a routine ("light") refresh
+ * and reserve the deep ("full") pull for the first load / periodic history
+ * backfill. `metricsDays` stays wide even when light: those are cheap parallel
+ * GETs and the 30-day span is needed for baselines and the trend charts.
+ */
+export interface RawFetchWindows {
+  metricsDays: number;
+  exerciseDays: number;
+  stepsDays: number;
+  caloriesDays: number;
+}
+
+/** Deep history — first load and periodic backfill (slow: many sequential reads). */
+export const FULL_WINDOWS: RawFetchWindows = {
+  metricsDays: 30,
+  exerciseDays: 90,
+  stepsDays: 90,
+  caloriesDays: 84,
+};
+
+/** Recent slice — routine + foreground refresh. Covers today and the current
+ * Mon–Sun goal week; older weeks come from the cached history the caller
+ * splices on. Fast: one or two exercise pages, a single calorie window. */
+export const LIGHT_WINDOWS: RawFetchWindows = {
+  metricsDays: 30,
+  exerciseDays: 14,
+  stepsDays: 14,
+  caloriesDays: 14,
+};
+
+/**
  * Fetch every supported metric from Google Health and map to RawHealthData.
  * `accessToken` is a valid OAuth2 bearer token for {@link GOOGLE_HEALTH_SCOPES};
  * obtaining it (the OAuth/PKCE flow + keychain storage) is the caller's job and
@@ -567,12 +710,15 @@ export async function fetchGoogleHealthRaw(
   accessToken: string,
   now: number,
   fetchImpl: FetchLike,
-  daysBack = 30,
+  windows: RawFetchWindows = FULL_WINDOWS,
 ): Promise<RawHealthData> {
-  const auth = { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' };
+  const daysBack = windows.metricsDays;
+  const auth = {
+    Authorization: `Bearer ${accessToken}`,
+    Accept: 'application/json',
+  };
   // Short label for logs, e.g. "steps" from ".../dataTypes/steps/dataPoints".
-  const label = (path: string) =>
-    path.match(/dataTypes\/([^/]+)/)?.[1] ?? path;
+  const label = (path: string) => path.match(/dataTypes\/([^/]+)/)?.[1] ?? path;
 
   async function getList<T>(path: string): Promise<T[]> {
     const name = label(path);
@@ -596,16 +742,13 @@ export async function fetchGoogleHealthRaw(
     }
   }
 
-  async function postRollup<T>(path: string): Promise<T[]> {
+  async function postRollupBody<T>(path: string, body: string): Promise<T[]> {
     const name = label(path);
     try {
       const res = await fetchImpl(`${BASE_URL}${path}`, {
         method: 'POST',
         headers: { ...auth, 'Content-Type': 'application/json' },
-        // total-calories rollups reject windows > 14 days
-        // (INVALID_ROLLUP_QUERY_DURATION, observed as a live 400). Cap the
-        // rollup window — we only need today + this week out of rollups anyway.
-        body: dailyRollupBody(now, Math.min(daysBack, 14)),
+        body,
       });
       if (!res.ok) {
         const detail = await res.text().catch(() => '');
@@ -615,14 +758,20 @@ export async function fetchGoogleHealthRaw(
         );
         return [];
       }
-      const body = (await res.json()) as RollupResponse<T>;
-      const points = body.rollupDataPoints ?? [];
+      const json = (await res.json()) as RollupResponse<T>;
+      const points = json.rollupDataPoints ?? [];
       console.log(`[GoogleHealth] POST ${name} → ${points.length} points`);
       return points;
     } catch (err) {
       console.warn(`[GoogleHealth] POST ${name} threw`, err);
       return [];
     }
+  }
+
+  /** A 1-day rollup over the last `windowDays` days (single window). Kept for
+   * metrics whose whole history fits one request (e.g. steps). */
+  function postRollup<T>(path: string, windowDays: number): Promise<T[]> {
+    return postRollupBody<T>(path, dailyRollupBody(now, windowDays));
   }
 
   const hrvFilter = encodeURIComponent(
@@ -634,17 +783,25 @@ export async function fetchGoogleHealthRaw(
   const sleepFilter = encodeURIComponent(
     `sleep.interval.civil_end_time >= "${isoDaysAgo(now, daysBack)}"`,
   );
+  // Weight / body-fat are instantaneous samples filtered on their RFC3339
+  // sample time (snake_case field in the filter, kebab-case type in the path).
+  const weightFilter = encodeURIComponent(
+    `weight.sample_time.physical_time >= "${isoTimeDaysAgo(now, daysBack)}"`,
+  );
+  const bodyFatFilter = encodeURIComponent(
+    `body_fat.sample_time.physical_time >= "${isoTimeDaysAgo(now, daysBack)}"`,
+  );
 
   // Exercise (and sleep) are HARD-CAPPED at pageSize 25 by the API — larger
   // values are silently truncated — and results are newest-first, so a single
   // read only ever returns the 25 most-recent sessions (~a week for an active
   // user). To get history we PAGINATE via nextPageToken, bounded by a civil
   // start-time filter. `exercise.interval.civil_start_time` is the documented
-  // filter field (users.dataTypes.dataPoints.list reference). A ~60-day window
-  // comfortably covers the 6-week goal-history view. (This — not any cloud
-  // retention limit — is why older weeks were previously missing.)
-  const EXERCISE_HISTORY_DAYS = 60;
-  const EXERCISE_MAX_PAGES = 20; // 20 × 25 = 500 sessions — a hard safety bound
+  // filter field (users.dataTypes.dataPoints.list reference). A ~90-day window
+  // covers the 12-week goal-history grid. (This — not any cloud retention
+  // limit — is why older weeks were previously missing.)
+  const EXERCISE_HISTORY_DAYS = windows.exerciseDays;
+  const EXERCISE_MAX_PAGES = 30; // 30 × 25 = 750 sessions — a hard safety bound
   const exerciseFilter = encodeURIComponent(
     `exercise.interval.civil_start_time >= "${isoDaysAgo(now, EXERCISE_HISTORY_DAYS)}"`,
   );
@@ -680,28 +837,86 @@ export async function fetchGoogleHealthRaw(
     return out;
   }
 
-  const [hrv, restingHr, sleep, steps, calories, exercise, nutrition] =
-    await Promise.all([
-      getList<HrvDataPoint>(
-        `/users/me/dataTypes/daily-heart-rate-variability/dataPoints?filter=${hrvFilter}`,
-      ),
-      getList<RestingHrDataPoint>(
-        `/users/me/dataTypes/daily-resting-heart-rate/dataPoints?filter=${rhrFilter}`,
-      ),
-      getList<SleepDataPoint>(
-        `/users/me/dataTypes/sleep/dataPoints?filter=${sleepFilter}&page_size=20`,
-      ),
-      postRollup<StepsRollupDataPoint>(
-        '/users/me/dataTypes/steps/dataPoints:dailyRollUp',
-      ),
-      postRollup<CaloriesRollupDataPoint>(
-        '/users/me/dataTypes/total-calories/dataPoints:dailyRollUp',
-      ),
-      getExercise(),
-      getList<NutritionDataPoint>(
-        '/users/me/dataTypes/nutrition-log/dataPoints?page_size=100',
-      ),
-    ]);
+  // Steps power the 12-week steps-goal history, so fetch a full quarter of daily
+  // rollups. If the long window is rejected (or returns nothing), fall back to a
+  // 14-day rollup so "today / this week" totals never break.
+  const STEPS_HISTORY_DAYS = windows.stepsDays;
+  async function getSteps(): Promise<StepsRollupDataPoint[]> {
+    const path = '/users/me/dataTypes/steps/dataPoints:dailyRollUp';
+    const long = await postRollup<StepsRollupDataPoint>(
+      path,
+      STEPS_HISTORY_DAYS,
+    );
+    return long.length ? long : postRollup<StepsRollupDataPoint>(path, 14);
+  }
+
+  // Total-calories (burned) rejects rollup windows > 14 days, so — unlike steps —
+  // a single request can only reach 2 weeks. That was the reason the calorie-
+  // deficit goal history stopped at 2 weeks. Page it across successive 14-day
+  // windows to assemble ~12 weeks, matching the exercise/steps history depth,
+  // and dedupe by day (adjacent windows share their boundary date; the more
+  // recent window wins) so no day's burned total is counted twice.
+  const CALORIES_HISTORY_DAYS = windows.caloriesDays;
+  const CALORIES_WINDOW_DAYS = 14; // API hard cap per rollup window
+  async function getCalories(): Promise<CaloriesRollupDataPoint[]> {
+    const path = '/users/me/dataTypes/total-calories/dataPoints:dailyRollUp';
+    const byDay = new Map<number, CaloriesRollupDataPoint>();
+    for (
+      let offset = 0;
+      offset < CALORIES_HISTORY_DAYS;
+      offset += CALORIES_WINDOW_DAYS
+    ) {
+      const startDaysBack = Math.min(
+        offset + CALORIES_WINDOW_DAYS,
+        CALORIES_HISTORY_DAYS,
+      );
+      const pts = await postRollupBody<CaloriesRollupDataPoint>(
+        path,
+        dailyRollupBodyBetween(now, startDaysBack, offset),
+      );
+      for (const dp of pts) {
+        const ms = isoToMs(dp.startTime) ?? civilToMs(dp.civilStartTime);
+        if (ms == null) continue;
+        const day = Math.floor(ms / 86_400_000);
+        if (!byDay.has(day)) byDay.set(day, dp); // recent window wins
+      }
+    }
+    return [...byDay.values()];
+  }
+
+  const [
+    hrv,
+    restingHr,
+    sleep,
+    steps,
+    calories,
+    exercise,
+    nutrition,
+    weight,
+    bodyFat,
+  ] = await Promise.all([
+    getList<HrvDataPoint>(
+      `/users/me/dataTypes/daily-heart-rate-variability/dataPoints?filter=${hrvFilter}`,
+    ),
+    getList<RestingHrDataPoint>(
+      `/users/me/dataTypes/daily-resting-heart-rate/dataPoints?filter=${rhrFilter}`,
+    ),
+    getList<SleepDataPoint>(
+      `/users/me/dataTypes/sleep/dataPoints?filter=${sleepFilter}&page_size=20`,
+    ),
+    getSteps(),
+    getCalories(),
+    getExercise(),
+    getList<NutritionDataPoint>(
+      '/users/me/dataTypes/nutrition-log/dataPoints?page_size=100',
+    ),
+    getList<WeightDataPoint>(
+      `/users/me/dataTypes/weight/dataPoints?filter=${weightFilter}`,
+    ),
+    getList<BodyFatDataPoint>(
+      `/users/me/dataTypes/body-fat/dataPoints?filter=${bodyFatFilter}`,
+    ),
+  ]);
 
   // Diagnostic: dump the first calories rollup point so the exact field/value
   // shape is visible in logs if burned calories ever looks wrong.
@@ -710,7 +925,17 @@ export async function fetchGoogleHealthRaw(
   }
 
   return mapGoogleHealthRaw(
-    { hrv, restingHr, sleep, steps, calories, exercise, nutrition },
+    {
+      hrv,
+      restingHr,
+      sleep,
+      steps,
+      calories,
+      exercise,
+      nutrition,
+      weight,
+      bodyFat,
+    },
     now,
   );
 }

@@ -17,17 +17,26 @@ function weekData(): GoalWeekData[] {
       weekStart: 0,
       complete: true,
       activities: [
-        { name: 'S', type: 'STRENGTH_TRAINING', displayName: 'Posilování', durationMin: 40, energyKcal: null, start: 0 },
+        {
+          name: 'S',
+          type: 'STRENGTH_TRAINING',
+          displayName: 'Posilování',
+          durationMin: 40,
+          energyKcal: null,
+          start: 0,
+        },
       ],
       tracked: {},
-      coverage: { steps: true, calories: true, activity: true },
+      energy: [],
+      coverage: { steps: true, calories: true, activity: true, energy: false },
     },
     {
       weekStart: WEEK,
       complete: true,
       activities: [],
       tracked: {},
-      coverage: { steps: true, calories: true, activity: false }, // uncovered
+      energy: [],
+      coverage: { steps: true, calories: true, activity: false, energy: false }, // uncovered
     },
   ];
 }

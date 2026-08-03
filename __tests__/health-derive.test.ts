@@ -7,8 +7,10 @@ import {
   dedupeIntervals,
   deriveSnapshot,
   latestFromPrimary,
+  mergeRaw,
   readiness,
   sleepHoursSeries,
+  sleepQualitySeries,
   sourceRank,
   stepsInWindow,
   trackedFromExercise,
@@ -34,6 +36,8 @@ function emptyRaw(): RawHealthData {
     activeEnergy: [],
     totalEnergy: [],
     nutrition: [],
+    weight: [],
+    bodyFat: [],
     sources: [],
     readAt: NOW,
   };
@@ -130,9 +134,33 @@ describe('trackedFromExercise', () => {
     const wk = NOW - 2 * DAY;
     const tracked = trackedFromExercise(
       [
-        { exerciseType: 70, typeName: 'STRENGTH_TRAINING', start: wk, end: wk + 60, durationMin: 45, energyKcal: null, source: FITBIT }, // strength
-        { exerciseType: 56, typeName: 'RUNNING', start: wk, end: wk + 60, durationMin: 30, energyKcal: null, source: FITBIT }, // running → zone2
-        { exerciseType: 79, typeName: 'WALKING', start: wk, end: wk + 60, durationMin: 20, energyKcal: null, source: FITBIT }, // walking → excluded from zone2
+        {
+          exerciseType: 70,
+          typeName: 'STRENGTH_TRAINING',
+          start: wk,
+          end: wk + 60,
+          durationMin: 45,
+          energyKcal: null,
+          source: FITBIT,
+        }, // strength
+        {
+          exerciseType: 56,
+          typeName: 'RUNNING',
+          start: wk,
+          end: wk + 60,
+          durationMin: 30,
+          energyKcal: null,
+          source: FITBIT,
+        }, // running → zone2
+        {
+          exerciseType: 79,
+          typeName: 'WALKING',
+          start: wk,
+          end: wk + 60,
+          durationMin: 20,
+          energyKcal: null,
+          source: FITBIT,
+        }, // walking → excluded from zone2
       ],
       [{ count: 41200, start: NOW - 6 * DAY, end: NOW, source: FITBIT }],
       [{ kcal: 2380, start: NOW - 6 * DAY, end: NOW, source: FITBIT }],
@@ -166,8 +194,20 @@ describe('deriveSnapshot', () => {
   it('derives sleep hours and performance from the last session', () => {
     const raw = emptyRaw();
     raw.sleep = [
-      { start: NOW - DAY, end: NOW - DAY + 6 * 3600_000, durationMin: 360, source: WITHINGS, stages: null },
-      { start: NOW - 12 * 3600_000, end: NOW - 4 * 3600_000, durationMin: 480, source: FITBIT, stages: null },
+      {
+        start: NOW - DAY,
+        end: NOW - DAY + 6 * 3600_000,
+        durationMin: 360,
+        source: WITHINGS,
+        stages: null,
+      },
+      {
+        start: NOW - 12 * 3600_000,
+        end: NOW - 4 * 3600_000,
+        durationMin: 480,
+        source: FITBIT,
+        stages: null,
+      },
     ];
     const snap = deriveSnapshot(raw, NOW);
     expect(snap.sleep?.hours).toBeCloseTo(8);
@@ -219,6 +259,29 @@ describe('trend series', () => {
     expect(s).toHaveLength(1);
     expect(s[0].value).toBe(7);
   });
+
+  it('computes sleep quality (efficiency %) only for nights with stages', () => {
+    const sleep = [
+      {
+        start: dayStart - 8 * 3_600_000,
+        end: dayStart - 3_600_000,
+        durationMin: 420,
+        source: FITBIT,
+        // 6h30 asleep (deep+rem+light) of 7h total → 92.9% → 93%.
+        stages: { deepMin: 90, remMin: 120, lightMin: 180, awakeMin: 30 },
+      },
+      {
+        start: dayStart - 2 * DAY,
+        end: dayStart - 2 * DAY + 6 * 3_600_000,
+        durationMin: 360,
+        source: FITBIT,
+        stages: null, // no stages → no quality point
+      },
+    ];
+    const q = sleepQualitySeries(sleep);
+    expect(q).toHaveLength(1);
+    expect(q[0].value).toBe(93);
+  });
 });
 
 describe('dailyEnergySeries', () => {
@@ -240,9 +303,19 @@ describe('dailyEnergySeries', () => {
     ];
     raw.totalEnergy = [
       // Today: eaten 1800, burned 2400 → net -600.
-      { kcal: 2400, start: startOfToday, end: startOfToday + DAY, source: 'Google Health' },
+      {
+        kcal: 2400,
+        start: startOfToday,
+        end: startOfToday + DAY,
+        source: 'Google Health',
+      },
       // Yesterday: burned only, no food logged → net null.
-      { kcal: 2300, start: startOfToday - DAY, end: startOfToday, source: 'Google Health' },
+      {
+        kcal: 2300,
+        start: startOfToday - DAY,
+        end: startOfToday,
+        source: 'Google Health',
+      },
     ];
     const series = dailyEnergySeries(raw, NOW);
     expect(series).toHaveLength(ADHERENCE_DAYS);
@@ -264,9 +337,36 @@ describe('activityGoalOptions', () => {
     const wk = NOW - 2 * DAY;
     const opts = activityGoalOptions(
       [
-        { exerciseType: 70, typeName: 'STRENGTH_TRAINING', displayName: 'Posilování', start: wk, end: wk + 60, durationMin: 42, energyKcal: null, source: FITBIT },
-        { exerciseType: 70, typeName: 'STRENGTH_TRAINING', displayName: 'Posilování', start: wk + DAY, end: wk + DAY + 60, durationMin: 51, energyKcal: null, source: FITBIT },
-        { exerciseType: 0, typeName: 'WORKOUT', displayName: 'Trénink středu těla', start: wk + 2 * DAY, end: wk + 2 * DAY + 60, durationMin: 9, energyKcal: null, source: FITBIT },
+        {
+          exerciseType: 70,
+          typeName: 'STRENGTH_TRAINING',
+          displayName: 'Posilování',
+          start: wk,
+          end: wk + 60,
+          durationMin: 42,
+          energyKcal: null,
+          source: FITBIT,
+        },
+        {
+          exerciseType: 70,
+          typeName: 'STRENGTH_TRAINING',
+          displayName: 'Posilování',
+          start: wk + DAY,
+          end: wk + DAY + 60,
+          durationMin: 51,
+          energyKcal: null,
+          source: FITBIT,
+        },
+        {
+          exerciseType: 0,
+          typeName: 'WORKOUT',
+          displayName: 'Trénink středu těla',
+          start: wk + 2 * DAY,
+          end: wk + 2 * DAY + 60,
+          durationMin: 9,
+          energyKcal: null,
+          source: FITBIT,
+        },
       ],
       NOW,
     );
@@ -277,7 +377,9 @@ describe('activityGoalOptions', () => {
     expect(strengthType?.count).toBe(2);
     expect(strengthType?.maxDurationMin).toBe(51);
     expect(
-      opts.some(o => o.field === 'displayName' && o.value === 'Trénink středu těla'),
+      opts.some(
+        o => o.field === 'displayName' && o.value === 'Trénink středu těla',
+      ),
     ).toBe(true);
     expect(
       opts.some(o => o.field === 'displayName' && o.value === 'Posilování'),
@@ -286,11 +388,42 @@ describe('activityGoalOptions', () => {
     expect(opts[0].count).toBe(2);
   });
 
-  it('excludes sessions older than the 14-day window', () => {
-    const old = NOW - 20 * DAY;
+  it('includes sessions within the 12-week window', () => {
+    const wk6 = NOW - 42 * DAY;
     const opts = activityGoalOptions(
       [
-        { exerciseType: 70, typeName: 'STRENGTH_TRAINING', displayName: null, start: old, end: old + 60, durationMin: 40, energyKcal: null, source: FITBIT },
+        {
+          exerciseType: 70,
+          typeName: 'ROWING',
+          displayName: null,
+          start: wk6,
+          end: wk6 + 60,
+          durationMin: 40,
+          energyKcal: null,
+          source: FITBIT,
+        },
+      ],
+      NOW,
+    );
+    expect(opts.some(o => o.field === 'type' && o.value === 'ROWING')).toBe(
+      true,
+    );
+  });
+
+  it('excludes sessions older than the 12-week window', () => {
+    const old = NOW - 90 * DAY;
+    const opts = activityGoalOptions(
+      [
+        {
+          exerciseType: 70,
+          typeName: 'STRENGTH_TRAINING',
+          displayName: null,
+          start: old,
+          end: old + 60,
+          durationMin: 40,
+          energyKcal: null,
+          source: FITBIT,
+        },
       ],
       NOW,
     );
@@ -319,11 +452,38 @@ describe('weeklyGoalHistory', () => {
     const thisWeek = weekStart + 2 * DAY;
     const lastWeek = weekStart - 5 * DAY;
     raw.exercise = [
-      { exerciseType: 70, typeName: 'STRENGTH_TRAINING', displayName: 'Posilování', start: thisWeek, end: thisWeek + 3_600_000, durationMin: 40, energyKcal: null, source: FITBIT },
-      { exerciseType: 70, typeName: 'STRENGTH_TRAINING', displayName: 'Posilování', start: lastWeek, end: lastWeek + 3_600_000, durationMin: 35, energyKcal: null, source: FITBIT },
+      {
+        exerciseType: 70,
+        typeName: 'STRENGTH_TRAINING',
+        displayName: 'Posilování',
+        start: thisWeek,
+        end: thisWeek + 3_600_000,
+        durationMin: 40,
+        energyKcal: null,
+        source: FITBIT,
+      },
+      {
+        exerciseType: 70,
+        typeName: 'STRENGTH_TRAINING',
+        displayName: 'Posilování',
+        start: lastWeek,
+        end: lastWeek + 3_600_000,
+        durationMin: 35,
+        energyKcal: null,
+        source: FITBIT,
+      },
     ];
-    raw.steps = [{ count: 5000, start: thisWeek, end: thisWeek + 3_600_000, source: FITBIT }];
-    raw.activeEnergy = [{ kcal: 300, start: thisWeek, end: thisWeek + 3_600_000, source: FITBIT }];
+    raw.steps = [
+      {
+        count: 5000,
+        start: thisWeek,
+        end: thisWeek + 3_600_000,
+        source: FITBIT,
+      },
+    ];
+    raw.activeEnergy = [
+      { kcal: 300, start: thisWeek, end: thisWeek + 3_600_000, source: FITBIT },
+    ];
 
     const weeks = weeklyGoalHistory(raw, NOW, 4);
     expect(weeks).toHaveLength(4);
@@ -346,7 +506,16 @@ describe('weeklyGoalHistory', () => {
     const raw = emptyRaw();
     const recent = weekStartMs(NOW) + 2 * DAY; // one session in the current week
     raw.exercise = [
-      { exerciseType: 70, typeName: 'STRENGTH_TRAINING', displayName: null, start: recent, end: recent + 3_600_000, durationMin: 40, energyKcal: null, source: FITBIT },
+      {
+        exerciseType: 70,
+        typeName: 'STRENGTH_TRAINING',
+        displayName: null,
+        start: recent,
+        end: recent + 3_600_000,
+        durationMin: 40,
+        energyKcal: null,
+        source: FITBIT,
+      },
     ];
     const weeks = weeklyGoalHistory(raw, NOW, 6);
     // Current week has data → covered; older weeks (before any session) → not.
@@ -358,6 +527,103 @@ describe('weeklyGoalHistory', () => {
     const weeks = weeklyGoalHistory(emptyRaw(), NOW, 6);
     expect(weeks.every(w => w.coverage.activity === false)).toBe(true);
   });
+
+  it('fills per-week energy days and flags energy coverage for deficit goals', () => {
+    const raw = emptyRaw();
+    const weekStart = weekStartMs(NOW);
+    const thisWeek = weekStart + 2 * DAY;
+    raw.nutrition = [
+      {
+        start: thisWeek + 3_600_000,
+        end: thisWeek + 3_600_000,
+        name: 'Lunch',
+        mealType: null,
+        kcal: 2000,
+        proteinG: null,
+        carbsG: null,
+        fatG: null,
+        source: 'x',
+      },
+    ];
+    raw.totalEnergy = [
+      {
+        kcal: 2600,
+        start: thisWeek,
+        end: thisWeek + DAY,
+        source: 'Google Health',
+      },
+    ];
+
+    const weeks = weeklyGoalHistory(raw, NOW, 4);
+    const current = weeks[weeks.length - 1];
+    // The day with both figures has net = eaten − burned = 2000 − 2600 = −600.
+    const covered = current.energy.find(d => d.net != null);
+    expect(covered?.net).toBe(-600);
+    expect(current.coverage.energy).toBe(true);
+    // A week with no nutrition/energy records is not energy-covered.
+    expect(weeks[0].coverage.energy).toBe(false);
+  });
+});
+
+describe('mergeRaw (cached history + recent slice)', () => {
+  const ex = (start: number, source = FITBIT) => ({
+    exerciseType: 70,
+    typeName: 'STRENGTH_TRAINING',
+    displayName: null,
+    start,
+    end: start + 3_600_000,
+    durationMin: 40,
+    energyKcal: null,
+    source,
+  });
+  const kcal = (start: number, kcalV: number) => ({
+    kcal: kcalV,
+    start,
+    end: start + DAY,
+    source: 'Google Health',
+  });
+
+  it('keeps history before the cutoff, recent after, deduping the overlap', () => {
+    const cutoff = NOW - 14 * DAY;
+    const history: RawHealthData = {
+      ...emptyRaw(),
+      hrvRmssd: [{ value: 40, time: NOW - 20 * DAY, source: FITBIT }], // stale
+      exercise: [ex(NOW - 30 * DAY), ex(NOW - 2 * DAY)], // old kept; recent one dup
+      totalEnergy: [kcal(NOW - 30 * DAY, 2000), kcal(NOW - 2 * DAY, 9999)],
+      sources: ['A'],
+    };
+    const recent: RawHealthData = {
+      ...emptyRaw(),
+      hrvRmssd: [{ value: 55, time: NOW - DAY, source: FITBIT }], // fresh
+      exercise: [ex(NOW - 2 * DAY), ex(NOW - DAY)], // boundary dup + newest
+      totalEnergy: [kcal(NOW - 2 * DAY, 2400), kcal(NOW - DAY, 2500)],
+      sources: ['B'],
+    };
+
+    const merged = mergeRaw(history, recent, cutoff);
+
+    // Cheap metrics come wholly from `recent`.
+    expect(merged.hrvRmssd).toEqual(recent.hrvRmssd);
+    // Exercise: old (−30d) + the shared −2d ONCE + newest (−1d) = 3, no dup.
+    const starts = merged.exercise.map(e => e.start).sort((a, b) => a - b);
+    expect(starts).toEqual([NOW - 30 * DAY, NOW - 2 * DAY, NOW - DAY]);
+    // The overlap day takes the RECENT value (2400), not the stale 9999.
+    const overlap = merged.totalEnergy.find(e => e.start === NOW - 2 * DAY);
+    expect(overlap?.kcal).toBe(2400);
+    // Source labels are unioned across both reads.
+    expect(new Set(merged.sources)).toEqual(new Set(['A', 'B']));
+  });
+
+  it('drops history at/after the cutoff (recent owns that window)', () => {
+    const cutoff = NOW - 14 * DAY;
+    const history: RawHealthData = {
+      ...emptyRaw(),
+      exercise: [ex(NOW - 10 * DAY)], // inside recent window → dropped
+    };
+    const recent: RawHealthData = { ...emptyRaw(), exercise: [ex(NOW - DAY)] };
+    const merged = mergeRaw(history, recent, cutoff);
+    expect(merged.exercise.map(e => e.start)).toEqual([NOW - DAY]);
+  });
 });
 
 describe('cardioFromExercise', () => {
@@ -366,13 +632,49 @@ describe('cardioFromExercise', () => {
     const y = today - DAY;
     const c = cardioFromExercise(
       [
-        { exerciseType: 56, typeName: 'RUNNING', start: today + 3_600_000, end: today + 7_200_000, durationMin: 40, energyKcal: null, hrZones: { lightMin: 10, moderateMin: 20, vigorousMin: 5, peakMin: 0 }, source: FITBIT },
-        { exerciseType: 56, typeName: 'RUNNING', start: y + 3_600_000, end: y + 5_400_000, durationMin: 30, energyKcal: null, hrZones: { lightMin: 0, moderateMin: 0, vigorousMin: 0, peakMin: 10 }, source: FITBIT },
-        { exerciseType: 70, typeName: 'STRENGTH_TRAINING', start: today + 20_000_000, end: today + 22_000_000, durationMin: 30, energyKcal: null, source: FITBIT }, // no HR zones
+        {
+          exerciseType: 56,
+          typeName: 'RUNNING',
+          start: today + 3_600_000,
+          end: today + 7_200_000,
+          durationMin: 40,
+          energyKcal: null,
+          hrZones: {
+            lightMin: 10,
+            moderateMin: 20,
+            vigorousMin: 5,
+            peakMin: 0,
+          },
+          source: FITBIT,
+        },
+        {
+          exerciseType: 56,
+          typeName: 'RUNNING',
+          start: y + 3_600_000,
+          end: y + 5_400_000,
+          durationMin: 30,
+          energyKcal: null,
+          hrZones: { lightMin: 0, moderateMin: 0, vigorousMin: 0, peakMin: 10 },
+          source: FITBIT,
+        },
+        {
+          exerciseType: 70,
+          typeName: 'STRENGTH_TRAINING',
+          start: today + 20_000_000,
+          end: today + 22_000_000,
+          durationMin: 30,
+          energyKcal: null,
+          source: FITBIT,
+        }, // no HR zones
       ],
       NOW,
     );
-    expect(c.zones7d).toEqual({ lightMin: 10, moderateMin: 20, vigorousMin: 5, peakMin: 10 });
+    expect(c.zones7d).toEqual({
+      lightMin: 10,
+      moderateMin: 20,
+      vigorousMin: 5,
+      peakMin: 10,
+    });
     expect(c.todayLoad).toBe(65); // 10×1 + 20×2 + 5×3 + 0×4
     expect(c.weekLoad).toBe(105); // + yesterday 10×4 = 40
     expect(c.daily).toHaveLength(7);
@@ -383,12 +685,25 @@ describe('cardioFromExercise', () => {
     const today = NOW - (NOW % DAY);
     const c = cardioFromExercise(
       [
-        { exerciseType: 70, typeName: 'STRENGTH_TRAINING', start: today + 3_600_000, end: today + 7_200_000, durationMin: 45, energyKcal: null, source: FITBIT },
+        {
+          exerciseType: 70,
+          typeName: 'STRENGTH_TRAINING',
+          start: today + 3_600_000,
+          end: today + 7_200_000,
+          durationMin: 45,
+          energyKcal: null,
+          source: FITBIT,
+        },
       ],
       NOW,
     );
     expect(c.hasZoneData).toBe(false);
     expect(c.weekLoad).toBe(0);
-    expect(c.zones7d).toEqual({ lightMin: 0, moderateMin: 0, vigorousMin: 0, peakMin: 0 });
+    expect(c.zones7d).toEqual({
+      lightMin: 0,
+      moderateMin: 0,
+      vigorousMin: 0,
+      peakMin: 0,
+    });
   });
 });

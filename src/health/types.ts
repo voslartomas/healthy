@@ -113,6 +113,10 @@ export interface RawHealthData {
   /** Total energy expenditure (TDEE = active + basal), for the deficit. */
   totalEnergy: EnergyRecord[];
   nutrition: NutritionEntry[];
+  /** Body-weight samples (kilograms); occasional, not daily. */
+  weight: InstantSample[];
+  /** Body-fat samples (percentage 0–100); occasional, not daily. */
+  bodyFat: InstantSample[];
   /** Distinct source packages seen across all record types. */
   sources: string[];
   /** Epoch ms when the read completed. */
@@ -178,7 +182,14 @@ export interface TrendSeries {
   hrv: TrendPoint[];
   restingHr: TrendPoint[];
   sleepHours: TrendPoint[];
+  /** Sleep quality (efficiency %) from the stage breakdown; distinct from
+   * length. Only nights with reported stages produce a point. */
+  sleepQuality: TrendPoint[];
   readiness: TrendPoint[];
+  /** Body weight (kg), one point per measured day, oldest first. */
+  weight: TrendPoint[];
+  /** Body fat (%), one point per measured day, oldest first. */
+  bodyFat: TrendPoint[];
 }
 
 /**
@@ -270,6 +281,9 @@ export interface WeekCoverage {
   /** Whether the ~30-day exercise fetch window covers this week (for activity /
    * zone2 / strength / core goals). */
   activity: boolean;
+  /** Whether at least one day this week has BOTH logged food and burned energy,
+   * so an energy-balance (deficit) goal can be judged. */
+  energy: boolean;
 }
 
 /**
@@ -286,6 +300,8 @@ export interface GoalWeekData {
   complete: boolean;
   activities: ActivitySummary[];
   tracked: Partial<Record<GoalSourceKey, number>>;
+  /** The week's per-day energy balance (for average-deficit goals). */
+  energy: DailyEnergy[];
   coverage: WeekCoverage;
 }
 

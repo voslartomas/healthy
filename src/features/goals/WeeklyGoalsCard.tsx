@@ -1,336 +1,187 @@
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
-import { Card } from '../../components/Card';
-import { Icon, IconName } from '../../components/Icon';
-import { ProgressBar } from '../../components/ProgressBar';
-import { Ring } from '../../components/Ring';
-import { GOAL_SOURCES } from '../../data/goalSources';
+import { AppNav } from '../../app/navigation/types';
+import { M, Section } from '../../components/brief';
+import { ENERGY_METRICS, GOAL_SOURCES } from '../../data/goalSources';
 import { removeGoal } from '../../state/goalsService';
 import { useHealthStore } from '../../state/useHealthStore';
 import {
   goalCurrent,
   goalProgress,
+  isAverageGoal,
   isGoalComplete,
   useGoalsStore,
   WeeklyGoal,
 } from '../../state/useGoalsStore';
-import { monoFont, radii, useTheme } from '../../theme/theme';
-import { GoalDefinitionSheet } from './GoalDefinitionSheet';
+import { useTheme } from '../../theme/theme';
 
-/** Group a number with thousands separators (Hermes-safe, no Intl dependency). */
-function fmt(n: number): string {
-  return Math.round(n)
-    .toString()
-    .replace(/\B(?=(\d{3})+(?!\d))/g, ',');
-}
-
-function headline(avg: number, count: number): string {
-  if (count === 0) return 'Set your first goal';
-  if (avg >= 0.8) return 'Crushing it this week';
-  if (avg >= 0.5) return 'Strong week so far';
-  return "Let's get moving";
+/** Group + abbreviate a number ("56,000" → "56K"). */
+function kfmt(n: number): string {
+  const r = Math.round(n);
+  if (r >= 10000)
+    return `${(Math.round(r / 100) / 10).toString().replace(/\.0$/, '')}K`;
+  return r.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
 /** "This week · N days left" — week runs Monday–Sunday. */
-function weekLabel(): string {
+function daysLeftLabel(): string {
   const dayIdx = (new Date().getDay() + 6) % 7; // Mon=0 … Sun=6
   const left = 6 - dayIdx;
-  return `This week · ${left} day${left === 1 ? '' : 's'} left`;
+  return `${left} DAY${left === 1 ? '' : 'S'} LEFT`;
 }
 
-/** Icon for an activity goal (no aggregate source): a light heuristic on the
- * matched value/name so strength / core / cardio read differently. */
-function goalIcon(goal: WeeklyGoal): IconName {
-  const v = `${goal.match?.value ?? ''} ${goal.name}`.toLowerCase();
-  if (/strength|weight|posil/.test(v)) return 'strength';
-  if (/core|stred|střed|abs|pilates|jádr/.test(v)) return 'core';
-  return 'zone2';
-}
-
-export function WeeklyGoalsCard() {
+/** The Today screen's "03 Week" section: auto-tracked weekly goals with inline
+ * edit + a native modal screen to define new ones. Kept as its own component
+ * because it owns the editing state and subscribes to the goals + snapshot
+ * stores; the host passes `navigation` so it can push the DefineGoal modal. */
+export function WeeklyGoalsCard({ navigation }: { navigation: AppNav }) {
   const t = useTheme();
+  const c = t.colors;
   const goals = useGoalsStore(s => s.goals);
-  const tracked = useHealthStore(s => s.snapshot.tracked);
-  const activities = useHealthStore(s => s.snapshot.activities);
   const [editing, setEditing] = useState(false);
-  const [sheetOpen, setSheetOpen] = useState(false);
-
-  const total = goals.reduce(
-    (sum, g) => sum + goalProgress(g, tracked, activities),
-    0,
-  );
-  const avg = goals.length ? total / goals.length : 0;
-  const doneCount = goals.filter(g =>
-    isGoalComplete(g, tracked, activities),
-  ).length;
 
   return (
-    <Card>
-      <View style={styles.head}>
-        <Text style={[styles.week, { color: t.colors.muted }]}>
-          {weekLabel()}
-        </Text>
+    <Section
+      n="03"
+      title="Week"
+      titleRight={
+        <View style={styles.titleRight}>
+          <Text style={M(700, 10.5, { color: c.fnt })}>{daysLeftLabel()}</Text>
+          <Pressable
+            onPress={() => setEditing(e => !e)}
+            accessibilityRole="button"
+            accessibilityLabel={editing ? 'Done editing goals' : 'Edit goals'}
+          >
+            <Text style={M(700, 10.5, { ls: 1, color: c.acc })}>
+              {editing ? 'DONE' : 'EDIT'}
+            </Text>
+          </Pressable>
+        </View>
+      }
+    >
+      <View style={styles.list}>
+        {goals.map(g => (
+          <GoalRow key={g.id} goal={g} editing={editing} />
+        ))}
         <Pressable
-          onPress={() => setEditing(e => !e)}
+          onPress={() => navigation.navigate('DefineGoal')}
           accessibilityRole="button"
+          accessibilityLabel="Define a goal"
+          style={styles.add}
         >
-          <Text style={[styles.config, { color: t.colors.accent }]}>
-            {editing ? 'Done' : 'Edit'}
+          <Text style={M(700, 10, { ls: 1.6, color: c.acc })}>
+            + DEFINE GOAL
           </Text>
         </Pressable>
       </View>
-
-      <View style={styles.hero}>
-        <Ring
-          progress={avg}
-          color={t.colors.accent}
-          size={80}
-          strokeWidth={9}
-          value={goals.length ? `${Math.round(avg * 100)}%` : '—'}
-          label="on track"
-          valueFontSize={20}
-        />
-        <View style={styles.heroMeta}>
-          <Text style={[styles.heroTitle, { color: t.colors.fg }]}>
-            {headline(avg, goals.length)}
-          </Text>
-          <Text style={[styles.heroBody, { color: t.colors.muted }]}>
-            {goals.length === 0
-              ? 'Auto-tracked from your steps and logged activities.'
-              : `${doneCount} of ${goals.length} goals complete · auto-tracked from steps & activities`}
-          </Text>
-        </View>
-      </View>
-
-      <View style={styles.list}>
-        {goals.map((g, i) => (
-          <GoalRow key={g.id} goal={g} editing={editing} first={i === 0} />
-        ))}
-      </View>
-
-      <Pressable
-        onPress={() => setSheetOpen(true)}
-        accessibilityRole="button"
-        style={({ pressed }) => [
-          styles.add,
-          { borderColor: t.colors.border, backgroundColor: t.colors.surface2 },
-          pressed && { transform: [{ scale: 0.985 }] },
-        ]}
-      >
-        <Icon name="plus" size={15} color={t.colors.accent} strokeWidth={2} />
-        <Text style={[styles.addText, { color: t.colors.accent }]}>
-          Define a goal
-        </Text>
-      </Pressable>
-
-      <GoalDefinitionSheet
-        visible={sheetOpen}
-        onClose={() => setSheetOpen(false)}
-      />
-    </Card>
+    </Section>
   );
 }
 
-function GoalRow({
-  goal,
-  editing,
-  first,
-}: {
-  goal: WeeklyGoal;
-  editing: boolean;
-  first: boolean;
-}) {
+function GoalRow({ goal, editing }: { goal: WeeklyGoal; editing: boolean }) {
   const t = useTheme();
-  const tracked = useHealthStore(s => s.snapshot.tracked);
-  const activities = useHealthStore(s => s.snapshot.activities);
-  const done = isGoalComplete(goal, tracked, activities);
-  const src = goal.source ? GOAL_SOURCES[goal.source] : undefined;
-  const icon: IconName = src?.icon ?? goalIcon(goal);
-  const unit = src?.unit ?? '';
-  const cur = goalCurrent(goal, tracked, activities);
+  const c = t.colors;
+  // Progress must reflect the *calendar* week (Mon–Sun) the header counts down,
+  // not a rolling last-7-days window — otherwise on Monday last week's activity
+  // still counts and every goal reads as already finished. The current-week
+  // entry weeklyGoalHistory already derives uses exactly that Monday-based
+  // window, so reusing it keeps this tile and the Trends grid in lock-step.
+  const week = useHealthStore(
+    s => s.snapshot.weeklyHistory[s.snapshot.weeklyHistory.length - 1],
+  );
+  const tracked = week?.tracked ?? {};
+  const activities = week?.activities ?? [];
+  const energy = week?.energy ?? [];
+  const p = goalProgress(goal, tracked, activities, energy);
+  const cur = goalCurrent(goal, tracked, activities, energy);
+  const unit = goal.source
+    ? GOAL_SOURCES[goal.source].unit
+    : goal.metric
+      ? ENERGY_METRICS[goal.metric].unit
+      : '';
+
+  // An average goal (deficit) is a whole-week average, so it is never "done"
+  // mid-week — a strong day-1 average can still slip. Show it as live progress
+  // with the count of days that have data so far, so it reads as in-progress
+  // rather than finished. Accumulating goals keep the ✓/complete treatment.
+  const avg = isAverageGoal(goal);
+  const done = !avg && isGoalComplete(goal, tracked, activities, energy);
+  const loggedDays = avg ? energy.filter(d => d.net != null).length : 0;
+
+  const barColor = done ? c.grn : p >= 4 / 7 ? c.ink : c.acc;
+  const valColor = done ? c.grn : p >= 4 / 7 ? c.ink : c.acc;
+  const valText = avg
+    ? `${kfmt(cur)}/${kfmt(goal.target)}${unit} · ${loggedDays}d`
+    : done
+      ? `${kfmt(goal.target)}/${kfmt(goal.target)}`
+      : `${kfmt(cur)}/${kfmt(goal.target)}${unit}`;
 
   return (
-    <View
-      style={[
-        styles.goal,
-        !first && {
-          borderTopColor: t.colors.border,
-          borderTopWidth: StyleSheet.hairlineWidth,
-        },
-      ]}
-    >
-      <View
-        style={[
-          styles.gic,
-          { backgroundColor: done ? t.colors.recStateBg : t.colors.surface2 },
-        ]}
-      >
-        <Icon name={icon} size={19} color={t.colors.accent} />
+    <View style={styles.goal}>
+      <View style={styles.goalTop}>
+        <Text
+          style={[
+            M(700, 10, {
+              lh: 14,
+              ls: 0.6,
+              upper: true,
+              color: done ? c.grn : c.mut,
+            }),
+            styles.label,
+          ]}
+        >
+          {goal.name}
+          {done ? ' ✓' : ''}
+        </Text>
+        <Text style={[M(700, 10, { lh: 14, color: valColor }), styles.val]}>
+          {valText}
+        </Text>
+        {editing ? (
+          <Pressable
+            onPress={() => removeGoal(goal.id)}
+            accessibilityRole="button"
+            accessibilityLabel={`Remove ${goal.name} goal`}
+            hitSlop={8}
+            style={[styles.remove, { borderColor: c.hair }]}
+          >
+            <Text style={M(700, 11, { color: c.fnt })}>×</Text>
+          </Pressable>
+        ) : null}
       </View>
-      <View style={styles.gmain}>
-        <View style={styles.grow}>
-          <View style={styles.gnameWrap}>
-            <Text
-              style={[styles.gname, { color: t.colors.fg }]}
-              numberOfLines={1}
-            >
-              {goal.name}
-            </Text>
-            <View style={[styles.auto, { backgroundColor: t.colors.surface2 }]}>
-              <Icon name="bolt" size={9} color={t.colors.muted} />
-              <Text style={[styles.autoText, { color: t.colors.muted }]}>
-                Auto
-              </Text>
-            </View>
-          </View>
-          <Text style={[styles.gval, { color: t.colors.muted }]}>
-            <Text style={{ color: t.colors.fg }}>{fmt(cur)}</Text> /{' '}
-            {fmt(goal.target)}
-            {unit}
-            {goal.minDurationMin ? ` · ≥${goal.minDurationMin}m` : ''}
-          </Text>
-        </View>
-        <ProgressBar
-          progress={goalProgress(goal, tracked)}
-          color={done ? t.colors.rec : t.colors.accent}
-          height={8}
+      <View style={[styles.track, { backgroundColor: c.track }]}>
+        <View
+          style={{
+            width: `${p * 100}%`,
+            height: '100%',
+            borderRadius: 3,
+            backgroundColor: barColor,
+          }}
         />
       </View>
-      {editing ? (
-        <Pressable
-          onPress={() => removeGoal(goal.id)}
-          accessibilityRole="button"
-          accessibilityLabel={`Remove ${goal.name} goal`}
-          hitSlop={8}
-        >
-          <Icon name="close" size={16} color={t.colors.faint} strokeWidth={2} />
-        </Pressable>
-      ) : done ? (
-        <Icon name="check" size={18} color={t.colors.rec} strokeWidth={2.4} />
-      ) : (
-        <View style={styles.checkSpacer} />
-      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  head: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-  },
-  week: {
-    fontFamily: monoFont,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-  },
-  config: {
-    fontFamily: monoFont,
-    fontSize: 11,
-    fontWeight: '700',
-    letterSpacing: 0.4,
-    textTransform: 'uppercase',
-    paddingVertical: 6,
-    paddingHorizontal: 4,
-  },
-  hero: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  heroMeta: {
-    flex: 1,
-  },
-  heroTitle: {
-    fontSize: 17,
-    fontWeight: '800',
-    letterSpacing: -0.2,
-  },
-  heroBody: {
-    fontSize: 12.5,
-    marginTop: 4,
-    lineHeight: 18,
-  },
-  list: {
-    marginTop: 6,
-  },
-  goal: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingVertical: 13,
-  },
-  gic: {
-    width: 38,
-    height: 38,
-    borderRadius: radii.sm,
+  titleRight: { flexDirection: 'row', alignItems: 'baseline', gap: 12 },
+  list: { marginTop: 14, gap: 13 },
+  goal: { gap: 7 },
+  goalTop: { flexDirection: 'row', alignItems: 'baseline', gap: 10 },
+  label: { flex: 1, minWidth: 0 },
+  track: { height: 6, borderRadius: 3, overflow: 'hidden' },
+  val: { flexShrink: 0, textAlign: 'right' },
+  remove: {
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  gmain: {
-    flex: 1,
-    minWidth: 0,
-  },
-  grow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    gap: 8,
-    marginBottom: 8,
-  },
-  gnameWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    flexShrink: 1,
-  },
-  gname: {
-    fontSize: 14,
-    fontWeight: '700',
-    flexShrink: 1,
-  },
-  auto: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 3,
-    paddingVertical: 3,
-    paddingHorizontal: 6,
-    borderRadius: 6,
-  },
-  autoText: {
-    fontFamily: monoFont,
-    fontSize: 8.5,
-    fontWeight: '700',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-  },
-  gval: {
-    fontFamily: monoFont,
-    fontSize: 12,
-    fontWeight: '700',
   },
   add: {
-    marginTop: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 7,
-    paddingVertical: 14,
-    borderRadius: radii.md,
-    borderWidth: 1,
-    borderStyle: 'dashed',
-  },
-  addText: {
-    fontSize: 12,
-    fontWeight: '700',
-    letterSpacing: 0.2,
-  },
-  checkSpacer: {
-    width: 18,
+    paddingVertical: 2,
   },
 });
