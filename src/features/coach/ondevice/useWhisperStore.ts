@@ -147,6 +147,15 @@ export const useWhisperStore = create<WhisperState>((set, get) => ({
       throw new Error('Voice model not downloaded.');
     }
     await whisperEngine.load(MODEL_PATH);
-    return whisperEngine.transcribe(audioUri, { language });
+    try {
+      return await whisperEngine.transcribe(audioUri, { language });
+    } finally {
+      // Free the model's memory as soon as the transcript is out. Voice is
+      // one-shot dictation, so there's no need to keep Whisper resident — and
+      // this stops it co-residing with the ~2.7 GB on-device coach model, which
+      // is what would otherwise risk an out-of-memory kill (and blocks moving to
+      // a larger, more accurate Whisper model). Reloaded on the next mic tap.
+      await whisperEngine.release().catch(() => undefined);
+    }
   },
 }));
