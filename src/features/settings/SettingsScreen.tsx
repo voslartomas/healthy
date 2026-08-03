@@ -6,6 +6,8 @@ import { BriefScreen, M, S, Section } from '../../components/brief';
 import { LanguageSelect } from '../coach/LanguageSelect';
 import { formatBytes, modelByLabel } from '../coach/ondevice/models';
 import { useModelStore } from '../coach/ondevice/useModelStore';
+import { useWhisperStore } from '../coach/ondevice/useWhisperStore';
+import { WHISPER_MODEL } from '../coach/ondevice/whisperModels';
 import { CalorieGoalSection } from '../nutrition/CalorieGoalSection';
 import {
   connectGoogleHealth,
@@ -110,6 +112,11 @@ export function SettingsScreen(_props: ScreenProps) {
         <OnDeviceModelCard modelLabel={modelLabel} />
 
         <LanguageSelect />
+
+        <Text style={[M(700, 10, { ls: 1, color: c.fnt }), styles.voiceLabel]}>
+          VOICE INPUT
+        </Text>
+        <VoiceModelCard />
       </Section>
 
       {/* ── 03 Calorie goal ─────────────────────────────────────────── */}
@@ -212,6 +219,93 @@ function OnDeviceModelCard({ modelLabel }: { modelLabel: string }) {
   );
 }
 
+/**
+ * Download card for the on-device Whisper speech-to-text model. Same states as
+ * {@link OnDeviceModelCard} but a single model (no tier), driven by
+ * {@link useWhisperStore}. Downloading it reveals the mic in the coach composer.
+ */
+function VoiceModelCard() {
+  const t = useTheme();
+  const c = t.colors;
+  const status = useWhisperStore(s => s.status);
+  const progress = useWhisperStore(s => s.progress);
+  const bytesWritten = useWhisperStore(s => s.bytesWritten);
+  const bytesTotal = useWhisperStore(s => s.bytesTotal);
+  const download = useWhisperStore(s => s.download);
+  const cancel = useWhisperStore(s => s.cancel);
+  const remove = useWhisperStore(s => s.remove);
+
+  // Re-check whether the model is already on disk when the card appears.
+  React.useEffect(() => {
+    void useWhisperStore.getState().check();
+  }, []);
+
+  const pct = Math.round(progress * 100);
+
+  return (
+    <View style={[styles.modelCard, { borderColor: c.hair }]}>
+      <View style={styles.modelCardHead}>
+        <Text style={S(600, 13.5, { color: c.ink })}>{WHISPER_MODEL.label}</Text>
+        <Text style={M(600, 10, { ls: 1, color: c.fnt })}>
+          {formatBytes(bytesTotal).toUpperCase()}
+        </Text>
+      </View>
+
+      {status === 'downloading' ? (
+        <>
+          <View style={[styles.progressTrack, { backgroundColor: c.hair }]}>
+            <View
+              style={[
+                styles.progressFill,
+                { backgroundColor: c.acc, width: `${pct}%` },
+              ]}
+            />
+          </View>
+          <View style={styles.modelCardHead}>
+            <Text style={M(600, 10.5, { color: c.mut })}>
+              {`${pct}% · ${formatBytes(bytesWritten)} / ${formatBytes(bytesTotal)}`}
+            </Text>
+            <Pressable onPress={() => void cancel()} accessibilityRole="button">
+              <Text style={M(700, 10.5, { ls: 0.4, color: c.fnt })}>CANCEL</Text>
+            </Pressable>
+          </View>
+        </>
+      ) : status === 'ready' ? (
+        <View style={styles.modelCardHead}>
+          <Text style={M(700, 10, { ls: 1, color: c.grn })}>VOICE READY</Text>
+          <Pressable onPress={() => void remove()} accessibilityRole="button">
+            <Text style={M(700, 10.5, { ls: 0.4, color: c.fnt })}>DELETE</Text>
+          </Pressable>
+        </View>
+      ) : (
+        <>
+          {status === 'error' && (
+            <Text style={[M(600, 10.5, { color: c.fnt }), styles.modelErr]}>
+              DOWNLOAD FAILED — CHECK YOUR CONNECTION AND RETRY.
+            </Text>
+          )}
+          <Pressable
+            onPress={() => void download()}
+            accessibilityRole="button"
+            style={[styles.downloadBtn, { backgroundColor: c.ink }]}
+          >
+            <Text style={M(700, 11, { ls: 0.6, color: c.inv })}>
+              {status === 'error'
+                ? 'RETRY DOWNLOAD'
+                : `DOWNLOAD ${formatBytes(bytesTotal).toUpperCase()}`}
+            </Text>
+          </Pressable>
+        </>
+      )}
+
+      <Text style={[M(600, 10.5, { color: c.fnt }), styles.note]}>
+        SPEECH-TO-TEXT RUNS FULLY ON YOUR PHONE · TAP THE MIC IN CHAT TO TALK TO
+        YOUR COACH · WORKS OFFLINE ONCE DOWNLOADED
+      </Text>
+    </View>
+  );
+}
+
 /** The v3 pill toggle (ink track when on, accent knob). */
 function Toggle({
   on,
@@ -267,6 +361,7 @@ const styles = StyleSheet.create({
   },
   knob: { width: 19, height: 19, borderRadius: 999 },
   coachNote: { marginTop: 4, lineHeight: 16 },
+  voiceLabel: { marginTop: 22, marginBottom: 2 },
   modelCard: {
     marginTop: 16,
     borderWidth: 1,

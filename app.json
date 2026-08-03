@@ -33,6 +33,12 @@
       ],
       "./plugins/withRnllamaGradleProps",
       [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow Health Buddy to use the microphone so you can talk to your coach with voice input."
+        }
+      ],
+      [
         "expo-splash-screen",
         {
           "image": "./assets/splash-icon.png",

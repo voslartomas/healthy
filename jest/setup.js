@@ -30,6 +30,27 @@ jest.mock('llama.rn', () => ({
   ),
 }));
 
+// Voice input: expo-audio's recorder is a native module with no Jest backing,
+// so importing it throws. Stub the recorder + the enums/presets the composer
+// reads at module load. whisper.rn itself is only `require`d lazily inside a
+// transcription, so it needs no mock here.
+jest.mock('expo-audio', () => ({
+  useAudioRecorder: jest.fn(() => ({
+    prepareToRecordAsync: jest.fn(() => Promise.resolve()),
+    record: jest.fn(),
+    stop: jest.fn(() => Promise.resolve()),
+    uri: null,
+    isRecording: false,
+  })),
+  requestRecordingPermissionsAsync: jest.fn(() =>
+    Promise.resolve({ granted: true }),
+  ),
+  setAudioModeAsync: jest.fn(() => Promise.resolve()),
+  RecordingPresets: { HIGH_QUALITY: { ios: {} } },
+  IOSOutputFormat: { LINEARPCM: 'lpcm' },
+  AudioQuality: { HIGH: 96 },
+}));
+
 jest.mock('expo-file-system/legacy', () => ({
   documentDirectory: 'file:///doc/',
   makeDirectoryAsync: jest.fn(() => Promise.resolve()),

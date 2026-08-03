@@ -38,6 +38,7 @@ import { ConversationDrawer } from './ConversationDrawer';
 import { buildDataContext } from './dataContext';
 import { makeFoodToolset } from './foodTool';
 import { languageDirective } from './languages';
+import { useVoiceInput, VoiceState } from './useVoiceInput';
 
 /** Format a model response time, e.g. "820 MS" / "3.4 S". */
 function formatMs(ms: number): string {
@@ -86,6 +87,13 @@ export function CoachScreen({ navigation }: ScreenProps) {
   const [busy, setBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
+
+  // Voice input: the transcript is appended to whatever's typed so the user can
+  // review/edit before sending (never auto-sent). The mic only appears once the
+  // on-device speech model is downloaded (see Settings → voice input).
+  const voice = useVoiceInput(text =>
+    setInput(prev => (prev.trim() ? `${prev.trimEnd()} ${text}` : text)),
+  );
 
   // Always keep a backing conversation (on first open, or after deleting all).
   useEffect(() => {
@@ -251,21 +259,37 @@ export function CoachScreen({ navigation }: ScreenProps) {
           ) : null}
         </ScrollView>
 
+        {voice.error ? (
+          <Text
+            style={[M(600, 10, { ls: 0.4, color: c.fnt }), styles.voiceErr]}
+          >
+            {voice.error.toUpperCase()}
+          </Text>
+        ) : null}
         <View
           style={[
             styles.composer,
             { borderTopColor: c.hair, paddingBottom: insets.bottom + 12 },
           ]}
         >
+          {voice.ready ? (
+            <MicButton state={voice.state} onPress={voice.toggle} colors={c} />
+          ) : null}
           <TextInput
             value={input}
             onChangeText={setInput}
             onSubmitEditing={() => send(input)}
-            placeholder="Tell coach what you ate…"
+            placeholder={
+              voice.state === 'recording'
+                ? 'Listening…'
+                : voice.state === 'transcribing'
+                  ? 'Transcribing…'
+                  : 'Tell coach what you ate…'
+            }
             placeholderTextColor={c.fnt}
             accessibilityLabel="Message your coach"
             returnKeyType="send"
-            editable={!busy}
+            editable={!busy && voice.state === 'idle'}
             style={[
               styles.input,
               S(500, 13.5, { color: c.ink }),
@@ -347,6 +371,64 @@ export function Sparkle({
   );
 }
 
+/** Composer mic: outlined mic when idle, accent stop-square while recording, a
+ * dot cluster while transcribing. Only mounted once the voice model is ready. */
+function MicButton({
+  state,
+  onPress,
+  colors,
+}: {
+  state: VoiceState;
+  onPress: () => void;
+  colors: { acc: string; ink: string; inv: string; fnt: string; hair: string };
+}) {
+  const recording = state === 'recording';
+  const transcribing = state === 'transcribing';
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={transcribing}
+      accessibilityRole="button"
+      accessibilityLabel={recording ? 'Stop recording' : 'Record voice message'}
+      style={[
+        styles.mic,
+        {
+          backgroundColor: recording ? colors.acc : 'transparent',
+          borderColor: recording ? colors.acc : colors.hair,
+        },
+      ]}
+    >
+      {transcribing ? (
+        <View style={styles.micDots}>
+          {[0, 1, 2].map(i => (
+            <View
+              key={i}
+              style={[styles.typingDot, { backgroundColor: colors.fnt }]}
+            />
+          ))}
+        </View>
+      ) : recording ? (
+        <View style={[styles.stopSquare, { backgroundColor: colors.inv }]} />
+      ) : (
+        <Svg
+          width={19}
+          height={19}
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke={colors.ink}
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <Path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z" />
+          <Path d="M19 10v1a7 7 0 0 1-14 0v-1" />
+          <Path d="M12 18v4" />
+        </Svg>
+      )}
+    </Pressable>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1 },
   burger: { paddingHorizontal: 4, paddingVertical: 4, gap: 4 },
@@ -405,4 +487,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  mic: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stopSquare: { width: 12, height: 12, borderRadius: 3 },
+  micDots: { flexDirection: 'row', gap: 3 },
+  voiceErr: { textAlign: 'center', paddingHorizontal: 20, paddingBottom: 8 },
 });
