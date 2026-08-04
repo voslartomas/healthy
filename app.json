@@ -13,7 +13,13 @@
       "appleTeamId": "3KS75QPJSR"
     },
     "android": {
-      "package": "cz.healthy"
+      "package": "cz.healthy",
+      "permissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"
+      ]
     },
     "plugins": [
       "expo-sqlite",
@@ -54,7 +60,10 @@
       "//": "Google Sign-In on Android needs no client ID in app config — the Android OAuth client is bound in Cloud Console via package name (cz.healthapp) + SHA-1 signing fingerprint. iOS needs googleIosClientId below (an iOS OAuth client bound to bundle id cz.healthapp) passed to GoogleSignin.configure, plus the matching reversed-client-id URL scheme registered via the google-signin plugin's iosUrlScheme above. googleWebClientId is only used for offline-access if ever provided; the legacy googleClientId from the browser PKCE flow is unused.",
       "googleWebClientId": "",
       "googleIosClientId": "664943790951-4p7fv3l3vo9bh8s16kn8vohc1k7dr5le.apps.googleusercontent.com",
-      "googleClientId": "664943790951-2tbkvpouvao38e2og6rjj4obnsdgrtt7.apps.googleusercontent.com"
+      "googleClientId": "664943790951-2tbkvpouvao38e2og6rjj4obnsdgrtt7.apps.googleusercontent.com",
+      "eas": {
+        "projectId": "42c6722a-64c9-40f3-bb67-96a954d63e67"
+      }
     },
     "eas": {
       "projectId": "42c6722a-64c9-40f3-bb67-96a954d63e67"
