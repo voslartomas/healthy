@@ -7,7 +7,7 @@ import { useTheme } from '../../theme/theme';
 
 /**
  * Branded launch splash — shown while the first health read settles (and for a
- * short minimum beat) so the app opens on "Health Buddy" rather than a flash of
+ * short minimum beat) so the app opens on "Healthy" rather than a flash of
  * empty content. Deliberately calm: no spinner, just the wordmark on the paper
  * palette. Uses {@link useTheme} directly (no provider needed) so it can render
  * before the navigation tree mounts.
@@ -21,7 +21,7 @@ export function SplashScreen() {
           <Icon name="heart" size={46} color={c.inv} />
         </View>
         <Text style={[S(800, 32, { ls: -0.4, color: c.ink }), styles.word]}>
-          Health Buddy
+          Healthy
         </Text>
         <View style={[styles.rule, { backgroundColor: c.acc }]} />
         <Text style={M(700, 11, { ls: 2.4, upper: true, color: c.fnt })}>

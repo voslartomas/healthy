@@ -3,7 +3,7 @@ import {
   createBottomTabNavigator,
 } from '@react-navigation/bottom-tabs';
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { BRIEF_MAX_WIDTH, M } from '../../components/brief';
@@ -50,7 +50,12 @@ function BriefTabBar({ state, navigation }: BottomTabBarProps) {
           // Sit closer to the home indicator than the full safe-area inset — the
           // inset over-reserves for a tab bar. Trim it, but keep a floor so the
           // labels never touch the indicator (or the edge on non-notched phones).
-          paddingBottom: Math.max(insets.bottom - 16, 6),
+          // Android reports little/no bottom inset on button-nav devices, so the
+          // labels sit almost on the edge — give them a larger floor there.
+          paddingBottom: Math.max(
+            insets.bottom - 16,
+            Platform.OS === 'android' ? 21 : 6,
+          ),
         },
       ]}
     >

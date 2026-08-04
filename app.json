@@ -1,12 +1,13 @@
 {
   "expo": {
-    "name": "Health Buddy",
+    "name": "Healthy",
     "slug": "healthapp",
     "version": "1.0.0",
     "orientation": "portrait",
     "scheme": "healthapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "icon": "./assets/icon.png",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "cz.healthy",
@@ -14,6 +15,10 @@
     },
     "android": {
       "package": "cz.healthy",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1C1710"
+      },
       "permissions": [
         "android.permission.RECORD_AUDIO",
         "android.permission.MODIFY_AUDIO_SETTINGS",
@@ -41,7 +46,7 @@
       [
         "expo-audio",
         {
-          "microphonePermission": "Allow Health Buddy to use the microphone so you can talk to your coach with voice input."
+          "microphonePermission": "Allow Healthy to use the microphone so you can talk to your coach with voice input."
         }
       ],
       [

@@ -7,9 +7,9 @@ describe('App', () => {
   it('opens on the branded splash, then the first-run Welcome brief', async () => {
     render(<App />);
 
-    // The launch splash shows first, branded "Health Buddy".
+    // The launch splash shows first, branded "Healthy".
     await waitFor(() =>
-      expect(screen.getByText('Health Buddy')).toBeOnTheScreen(),
+      expect(screen.getByText('Healthy')).toBeOnTheScreen(),
     );
 
     // After the splash beat, a fresh install (not onboarded) lands on the
