@@ -91,6 +91,15 @@ pnpm-debug.log
 # testing
 /coverage
 
+# EAS build artifacts & submit secrets
+# `eas build --local` drops these in the repo root; never commit them.
+*.aab
+*.apk
+build-*.tar.gz
+service-account-key.json
+credentials.json
+credentials/
+
 # Yarn
 .yarn/*
 !.yarn/patches

@@ -2,18 +2,18 @@
   "expo": {
     "name": "Health Buddy",
     "slug": "healthapp",
-    "version": "0.0.1",
+    "version": "1.0.0",
     "orientation": "portrait",
     "scheme": "healthapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "cz.healthapp",
+      "bundleIdentifier": "cz.healthy",
       "appleTeamId": "3KS75QPJSR"
     },
     "android": {
-      "package": "cz.healthapp"
+      "package": "cz.healthy"
     },
     "plugins": [
       "expo-sqlite",
@@ -55,6 +55,10 @@
       "googleWebClientId": "",
       "googleIosClientId": "664943790951-4p7fv3l3vo9bh8s16kn8vohc1k7dr5le.apps.googleusercontent.com",
       "googleClientId": "664943790951-2tbkvpouvao38e2og6rjj4obnsdgrtt7.apps.googleusercontent.com"
-    }
+    },
+    "eas": {
+      "projectId": "42c6722a-64c9-40f3-bb67-96a954d63e67"
+    },
+    "owner": "sport-buddy-dev"
   }
 }

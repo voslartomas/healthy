@@ -11,7 +11,11 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "typecheck": "tsc --noEmit",
-    "test": "jest"
+    "test": "jest",
+    "build-ios": "APP_ENV=production eas build --clear-cache --profile production --platform ios --local --non-interactive",
+    "build-android": "APP_ENV=production eas build --clear-cache --profile production --platform android --local --non-interactive",
+    "submit-ios": "eas submit -p ios --profile production",
+    "submit-android": "eas submit -p android --profile production"
   },
   "dependencies": {
     "@expo-google-fonts/hanken-grotesk": "^0.4.3",
