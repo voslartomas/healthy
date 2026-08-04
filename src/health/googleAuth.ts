@@ -1,5 +1,5 @@
 import Constants from 'expo-constants';
-import { GoogleSignin } from '@react-native-google-signin/google-signin';
+import { GoogleSignin, statusCodes } from '@react-native-google-signin/google-signin';
 import { Platform } from 'react-native';
 
 import { GOOGLE_HEALTH_SCOPES } from './GoogleHealthApi';
@@ -15,7 +15,7 @@ import { setGoogleHealthTokenProvider } from './index';
  * storage — {@link getAccessToken} just asks the SDK for the current token.
  *
  * Setup requirements (Google Cloud Console):
- *  - An Android OAuth client for package `cz.healthapp` + this build's SHA-1
+ *  - An Android OAuth client for package `cz.healthy` + this build's SHA-1
  *    (debug keystore for dev, Play App Signing for release).
  *  - The OAuth consent screen must list the googlehealth.* scopes, and the
  *    signed-in account must be a test user while the app is unverified.
@@ -47,6 +47,41 @@ export function isGoogleHealthClientConfigured(): boolean {
   return Platform.OS === 'android' || Platform.OS === 'ios';
 }
 
+/** The native status code carried by a Google sign-in rejection, if any. */
+function signInErrorCode(err: unknown): string | number | undefined {
+  if (err && typeof err === 'object' && 'code' in err) {
+    return (err as { code?: string | number }).code;
+  }
+  return undefined;
+}
+
+/** True when a thrown sign-in error is really just the user cancelling. */
+function isSignInCancellation(err: unknown): boolean {
+  const code = signInErrorCode(err);
+  return code === statusCodes.SIGN_IN_CANCELLED || code === 'SIGN_IN_CANCELLED';
+}
+
+/**
+ * Human-readable reason for a failed sign-in, keyed off the native status code.
+ * DEVELOPER_ERROR is the usual culprit: the running build's package name +
+ * signing SHA-1 don't match an Android OAuth client in Google Cloud Console.
+ */
+function describeSignInError(err: unknown): string {
+  const code = signInErrorCode(err);
+  if (code === 'DEVELOPER_ERROR' || code === 10 || code === '10') {
+    return "Google sign-in is misconfigured (DEVELOPER_ERROR): this build's package name and signing SHA-1 don't match an OAuth client in Google Cloud Console.";
+  }
+  if (code === statusCodes.PLAY_SERVICES_NOT_AVAILABLE) {
+    return 'Google Play services is missing or out of date on this device.';
+  }
+  if (code === statusCodes.IN_PROGRESS) {
+    return 'A Google sign-in is already in progress.';
+  }
+  return code != null
+    ? `Google sign-in failed (code ${String(code)}).`
+    : 'Could not connect to Google Health.';
+}
+
 /**
  * Run the interactive native sign-in flow.
  * Returns true on success, false when the user cancels or Play services is
@@ -58,6 +93,8 @@ export async function connectGoogleHealth(): Promise<boolean> {
     await GoogleSignin.hasPlayServices({ showPlayServicesUpdateDialog: true });
     const response = await GoogleSignin.signIn();
     console.log('[GoogleHealth] signIn response type:', response.type);
+    // The user dismissed the account picker — a genuine cancel, not a failure.
+    if (response.type === 'cancelled') return false;
     if (response.type !== 'success') return false;
     // Which of the requested scopes did the user actually grant? Missing health
     // scopes here is the usual reason a request 403s ("insufficient
@@ -86,8 +123,13 @@ export async function connectGoogleHealth(): Promise<boolean> {
     }
     return true;
   } catch (err) {
+    // Some SDK/platform combos throw a cancel instead of returning `cancelled`.
+    if (isSignInCancellation(err)) return false;
+    // Everything else (DEVELOPER_ERROR from a package/SHA-1 mismatch, missing
+    // Play services, network) is a real, actionable failure — surface it with
+    // its code instead of letting the UI report a misleading "cancelled".
     console.warn('Google sign-in failed', err);
-    return false;
+    throw new Error(describeSignInError(err));
   }
 }
 

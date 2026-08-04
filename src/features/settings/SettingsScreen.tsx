@@ -64,8 +64,15 @@ export function SettingsScreen(_props: ScreenProps) {
         if (ok) await refreshHealth();
         else
           Alert.alert('Not connected', 'Google Health sign-in was cancelled.');
-      } catch {
-        Alert.alert('Connection failed', 'Could not connect to Google Health.');
+      } catch (err) {
+        // connectGoogleHealth throws only on real failures (e.g. DEVELOPER_ERROR
+        // from a package/SHA-1 mismatch) — show that reason, not a generic line.
+        Alert.alert(
+          'Connection failed',
+          err instanceof Error
+            ? err.message
+            : 'Could not connect to Google Health.',
+        );
       }
     },
     [clientConfigured, refreshHealth, setConnection],
