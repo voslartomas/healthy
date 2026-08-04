@@ -65,6 +65,9 @@ npm-debug.log
 yarn-error.log
 pnpm-debug.log
 .pnpm-store/
+# This project uses pnpm exclusively; a stray package-lock.json makes EAS run
+# `npm ci` (which then fails on an out-of-sync lockfile). Never commit it.
+package-lock.json
 
 # fastlane
 #
