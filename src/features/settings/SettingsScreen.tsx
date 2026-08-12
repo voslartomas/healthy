@@ -170,7 +170,7 @@ function OnDeviceModelCard({ modelLabel }: { modelLabel: string }) {
         </Text>
       </View>
 
-      {status === 'downloading' ? (
+      {status === 'downloading' || status === 'paused' ? (
         <>
           <View style={[styles.progressTrack, { backgroundColor: c.hair }]}>
             <View
@@ -182,13 +182,28 @@ function OnDeviceModelCard({ modelLabel }: { modelLabel: string }) {
           </View>
           <View style={styles.modelCardHead}>
             <Text style={M(600, 10.5, { color: c.mut })}>
-              {`${pct}% · ${formatBytes(bytesWritten)} / ${formatBytes(bytesTotal)}`}
+              {`${status === 'paused' ? 'PAUSED · ' : ''}${pct}% · ${formatBytes(bytesWritten)} / ${formatBytes(bytesTotal)}`}
             </Text>
-            <Pressable onPress={() => void cancel()} accessibilityRole="button">
-              <Text style={M(700, 10.5, { ls: 0.4, color: c.fnt })}>
-                CANCEL
-              </Text>
-            </Pressable>
+            <View style={styles.modelCardActions}>
+              {status === 'paused' && (
+                <Pressable
+                  onPress={() => void download()}
+                  accessibilityRole="button"
+                >
+                  <Text style={M(700, 10.5, { ls: 0.4, color: c.grn })}>
+                    RESUME
+                  </Text>
+                </Pressable>
+              )}
+              <Pressable
+                onPress={() => void cancel()}
+                accessibilityRole="button"
+              >
+                <Text style={M(700, 10.5, { ls: 0.4, color: c.fnt })}>
+                  CANCEL
+                </Text>
+              </Pressable>
+            </View>
           </View>
         </>
       ) : status === 'ready' ? (
@@ -258,7 +273,7 @@ function VoiceModelCard() {
         </Text>
       </View>
 
-      {status === 'downloading' ? (
+      {status === 'downloading' || status === 'paused' ? (
         <>
           <View style={[styles.progressTrack, { backgroundColor: c.hair }]}>
             <View
@@ -270,11 +285,28 @@ function VoiceModelCard() {
           </View>
           <View style={styles.modelCardHead}>
             <Text style={M(600, 10.5, { color: c.mut })}>
-              {`${pct}% · ${formatBytes(bytesWritten)} / ${formatBytes(bytesTotal)}`}
+              {`${status === 'paused' ? 'PAUSED · ' : ''}${pct}% · ${formatBytes(bytesWritten)} / ${formatBytes(bytesTotal)}`}
             </Text>
-            <Pressable onPress={() => void cancel()} accessibilityRole="button">
-              <Text style={M(700, 10.5, { ls: 0.4, color: c.fnt })}>CANCEL</Text>
-            </Pressable>
+            <View style={styles.modelCardActions}>
+              {status === 'paused' && (
+                <Pressable
+                  onPress={() => void download()}
+                  accessibilityRole="button"
+                >
+                  <Text style={M(700, 10.5, { ls: 0.4, color: c.grn })}>
+                    RESUME
+                  </Text>
+                </Pressable>
+              )}
+              <Pressable
+                onPress={() => void cancel()}
+                accessibilityRole="button"
+              >
+                <Text style={M(700, 10.5, { ls: 0.4, color: c.fnt })}>
+                  CANCEL
+                </Text>
+              </Pressable>
+            </View>
           </View>
         </>
       ) : status === 'ready' ? (
@@ -381,6 +413,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  modelCardActions: { flexDirection: 'row', alignItems: 'center', gap: 16 },
   progressTrack: { height: 6, borderRadius: 3, overflow: 'hidden' },
   progressFill: { height: 6, borderRadius: 3 },
   downloadBtn: {

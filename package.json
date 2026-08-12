@@ -5,7 +5,7 @@
   "main": "index.ts",
   "scripts": {
     "start": "expo start",
-    "android": "expo run:android",
+    "android": "APP_VARIANT=dev expo prebuild -p android --clean && APP_VARIANT=dev expo run:android",
     "ios": "expo run:ios",
     "lint": "eslint .",
     "format": "prettier --write .",
@@ -40,6 +40,7 @@
     "llama.rn": "^0.12.8",
     "react": "19.2.3",
     "react-native": "0.86.2",
+    "react-native-markdown-display": "^7.0.2",
     "react-native-safe-area-context": "~5.7.0",
     "react-native-screens": "~4.26.0",
     "react-native-svg": "15.15.4",

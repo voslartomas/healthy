@@ -56,10 +56,20 @@ jest.mock('expo-file-system/legacy', () => ({
   makeDirectoryAsync: jest.fn(() => Promise.resolve()),
   getInfoAsync: jest.fn(() => Promise.resolve({ exists: false })),
   deleteAsync: jest.fn(() => Promise.resolve()),
+  moveAsync: jest.fn(() => Promise.resolve()),
+  // The download store persists resume state to a `.part.json` sidecar; the
+  // default mock has no sidecar (read rejects) so downloads always start fresh.
+  readAsStringAsync: jest.fn(() => Promise.reject(new Error('no sidecar'))),
+  writeAsStringAsync: jest.fn(() => Promise.resolve()),
   createDownloadResumable: jest.fn(() => ({
     downloadAsync: jest.fn(() =>
       Promise.resolve({ uri: 'file:///doc/models/model.gguf' }),
     ),
+    resumeAsync: jest.fn(() =>
+      Promise.resolve({ uri: 'file:///doc/models/model.gguf' }),
+    ),
+    pauseAsync: jest.fn(() => Promise.resolve({})),
+    savable: jest.fn(() => ({})),
     cancelAsync: jest.fn(() => Promise.resolve()),
   })),
 }));

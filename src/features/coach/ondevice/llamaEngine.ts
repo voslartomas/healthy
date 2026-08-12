@@ -45,8 +45,26 @@ const N_CTX = 4096;
 class LlamaEngine implements OnDeviceEngine {
   private ctx: LlamaContext | null = null;
   private loadedPath: string | null = null;
-  /** De-dupes concurrent loads of the same path (e.g. rapid messages). */
-  private loading: Promise<void> | null = null;
+  /**
+   * Serializes every native context operation (load / complete / release). A
+   * `LlamaContext` runs ONE generation at a time — overlapping callers (e.g. the
+   * startup daily brief and the first chat message, or two rapid sends) would
+   * otherwise make llama.rn throw "Exception in host function: context is busy".
+   * Ops queue on this tail promise and run strictly one after another.
+   */
+  private lock: Promise<unknown> = Promise.resolve();
+
+  /** Run `fn` once all previously-queued context ops have settled. Serializes
+   * access so no two operations ever touch the context concurrently. */
+  private withLock<T>(fn: () => Promise<T>): Promise<T> {
+    const result = this.lock.then(fn);
+    // Keep the queue moving even if this op rejects; the caller still sees it.
+    this.lock = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  }
 
   isLoaded(path?: string): boolean {
     if (!this.ctx) return false;
@@ -57,12 +75,12 @@ class LlamaEngine implements OnDeviceEngine {
     modelPath: string,
     onProgress?: (pct: number) => void,
   ): Promise<void> {
+    // Fast path: already loaded ⇒ don't queue behind an in-flight completion.
     if (this.isLoaded(modelPath)) return;
-    if (this.loading) await this.loading;
-    if (this.isLoaded(modelPath)) return;
-
-    this.loading = (async () => {
-      if (this.ctx) await this.release();
+    await this.withLock(async () => {
+      // Re-check under the lock — a concurrent load may have finished first.
+      if (this.isLoaded(modelPath)) return;
+      if (this.ctx) await this.releaseCtx();
       // Lazy require so the native module is only pulled in on a real device
       // when the user actually runs the on-device coach.
       // eslint-disable-next-line @typescript-eslint/no-require-imports -- lazy native load
@@ -78,28 +96,29 @@ class LlamaEngine implements OnDeviceEngine {
         onProgress ? p => onProgress(p) : undefined,
       );
       this.loadedPath = modelPath;
-    })();
-
-    try {
-      await this.loading;
-    } finally {
-      this.loading = null;
-    }
+    });
   }
 
   async complete(prompt: string, opts: CompleteOptions = {}): Promise<string> {
-    if (!this.ctx) throw new Error('No model loaded — call load() first.');
-    const res = await this.ctx.completion({
-      prompt,
-      grammar: opts.grammar,
-      stop: opts.stop,
-      n_predict: opts.nPredict ?? 1024,
-      temperature: opts.temperature ?? 0.3,
+    return this.withLock(async () => {
+      if (!this.ctx) throw new Error('No model loaded — call load() first.');
+      const res = await this.ctx.completion({
+        prompt,
+        grammar: opts.grammar,
+        stop: opts.stop,
+        n_predict: opts.nPredict ?? 1024,
+        temperature: opts.temperature ?? 0.3,
+      });
+      return res.text ?? '';
     });
-    return res.text ?? '';
   }
 
   async release(): Promise<void> {
+    await this.withLock(() => this.releaseCtx());
+  }
+
+  /** Free the context. Assumes the caller already holds {@link lock}. */
+  private async releaseCtx(): Promise<void> {
     const ctx = this.ctx;
     this.ctx = null;
     this.loadedPath = null;

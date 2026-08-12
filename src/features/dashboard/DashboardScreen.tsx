@@ -15,7 +15,7 @@ import { HealthSnapshot } from '../../health';
 import { useHealthStore } from '../../state/useHealthStore';
 import { useTheme } from '../../theme/theme';
 import { WeeklyGoalsCard } from '../goals/WeeklyGoalsCard';
-import { DailyBriefCard } from './DailyBriefCard';
+import { useDailyBriefStore } from './useDailyBriefStore';
 
 /** Decimal hours → "7:42". */
 function hoursToHm(hours: number): string {
@@ -58,30 +58,22 @@ function Delta({ delta, goodUp = true }: { delta: number; goodUp?: boolean }) {
   );
 }
 
-/** Recovery pill + short caption from the readiness state. */
-function recoveryChrome(
+/** Recovery status pill from the readiness state. The caption beneath the hero
+ * number is the AI daily brief (see {@link DashboardScreen}), not a fixed
+ * per-state phrase, so this only owns the pill. */
+function recoveryPill(
   snap: HealthSnapshot,
   ink: string,
   inv: string,
   acc: string,
   fnt: string,
-): { pill: PillSpec; caption: string } {
-  if (!snap.readiness) {
-    return {
-      pill: { text: 'NOT CONNECTED', dot: fnt },
-      caption: 'CONNECT A SOURCE TO START',
-    };
-  }
-  const state = snap.readiness.state;
-  const caption =
-    state === 'Recovered'
-      ? 'READY TO ADD LOAD'
-      : state === 'Balanced'
-        ? 'KEEP LOAD MODERATE'
-        : 'FAVOR REST TODAY';
+): PillSpec {
+  if (!snap.readiness) return { text: 'NOT CONNECTED', dot: fnt };
   return {
-    pill: { text: state.toUpperCase(), dot: acc, bg: ink, textColor: inv },
-    caption,
+    text: snap.readiness.state.toUpperCase(),
+    dot: acc,
+    bg: ink,
+    textColor: inv,
   };
 }
 
@@ -90,9 +82,24 @@ export function DashboardScreen({ navigation }: ScreenProps) {
   const t = useTheme();
   const c = t.colors;
   const snap = useHealthStore(s => s.snapshot);
+  const briefText = useDailyBriefStore(s => s.text);
+  const briefLoading = useDailyBriefStore(s => s.status === 'loading');
+  const ensureBrief = useDailyBriefStore(s => s.ensure);
+
+  // Generate today's short brief on mount; it's cached and reused within a day,
+  // and stays idle (empty) when the coach isn't set up.
+  React.useEffect(() => {
+    void ensureBrief();
+  }, [ensureBrief]);
 
   const recoveryPct = snap.readiness?.pct ?? null;
-  const { pill, caption } = recoveryChrome(snap, c.ink, c.inv, c.acc, c.fnt);
+  const pill = recoveryPill(snap, c.ink, c.inv, c.acc, c.fnt);
+  // Caption under the hero number is the AI daily brief. Before it lands — or
+  // when the coach isn't configured — fall back to a connect/loading hint; the
+  // recovery state itself still shows in the pill.
+  const caption = !snap.readiness
+    ? 'CONNECT A SOURCE TO START'
+    : briefText || (briefLoading ? 'Writing today’s brief…' : undefined);
 
   const eaten = snap.nutrition?.eaten ?? null;
   const burned = snap.energyBurnedToday;
@@ -133,8 +140,6 @@ export function DashboardScreen({ navigation }: ScreenProps) {
             : 'Open recovery detail, no recovery data'
         }
       />
-
-      <DailyBriefCard />
 
       {/* ── 01 Body ─────────────────────────────────────────────────── */}
       <Section n="01" title="Body" first>

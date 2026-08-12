@@ -46,6 +46,9 @@ beforeEach(() => {
 
 describe('runOnDevice', () => {
   it('throws a CoachError when no model has been downloaded', async () => {
+    // No file on disk: the runner now syncs status from disk (check()) before
+    // giving up, so "no model" means the file is genuinely absent.
+    (FS.getInfoAsync as jest.Mock).mockResolvedValue({ exists: false });
     await expect(
       runOnDevice(
         { provider: 'ondevice', model: 'Gemma 3 4B', apiKey: '' },
@@ -126,6 +129,7 @@ describe('runOnDevice', () => {
 
 describe('runCoach routing', () => {
   it('routes the ondevice provider to the on-device runner (guarded when no model)', async () => {
+    (FS.getInfoAsync as jest.Mock).mockResolvedValue({ exists: false });
     await expect(
       runCoach(
         { provider: 'ondevice', model: 'Gemma 3 4B', apiKey: '' },

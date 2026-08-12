@@ -23,6 +23,18 @@ import { setGoogleHealthTokenProvider } from './index';
  * is only used for iOS/offline-access if ever provided.
  */
 
+/**
+ * The googlehealth.* API scopes we must confirm the user actually granted.
+ * Deliberately EXCLUDES the identity scopes ('openid'/'profile'): Google
+ * consumes those for the ID token and never lists them back in the granted-
+ * scopes array, so checking for them made `missing` non-empty on EVERY sign-in
+ * and fired a second, redundant consent prompt (addScopes) even after the user
+ * had already granted everything. Only these API scopes gate data access.
+ */
+const REQUIRED_API_SCOPES = GOOGLE_HEALTH_SCOPES.filter(s =>
+  s.startsWith('https://'),
+);
+
 function webClientId(): string | undefined {
   const id = (
     Constants.expoConfig?.extra as { googleWebClientId?: string } | undefined
@@ -96,13 +108,15 @@ export async function connectGoogleHealth(): Promise<boolean> {
     // The user dismissed the account picker — a genuine cancel, not a failure.
     if (response.type === 'cancelled') return false;
     if (response.type !== 'success') return false;
-    // Which of the requested scopes did the user actually grant? Missing health
-    // scopes here is the usual reason a request 403s ("insufficient
-    // authentication scopes"). The nutrition WRITE scope in particular is often
-    // absent on first consent.
+    // Which of the requested scopes did the user actually grant? We check ONLY
+    // the googlehealth.* API scopes ({@link REQUIRED_API_SCOPES}), never the
+    // identity scopes: Google doesn't echo 'openid'/'profile' back here, so
+    // including them made `missing` non-empty on every sign-in and triggered a
+    // redundant second consent prompt. A genuinely-missing API scope (the
+    // nutrition WRITE scope is the usual culprit) is still recovered below.
     let granted = response.data.scopes ?? [];
     console.log('[GoogleHealth] granted scopes:', granted);
-    let missing = GOOGLE_HEALTH_SCOPES.filter(s => !granted.includes(s));
+    let missing = REQUIRED_API_SCOPES.filter(s => !granted.includes(s));
     if (missing.length > 0) {
       // signIn reuses the cached grant and won't re-prompt for a scope added
       // later, so explicitly request the missing ones via incremental consent.
@@ -113,7 +127,7 @@ export async function connectGoogleHealth(): Promise<boolean> {
       } catch (err) {
         console.warn('[GoogleHealth] addScopes failed', err);
       }
-      missing = GOOGLE_HEALTH_SCOPES.filter(s => !granted.includes(s));
+      missing = REQUIRED_API_SCOPES.filter(s => !granted.includes(s));
     }
     if (missing.length > 0) {
       // Still missing after an explicit request → the scope isn't grantable for

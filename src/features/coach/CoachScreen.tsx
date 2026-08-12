@@ -34,6 +34,7 @@ import {
 } from '../../state/useConversationsStore';
 import { useTheme } from '../../theme/theme';
 import { CoachError, CoachMessage, runCoach } from './aiClient';
+import { CoachMarkdown } from './CoachMarkdown';
 import { ConversationDrawer } from './ConversationDrawer';
 import { buildDataContext } from './dataContext';
 import { makeFoodToolset } from './foodTool';
@@ -234,15 +235,13 @@ export function CoachScreen({ navigation }: ScreenProps) {
                       },
                 ]}
               >
-                <Text
-                  selectable
-                  style={S(400, 13, {
-                    lh: 19,
-                    color: m.from === 'me' ? c.inv : c.ink,
-                  })}
-                >
-                  {m.text}
-                </Text>
+                {m.from === 'ai' ? (
+                  <CoachMarkdown text={m.text} />
+                ) : (
+                  <Text selectable style={S(400, 13, { lh: 19, color: c.inv })}>
+                    {m.text}
+                  </Text>
+                )}
                 {m.from === 'ai' && m.ms != null ? (
                   <Text
                     style={[

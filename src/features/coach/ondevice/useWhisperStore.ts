@@ -21,10 +21,22 @@ import { create } from 'zustand';
 import { whisperEngine } from './whisperEngine';
 import { WHISPER_MODEL } from './whisperModels';
 
-export type WhisperStatus = 'absent' | 'downloading' | 'ready' | 'error';
+export type WhisperStatus =
+  | 'absent'
+  | 'downloading'
+  | 'paused'
+  | 'ready'
+  | 'error';
 
 const MODELS_DIR = `${FS.documentDirectory ?? ''}models/`;
 const MODEL_PATH = MODELS_DIR + WHISPER_MODEL.filename;
+/** In-flight download target. Only moved onto MODEL_PATH once complete, so a
+ * file at the final path always means a finished download — an interrupted one
+ * leaves a `.part` that check() resumes or sweeps instead of reporting "ready". */
+const PART_PATH = MODEL_PATH + '.part';
+/** Sidecar holding the resumable's `savable()` state so an interrupted download
+ * can be rebuilt and resumed across app restarts (mirrors {@link ./useModelStore}). */
+const META_PATH = MODEL_PATH + '.part.json';
 
 /** Voice-model files from earlier tiers, deleted on `check` so a model bump
  * doesn't orphan a few-hundred-MB download on disk. */
@@ -32,6 +44,48 @@ const LEGACY_FILENAMES = ['ggml-small-q5_1.bin'];
 
 /** In-flight resumable handle, kept out of store state (not serializable). */
 let resumable: FS.DownloadResumable | null = null;
+
+/** Read the persisted resume state, or null if none/parse failure. */
+async function readResumeState(): Promise<FS.DownloadPauseState | null> {
+  try {
+    return JSON.parse(
+      await FS.readAsStringAsync(META_PATH),
+    ) as FS.DownloadPauseState;
+  } catch {
+    return null;
+  }
+}
+
+/** Persist the resume state so a later launch can rebuild the download. */
+async function writeResumeState(state: FS.DownloadPauseState): Promise<void> {
+  try {
+    await FS.writeAsStringAsync(META_PATH, JSON.stringify(state));
+  } catch {
+    // Best-effort — losing the sidecar only costs us a restart, not the file.
+  }
+}
+
+/** Drop the resume sidecar (idempotent). */
+async function clearResumeState(): Promise<void> {
+  await FS.deleteAsync(META_PATH, { idempotent: true }).catch(() => undefined);
+}
+
+/** Progress-callback factory shared by download + resume. */
+function onProgress(
+  set: (partial: Partial<WhisperState>) => void,
+): (p: FS.DownloadProgressData) => void {
+  return p => {
+    const total =
+      p.totalBytesExpectedToWrite > 0
+        ? p.totalBytesExpectedToWrite
+        : WHISPER_MODEL.sizeBytes;
+    set({
+      bytesWritten: p.totalBytesWritten,
+      bytesTotal: total,
+      progress: total > 0 ? p.totalBytesWritten / total : 0,
+    });
+  };
+}
 
 interface WhisperState {
   status: WhisperStatus;
@@ -46,9 +100,15 @@ interface WhisperState {
   isReady: () => boolean;
   /** Refresh `status` from the filesystem. */
   check: () => Promise<void>;
-  /** Download the model, streaming progress into the store. */
+  /**
+   * Download the model, streaming progress into the store. Doubles as "resume":
+   * if an interrupted download left a `.part` + sidecar, it continues from there.
+   */
   download: () => Promise<void>;
-  /** Cancel an in-flight download and discard the partial file. */
+  /** Pause an in-flight download, persisting resume state (wired to app
+   * backgrounding). Safe to call when not downloading — it no-ops. */
+  pause: () => Promise<void>;
+  /** Cancel an in-flight/paused download and discard the partial file. */
   cancel: () => Promise<void>;
   /** Delete the downloaded model file and free its space. */
   remove: () => Promise<void>;
@@ -69,6 +129,9 @@ export const useWhisperStore = create<WhisperState>((set, get) => ({
   isReady: () => get().status === 'ready',
 
   check: async () => {
+    // Don't second-guess an in-flight/paused download — its file legitimately
+    // isn't at the final path yet, and sweeping the partial would corrupt it.
+    if (get().status === 'downloading' || get().status === 'paused') return;
     // Sweep away superseded model files (idempotent; a no-op once gone).
     for (const name of LEGACY_FILENAMES) {
       if (name !== WHISPER_MODEL.filename) {
@@ -77,54 +140,156 @@ export const useWhisperStore = create<WhisperState>((set, get) => ({
         );
       }
     }
+    // A file at the final path only ever appears via the completed-download
+    // move, so its existence is a trustworthy "ready".
     try {
       const info = await FS.getInfoAsync(MODEL_PATH);
-      set({ status: info.exists ? 'ready' : 'absent' });
+      if (info.exists) {
+        set({ status: 'ready' });
+        return;
+      }
     } catch {
-      set({ status: 'absent' });
+      // fall through to the resume/absent checks below
     }
+    // No final file. A resume sidecar + partial means an interrupted download we
+    // can continue — surface it as 'paused' with its progress instead of wiping.
+    const saved = await readResumeState();
+    const partInfo = saved
+      ? await FS.getInfoAsync(PART_PATH).catch(() => ({
+          exists: false as const,
+        }))
+      : { exists: false as const };
+    if (saved && partInfo.exists) {
+      const total = WHISPER_MODEL.sizeBytes;
+      const written =
+        'size' in partInfo && typeof partInfo.size === 'number'
+          ? partInfo.size
+          : 0;
+      set({
+        status: 'paused',
+        bytesWritten: written,
+        bytesTotal: total,
+        progress: total > 0 ? Math.min(written / total, 1) : 0,
+      });
+      return;
+    }
+    // Nothing resumable: sweep any stray partial + sidecar and report absent.
+    await FS.deleteAsync(PART_PATH, { idempotent: true }).catch(() => undefined);
+    await clearResumeState();
+    set({ status: 'absent', progress: 0, bytesWritten: 0 });
   },
 
   download: async () => {
     if (get().status === 'downloading') return;
-    set({
-      status: 'downloading',
-      progress: 0,
-      bytesWritten: 0,
-      bytesTotal: WHISPER_MODEL.sizeBytes,
-      error: null,
-    });
+    set({ status: 'downloading', error: null });
     try {
       await FS.makeDirectoryAsync(MODELS_DIR, { intermediates: true }).catch(
         () => undefined,
       );
-      resumable = FS.createDownloadResumable(
-        WHISPER_MODEL.url,
-        MODEL_PATH,
-        {},
-        p => {
-          const total =
-            p.totalBytesExpectedToWrite > 0
-              ? p.totalBytesExpectedToWrite
-              : WHISPER_MODEL.sizeBytes;
+      // Resume when an interrupted attempt left a sidecar + partial; otherwise
+      // start clean. Existence of the partial guards against a stale sidecar.
+      const saved = await readResumeState();
+      const partInfo =
+        saved &&
+        (await FS.getInfoAsync(PART_PATH).catch(() => ({
+          exists: false as const,
+        })));
+      const resuming = Boolean(saved && partInfo && partInfo.exists);
+
+      let res: FS.FileSystemDownloadResult | undefined;
+      if (resuming && saved) {
+        resumable = FS.createDownloadResumable(
+          WHISPER_MODEL.url,
+          PART_PATH,
+          saved.options ?? {},
+          onProgress(set),
+          saved.resumeData,
+        );
+        await writeResumeState(resumable.savable());
+        try {
+          res = await resumable.resumeAsync();
+        } catch {
+          // Resume unsupported here (e.g. iOS after a hard kill, no token) —
+          // fall back to a clean restart rather than getting stuck.
+          await clearResumeState();
+          await FS.deleteAsync(PART_PATH, { idempotent: true }).catch(
+            () => undefined,
+          );
           set({
-            bytesWritten: p.totalBytesWritten,
-            bytesTotal: total,
-            progress: total > 0 ? p.totalBytesWritten / total : 0,
+            progress: 0,
+            bytesWritten: 0,
+            bytesTotal: WHISPER_MODEL.sizeBytes,
           });
-        },
-      );
-      const res = await resumable.downloadAsync();
-      // A cancelled download resolves to undefined.
+          resumable = FS.createDownloadResumable(
+            WHISPER_MODEL.url,
+            PART_PATH,
+            {},
+            onProgress(set),
+          );
+          await writeResumeState(resumable.savable());
+          res = await resumable.downloadAsync();
+        }
+      } else {
+        await clearResumeState();
+        await FS.deleteAsync(PART_PATH, { idempotent: true }).catch(
+          () => undefined,
+        );
+        set({
+          progress: 0,
+          bytesWritten: 0,
+          bytesTotal: WHISPER_MODEL.sizeBytes,
+        });
+        resumable = FS.createDownloadResumable(
+          WHISPER_MODEL.url,
+          PART_PATH,
+          {},
+          onProgress(set),
+        );
+        await writeResumeState(resumable.savable());
+        res = await resumable.downloadAsync();
+      }
+
+      // undefined ⇒ the task stopped writing (paused or cancelled). A background
+      // pause() keeps the partial + sidecar for a later resume; anything else is
+      // a cancel, already cleaned up by cancel().
       if (!res) {
-        set({ status: 'absent', progress: 0, bytesWritten: 0 });
+        if (get().status !== 'paused') {
+          await clearResumeState();
+          await FS.deleteAsync(PART_PATH, { idempotent: true }).catch(
+            () => undefined,
+          );
+          set({ status: 'absent', progress: 0, bytesWritten: 0 });
+        }
         return;
       }
+      // Publish atomically: only now does a file appear at the final path, so a
+      // later check() can trust its existence as a completed download.
+      await FS.moveAsync({ from: PART_PATH, to: MODEL_PATH });
+      await clearResumeState();
       set({ status: 'ready', progress: 1 });
     } catch (err) {
+      // Transient failure: keep the partial + sidecar so RETRY resumes.
+      try {
+        if (resumable) await writeResumeState(resumable.savable());
+      } catch {
+        // ignore — worst case retry restarts
+      }
       set({ status: 'error', error: String((err as Error)?.message ?? err) });
     } finally {
       resumable = null;
+    }
+  },
+
+  pause: async () => {
+    if (get().status !== 'downloading' || !resumable) return;
+    try {
+      const state = await resumable.pauseAsync();
+      await writeResumeState(state);
+      // Flip before the download promise resolves(undefined) so download()'s
+      // !res branch knows this was a pause, not a cancel, and keeps the file.
+      set({ status: 'paused' });
+    } catch {
+      // Couldn't pause cleanly — leave it downloading; worst case it restarts.
     }
   },
 
@@ -135,10 +300,13 @@ export const useWhisperStore = create<WhisperState>((set, get) => ({
       // ignore — we discard the partial file regardless
     }
     resumable = null;
-    try {
-      await FS.deleteAsync(MODEL_PATH, { idempotent: true });
-    } catch {
-      // ignore
+    await clearResumeState();
+    for (const p of [PART_PATH, MODEL_PATH]) {
+      try {
+        await FS.deleteAsync(p, { idempotent: true });
+      } catch {
+        // ignore
+      }
     }
     set({ status: 'absent', progress: 0, bytesWritten: 0 });
   },
@@ -146,10 +314,13 @@ export const useWhisperStore = create<WhisperState>((set, get) => ({
   remove: async () => {
     // Free the native context first so we're not deleting a mapped file.
     await whisperEngine.release().catch(() => undefined);
-    try {
-      await FS.deleteAsync(MODEL_PATH, { idempotent: true });
-    } catch {
-      // ignore
+    await clearResumeState();
+    for (const p of [PART_PATH, MODEL_PATH]) {
+      try {
+        await FS.deleteAsync(p, { idempotent: true });
+      } catch {
+        // ignore
+      }
     }
     set({ status: 'absent', progress: 0, bytesWritten: 0, error: null });
   },

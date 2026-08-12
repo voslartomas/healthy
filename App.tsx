@@ -14,6 +14,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { navigationRef } from './src/app/navigation/navigationRef';
 import { RootStack } from './src/app/navigation/RootStack';
+import { useModelStore } from './src/features/coach/ondevice/useModelStore';
+import { useWhisperStore } from './src/features/coach/ondevice/useWhisperStore';
 import { SplashScreen } from './src/features/onboarding/SplashScreen';
 import { WelcomeScreen } from './src/features/onboarding/WelcomeScreen';
 import { registerGoogleHealthAuth } from './src/health/googleAuth';
@@ -89,6 +91,11 @@ export default function App() {
   // Load persisted goals from SQLite and the live health snapshot on startup.
   useEffect(() => {
     registerGoogleHealthAuth();
+    // Initialise on-device model status from disk so a previously downloaded
+    // coach/voice model is usable immediately — the coach and daily brief gate
+    // on this status, so without it the user would have to open Settings first.
+    void useModelStore.getState().check();
+    void useWhisperStore.getState().check();
     initGoals().catch(err => console.warn('Failed to load goals', err));
     initCalorieGoals().catch(err =>
       console.warn('Failed to load calorie goals', err),
@@ -123,6 +130,28 @@ export default function App() {
         .getState()
         .refresh()
         .catch(err => console.warn('Foreground refresh failed', err));
+    });
+    return () => sub.remove();
+  }, []);
+
+  // Pause any in-flight model download when the app backgrounds and resume it on
+  // return. Pausing persists the resume token, which makes continuation reliable
+  // (vs. a hard kill, which may have to restart) — a big deal for the multi-GB
+  // on-device coach model. No-ops unless a download is actually in flight.
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', next => {
+      const model = useModelStore.getState();
+      const whisper = useWhisperStore.getState();
+      if (next === 'active') {
+        if (model.status === 'paused') void model.download();
+        if (whisper.status === 'paused') void whisper.download();
+      } else if (next === 'background') {
+        // Only on a committed background — not the transient 'inactive' iOS
+        // fires for the app switcher / control center, which would otherwise
+        // race a pause against the immediate 'active' on return.
+        if (model.status === 'downloading') void model.pause();
+        if (whisper.status === 'downloading') void whisper.pause();
+      }
     });
     return () => sub.remove();
   }, []);

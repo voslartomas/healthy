@@ -3,20 +3,41 @@
  * doing, generated from their live health data ({@link buildDataContext}) via
  * the configured coach provider (on-device Gemma or a cloud model).
  *
- * Generated at most once per day (guarded by date) so it doesn't re-run on every
- * Today visit, with a manual refresh. In-memory only: it re-generates once on a
- * fresh app launch, which keeps the wiring simple and avoids showing a stale
- * brief. Degrades silently — if no provider is set up (no model downloaded / no
- * API key), it stays idle and the card hides itself.
+ * Generated at most once per calendar day (guarded by date) so it doesn't re-run
+ * on every Today visit, with a manual refresh. The date + text are persisted, so
+ * it generates once on the first app open of the day and is then reused on later
+ * launches that same day — not regenerated on every cold start. Degrades silently
+ * — if no provider is set up (no model downloaded / no API key), it stays idle and
+ * the card hides itself.
  */
 
+import * as SecureStore from 'expo-secure-store';
 import { create } from 'zustand';
+import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { useAppStore } from '../../state/useAppStore';
 import { CoachError, runCoach } from '../coach/aiClient';
 import { buildDataContext } from '../coach/dataContext';
 import { languageDirective } from '../coach/languages';
 import { useModelStore } from '../coach/ondevice/useModelStore';
+
+/** Non-secret local cache for the once-a-day brief (date + text). Reuses the
+ * SecureStore backend the app already ships with — the payload is one short
+ * sentence, well within its size limits. */
+const briefStorage = {
+  getItem: (name: string) => SecureStore.getItemAsync(name),
+  setItem: (name: string, value: string) =>
+    SecureStore.setItemAsync(name, value),
+  removeItem: (name: string) => SecureStore.deleteItemAsync(name),
+};
+
+/** Resolves once persisted state has been read (or failed to). `ensure()` awaits
+ * this so it reuses today's stored brief instead of regenerating before the
+ * async storage read lands on a cold start. */
+let markHydrated: () => void = () => {};
+const hydrated = new Promise<void>(resolve => {
+  markHydrated = resolve;
+});
 
 export type BriefStatus = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -41,9 +62,9 @@ async function generateBrief(): Promise<string> {
   const system = [
     "You are the user's health coach writing today's one-line dashboard note.",
     languageDirective(useAppStore.getState().coachLanguage),
-    'Using ONLY the data below, write ONE short, plain sentence (max ~15 words) about how they are doing today and, if useful, a nudge.',
-    'Reference one real number (e.g. recovery %, sleep, protein, or steps). No lists, no markdown, no heading — just the single sentence.',
-    'Example style: "Recovery is solid at 78% — a good day to add some load."',
+    'Using ONLY the data below, write ONE very short line (max ~8 words) on how they are doing today, with a light nudge if useful.',
+    'Reference one real number (e.g. recovery %, sleep, protein, or steps). No lists, no markdown, no heading, no trailing period — just the short line.',
+    'Example style: "Recovery solid at 78% — room to add load"',
     '',
     "=== The user's current health data ===",
     buildDataContext(),
@@ -72,43 +93,64 @@ interface DailyBriefState {
   regenerate: () => Promise<void>;
 }
 
-export const useDailyBriefStore = create<DailyBriefState>((set, get) => {
-  const run = async () => {
-    if (get().status === 'loading') return;
-    if (!canGenerate()) {
-      set({ status: 'idle' });
-      return;
-    }
-    set({ status: 'loading', error: null });
-    try {
-      const text = await generateBrief();
-      set({ date: todayKey(), text, status: text ? 'ready' : 'idle' });
-    } catch (err) {
-      set({
-        status: 'error',
-        error:
-          err instanceof CoachError
-            ? err.message
-            : "Couldn't generate today's brief.",
-      });
-    }
-  };
+export const useDailyBriefStore = create<DailyBriefState>()(
+  persist(
+    (set, get) => {
+      const run = async () => {
+        if (get().status === 'loading') return;
+        // For the on-device provider, sync model status from disk first so the
+        // brief generates on a fresh launch even before Settings initialised it.
+        if (useAppStore.getState().aiProvider === 'ondevice') {
+          await useModelStore.getState().check();
+        }
+        if (!canGenerate()) {
+          set({ status: 'idle' });
+          return;
+        }
+        set({ status: 'loading', error: null });
+        try {
+          const text = await generateBrief();
+          set({ date: todayKey(), text, status: text ? 'ready' : 'idle' });
+        } catch (err) {
+          set({
+            status: 'error',
+            error:
+              err instanceof CoachError
+                ? err.message
+                : "Couldn't generate today's brief.",
+          });
+        }
+      };
 
-  return {
-    date: '',
-    text: '',
-    status: 'idle',
-    error: null,
-    ensure: async () => {
-      if (get().date === todayKey() && get().text) {
-        if (get().status !== 'ready') set({ status: 'ready' });
-        return;
-      }
-      await run();
+      return {
+        date: '',
+        text: '',
+        status: 'idle',
+        error: null,
+        ensure: async () => {
+          // Wait for the persisted brief to load before deciding, so today's
+          // stored brief from an earlier launch is reused, not regenerated.
+          await hydrated;
+          if (get().date === todayKey() && get().text) {
+            if (get().status !== 'ready') set({ status: 'ready' });
+            return;
+          }
+          await run();
+        },
+        regenerate: async () => {
+          set({ date: '', text: '' });
+          await run();
+        },
+      };
     },
-    regenerate: async () => {
-      set({ date: '', text: '' });
-      await run();
+    {
+      name: 'daily-brief',
+      storage: createJSONStorage(() => briefStorage),
+      // Only the day's content is worth keeping; status/error are transient.
+      partialize: state => ({ date: state.date, text: state.text }),
+      // Fires after hydration finishes (with state, or on failure) — either way
+      // release ensure()'s gate so a fresh install still generates.
+      onRehydrateStorage: () => () => markHydrated(),
     },
-  };
-});
+  ),
+);

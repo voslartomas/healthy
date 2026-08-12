@@ -52,7 +52,14 @@ export async function runOnDevice(
   opts: RunOptions,
   engine: OnDeviceEngine = llamaEngine,
 ): Promise<string> {
-  const modelPath = useModelStore.getState().activeModelPath();
+  let modelPath = useModelStore.getState().activeModelPath();
+  if (!modelPath) {
+    // The store may simply not be initialised yet — e.g. the user opened the
+    // coach without first visiting Settings. Sync status from disk and re-read
+    // before giving up, so an already-downloaded model just works.
+    await useModelStore.getState().check();
+    modelPath = useModelStore.getState().activeModelPath();
+  }
   if (!modelPath) {
     throw new CoachError(
       'Download the Gemma model in Settings before chatting with the on-device coach.',
