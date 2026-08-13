@@ -18,7 +18,6 @@ import {
   removeFoodEntry,
 } from '../health';
 import { syncDailyEnergy } from './dailyEnergyService';
-import { syncGoalHistory } from './goalHistoryService';
 
 /**
  * In-memory store for the current health snapshot. Seeded empty — the UI shows
@@ -60,7 +59,7 @@ interface HealthState {
    * history exists (deep pull only on first load / when stale); 'full' forces a
    * deep pull. Safe to call on app start and every foreground. */
   refresh: (mode?: RefreshMode) => Promise<void>;
-  /** Log a food entry to Google Health, then refresh. Returns false if the
+  /** Log a food entry to Health Connect, then refresh. Returns false if the
    * write failed (e.g. not connected) so the UI can tell the user. */
   logFood: (input: FoodEntryInput) => Promise<boolean>;
   /** Log a food entry and return the created id (for later edits), refreshing
@@ -77,9 +76,13 @@ export const useHealthStore = create<HealthState>((set, get) => {
     void syncDailyEnergy(snapshot.dailyEnergy).catch(err =>
       console.warn('Failed to persist daily energy', err),
     );
-    void syncGoalHistory().catch(err =>
-      console.warn('Failed to persist goal history', err),
-    );
+    // Lazy import breaks the module require cycle (goalHistoryService imports
+    // this store and useGoalsStore, which also imports this store). Resolving it
+    // at call time — after all modules have initialized — avoids reading an
+    // uninitialized binding during evaluation.
+    void import('./goalHistoryService')
+      .then(m => m.syncGoalHistory())
+      .catch(err => console.warn('Failed to persist goal history', err));
   }
 
   /** Deep pull: fetch the full 12-week history, refresh the caches and snapshot.

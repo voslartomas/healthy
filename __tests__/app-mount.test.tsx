@@ -15,7 +15,10 @@ describe('App', () => {
     // After the splash beat, a fresh install (not onboarded) lands on the
     // Welcome screen with its connect call-to-action.
     await waitFor(
-      () => expect(screen.getByText('CONNECT GOOGLE HEALTH')).toBeOnTheScreen(),
+      () =>
+        expect(
+          screen.getByText(/CONNECT (APPLE HEALTH|HEALTH CONNECT)/),
+        ).toBeOnTheScreen(),
       { timeout: 3000 },
     );
   });

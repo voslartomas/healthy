@@ -1,6 +1,6 @@
 /**
  * Static UI structure for the health screens — labels, colors, and units only.
- * All measured values come from the live health snapshot (Google Health);
+ * All measured values come from the live health snapshot (Health Connect);
  * anything without real data renders "-". No sample numbers live here.
  */
 
@@ -98,6 +98,12 @@ export interface TrendMetric {
   delta: string;
   colorKey: MetricColorKey | 'fat' | 'carbs' | 'protein';
   points: number[];
+  /** Epoch-ms timestamp for each point in {@link points} (same length/order),
+   * so the chart can show the date when a point is tapped. */
+  times: number[];
+  /** Optional per-point min/max band (same length/order as {@link points}),
+   * e.g. the daily HRV spread. Absent for metrics with no intraday range. */
+  band?: { lo: number; hi: number }[];
   avg: string;
   range: string;
 }

@@ -1,33 +1,28 @@
+import { Platform } from 'react-native';
+
+import { activeHealthSource } from './deviceHealth';
 import { deriveSnapshot } from './derive';
 import {
-  createFoodEntry,
-  deleteFoodEntry,
-  fetchGoogleHealthRaw,
   FoodEntryInput,
   FoodLogResult,
   FULL_WINDOWS,
   RawFetchWindows,
-  writeFoodEntry,
-} from './GoogleHealthApi';
+} from './fetchWindows';
 import { HealthSnapshot, RawHealthData } from './types';
 
 export * from './types';
 export { deriveSnapshot, mergeRaw } from './derive';
-export {
-  GOOGLE_HEALTH_SCOPES,
-  FULL_WINDOWS,
-  LIGHT_WINDOWS,
-} from './GoogleHealthApi';
+export { FULL_WINDOWS, LIGHT_WINDOWS } from './fetchWindows';
 export type {
   FoodEntryInput,
   FoodLogResult,
   RawFetchWindows,
-} from './GoogleHealthApi';
+} from './fetchWindows';
 
 /**
- * Empty snapshot — every metric null/zero. Used whenever the live Google
- * Health cloud source is unavailable (not connected, failed read) so the UI
- * only ever shows real data and renders "-" for anything missing.
+ * Empty snapshot — every metric null/zero. Used whenever the live native source
+ * is unavailable (not connected, permission denied, failed read) so the UI only
+ * ever shows real data and renders "-" for anything missing.
  */
 export const EMPTY_SNAPSHOT: HealthSnapshot = {
   hrv: null,
@@ -45,13 +40,16 @@ export const EMPTY_SNAPSHOT: HealthSnapshot = {
     zones7d: { lightMin: 0, moderateMin: 0, vigorousMin: 0, peakMin: 0 },
     daily: [],
     hasZoneData: false,
+    hasLoadData: false,
   },
   activityOptions: [],
   weeklyHistory: [],
   dailyEnergy: [],
   trends: {
     hrv: [],
+    hrvRange: [],
     restingHr: [],
+    rhrRange: [],
     sleepHours: [],
     sleepQuality: [],
     readiness: [],
@@ -64,30 +62,36 @@ export const EMPTY_SNAPSHOT: HealthSnapshot = {
   live: false,
 };
 
-/**
- * OAuth access-token provider for the Google Health cloud source. The native
- * sign-in flow lives in {@link ./googleAuth} and registers a getter here on app
- * start via {@link setGoogleHealthTokenProvider}. Until then this stays null
- * and every read returns {@link EMPTY_SNAPSHOT}.
- */
-type TokenProvider = () => Promise<string | null>;
-let googleTokenProvider: TokenProvider | null = null;
-
-export function setGoogleHealthTokenProvider(fn: TokenProvider | null): void {
-  googleTokenProvider = fn;
+/** True when the current platform's native health module is available. */
+export function isHealthSourceConfigured(): boolean {
+  return activeHealthSource().isConfigured();
 }
 
-/** True once a Google Health token provider has been registered. */
-export function isGoogleHealthConfigured(): boolean {
-  return googleTokenProvider != null;
+/** Prompt the OS health-permission sheet. True once the read grant is in place. */
+export function connectHealthSource(): Promise<boolean> {
+  return activeHealthSource().connect();
+}
+
+/** Forget the local connection intent (native grants live in system settings). */
+export function disconnectHealthSource(): Promise<void> {
+  return activeHealthSource().disconnect();
+}
+
+/** Whether we currently hold the read permissions needed to produce data. */
+export function isHealthSourceConnected(): Promise<boolean> {
+  return activeHealthSource().isConnected();
+}
+
+/** Human label for the active platform's health store, for UI copy:
+ * "Apple Health" on iOS, "Health Connect" on Android. */
+export function healthSourceName(): string {
+  return Platform.OS === 'ios' ? 'Apple Health' : 'Health Connect';
 }
 
 /**
- * Read the current health snapshot from the Google Health cloud API, returning
- * {@link EMPTY_SNAPSHOT} whenever the source is unavailable: no token provider,
- * not signed in, or a failed request. This is the single live source — the app
- * is platform-agnostic (the REST API behaves identically on iOS and Android),
- * so there is no native path.
+ * Read the current health snapshot from the active native source, returning
+ * {@link EMPTY_SNAPSHOT} whenever the source is unavailable (not connected,
+ * permission denied, or a failed read).
  */
 export async function readSnapshot(now: number): Promise<HealthSnapshot> {
   const raw = await fetchRaw(now, FULL_WINDOWS);
@@ -96,82 +100,69 @@ export async function readSnapshot(now: number): Promise<HealthSnapshot> {
 }
 
 /**
- * Fetch RAW multi-source records over the given {@link RawFetchWindows}, or null
- * when the source is unavailable (no provider, not signed in, or the request
- * threw). Returning raw — not a derived snapshot — is what lets the store cache
- * the deep-history read and splice a light recent read onto it
- * ({@link ./derive.mergeRaw}) instead of re-pulling everything each refresh.
+ * Read RAW multi-source records over the given {@link RawFetchWindows}, or null
+ * when the source is unavailable. Returning raw — not a derived snapshot — is
+ * what lets the store cache the deep-history read and splice a light recent read
+ * onto it ({@link ./derive.mergeRaw}) instead of re-reading everything.
  */
 export async function fetchRaw(
   now: number,
   windows: RawFetchWindows = FULL_WINDOWS,
 ): Promise<RawHealthData | null> {
-  if (!googleTokenProvider) {
-    console.warn(
-      '[GoogleHealth] no token provider registered — empty snapshot',
-    );
+  const source = activeHealthSource();
+  if (!source.isConfigured()) {
+    console.warn('[health] no native source on this platform — empty snapshot');
     return null;
   }
   try {
-    const token = await googleTokenProvider();
-    if (!token) {
-      console.warn(
-        '[GoogleHealth] no access token (not signed in) — empty snapshot',
-      );
-      return null;
+    const raw = await source.readRaw(now, windows);
+    if (raw) {
+      console.log('[health] raw counts', {
+        exercise: raw.exercise.length,
+        steps: raw.steps.length,
+        totalEnergy: raw.totalEnergy.length,
+        nutrition: raw.nutrition.length,
+        windows,
+      });
     }
-    const raw = await fetchGoogleHealthRaw(token, now, fetch as never, windows);
-    console.log('[GoogleHealth] raw counts', {
-      exercise: raw.exercise.length,
-      steps: raw.steps.length,
-      totalEnergy: raw.totalEnergy.length,
-      nutrition: raw.nutrition.length,
-      windows,
-    });
     return raw;
   } catch (err) {
-    console.warn('[GoogleHealth] read failed', err);
+    console.warn('[health] read failed', err);
     return null;
   }
 }
 
 /**
- * Log a food entry to the signed-in user's Google Health nutrition log.
- * Returns false (a no-op) when not connected — the caller surfaces that. This is
- * the only WRITE the app performs, and only for user-authored food data.
+ * Log a food entry to the OS nutrition store (Health Connect / HealthKit).
+ * Returns false (a no-op) when not connected. This is the only WRITE the app
+ * performs, and only for user-authored food data.
  */
 export async function logFood(
   input: FoodEntryInput,
   now: number = Date.now(),
 ): Promise<boolean> {
-  if (!googleTokenProvider) return false;
-  const token = await googleTokenProvider();
-  if (!token) return false;
-  return writeFoodEntry(token, input, now, fetch as never);
+  return (await logFoodEntry(input, now)).ok;
 }
 
 /**
- * Like {@link logFood} but returns the created entry's resource id (when the API
- * echoes it) so the caller can later edit or delete it. Returns `{ok:false}`
- * when not connected.
+ * Like {@link logFood} but returns the created entry's native id (when the store
+ * echoes it) so the caller can later edit or delete it.
  */
 export async function logFoodEntry(
   input: FoodEntryInput,
   now: number = Date.now(),
 ): Promise<FoodLogResult> {
-  if (!googleTokenProvider) return { ok: false, error: 'not-connected' };
-  const token = await googleTokenProvider();
-  if (!token) return { ok: false, error: 'not-signed-in' };
-  return createFoodEntry(token, input, now, fetch as never);
+  const source = activeHealthSource();
+  if (!source.isConfigured()) return { ok: false, error: 'not-configured' };
+  return source.createFoodEntry(input, now);
 }
 
 /**
- * Delete a previously logged food entry by its resource name. Returns false
- * when not connected or the delete failed.
+ * Delete a previously logged food entry by its native id. Returns false when
+ * not connected or the delete failed.
  */
 export async function removeFoodEntry(name: string): Promise<boolean> {
-  if (!googleTokenProvider) return false;
-  const token = await googleTokenProvider();
-  if (!token) return false;
-  return deleteFoodEntry(token, name, fetch as never);
+  const source = activeHealthSource();
+  if (!source.isConfigured()) return false;
+  return source.deleteFoodEntry(name);
 }

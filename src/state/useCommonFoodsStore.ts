@@ -13,6 +13,14 @@ export interface CommonFood {
   carbsG?: number | null;
   fatG?: number | null;
   mealType?: string | null;
+  /**
+   * The reference portion the kcal/macros above describe — e.g. 100 (g) or 1
+   * (piece). Logging scales every value by chosenAmount / servingSize. Null
+   * means "1 serving" (an unscaled favourite).
+   */
+  servingSize?: number | null;
+  /** Unit for {@link servingSize}: 'g', 'ml', 'piece', 'serving', … */
+  servingUnit?: string | null;
 }
 
 interface CommonFoodsState {
@@ -23,6 +31,8 @@ interface CommonFoodsState {
   setFoods: (foods: CommonFood[]) => void;
   /** Append a food to the in-memory list. */
   addFoodLocal: (food: CommonFood) => void;
+  /** Replace a food in the in-memory list, matched by id. */
+  updateFoodLocal: (food: CommonFood) => void;
   /** Remove a food from the in-memory list. */
   removeFoodLocal: (id: string) => void;
 }
@@ -37,6 +47,10 @@ export const useCommonFoodsStore = create<CommonFoodsState>(set => ({
   hydrated: false,
   setFoods: foods => set({ foods, hydrated: true }),
   addFoodLocal: food => set(state => ({ foods: [...state.foods, food] })),
+  updateFoodLocal: food =>
+    set(state => ({
+      foods: state.foods.map(f => (f.id === food.id ? food : f)),
+    })),
   removeFoodLocal: id =>
     set(state => ({ foods: state.foods.filter(f => f.id !== id) })),
 }));

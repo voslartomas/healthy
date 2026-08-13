@@ -1,5 +1,13 @@
-import React, { useMemo } from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import {
+  GestureResponderEvent,
+  LayoutChangeEvent,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
 
 import { ScreenProps } from '../../app/navigation/types';
@@ -11,23 +19,25 @@ import { useTrendsStore } from '../../state/useTrendsStore';
 import { useTheme } from '../../theme/theme';
 import { buildMetrics, fmt, METRIC_CONFIG } from './metrics';
 
-/** Project a series into [x,y] within a padded W×H box. */
-function project(
-  pts: number[],
-  w: number,
-  h: number,
-  pad: number,
-): [number, number][] {
-  let min = Math.min(...pts),
-    max = Math.max(...pts);
-  if (min === max) {
-    min -= 1;
-    max += 1;
-  }
-  return pts.map((p, i) => [
-    pad + (i * (w - 2 * pad)) / (pts.length - 1),
-    h - pad - ((p - min) / (max - min)) * (h - 2 * pad),
-  ]);
+const MONTHS = [
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
+];
+
+/** "Aug 11" for a day timestamp. */
+function shortDate(ms: number): string {
+  const d = new Date(ms);
+  return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
 }
 
 /** Centered moving average — each point averaged with `half` neighbours on each
@@ -51,154 +61,275 @@ function movingAverage(pts: number[], window: number): number[] {
 }
 
 /**
- * The v3 trend line: baselines, an accent line, and value labels only on the
- * points that matter (latest + min + max), each drawn with a paper halo so the
- * line never runs through the digits. Only labelled points get a marker.
+ * The v3 trend line: an accent median line over baselines, an optional shaded
+ * min–max band (HRV's nightly spread), and a rolling-average reference curve.
+ * TAP or drag anywhere on the chart to inspect any day — a guide line + marker
+ * snap to the nearest point and the readout above shows that day's date, value,
+ * and (when banded) its min–max range. Static labels still mark min / max /
+ * latest so the extremes read at a glance.
  */
 function TrendChart({
   points,
+  times,
   decimals,
+  unit,
+  band,
 }: {
   points: number[];
+  times: number[];
   decimals: number;
+  unit: string;
+  band?: { lo: number; hi: number }[];
 }) {
   const c = useTheme().colors;
   const W = 386,
     H = 170,
     PAD = 16;
-  const xy = project(points, W, H, PAD);
+  const n = points.length;
+  const hasBand = !!band && band.length === n;
+
+  const [sel, setSel] = useState<number | null>(null);
+  const [layoutW, setLayoutW] = useState(0);
+
+  // y-domain covers the band when present, so the full nightly range is visible.
+  let mn = Math.min(...points),
+    mx = Math.max(...points);
+  if (hasBand) {
+    for (const b of band as { lo: number; hi: number }[]) {
+      mn = Math.min(mn, b.lo);
+      mx = Math.max(mx, b.hi);
+    }
+  }
+  if (mn === mx) {
+    mn -= 1;
+    mx += 1;
+  }
+  const x = (i: number) => PAD + (i * (W - 2 * PAD)) / (n - 1);
+  const y = (v: number) => H - PAD - ((v - mn) / (mx - mn)) * (H - 2 * PAD);
+
   const line =
-    'M' + xy.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(' L');
-  const lastIdx = points.length - 1;
+    'M' + points.map((p, i) => `${x(i).toFixed(1)},${y(p).toFixed(1)}`).join(' L');
+
+  // Band area: top edge (hi) left→right, then bottom edge (lo) right→left.
+  let bandPath = '';
+  if (hasBand) {
+    const b = band as { lo: number; hi: number }[];
+    const top = b.map((v, i) => `${x(i).toFixed(1)},${y(v.hi).toFixed(1)}`);
+    const bot = b
+      .map((v, i) => `${x(i).toFixed(1)},${y(v.lo).toFixed(1)}`)
+      .reverse();
+    bandPath = 'M' + top.join(' L') + ' L' + bot.join(' L') + ' Z';
+  }
+
+  const lastIdx = n - 1;
   const minIdx = points.indexOf(Math.min(...points));
   const maxIdx = points.indexOf(Math.max(...points));
   const labelled = [...new Set([minIdx, maxIdx, lastIdx])];
   const family = M(700, 10).fontFamily;
 
-  // Rolling-average reference curve (centered moving average), on the same
-  // y-scale as the series.
-  let mn = Math.min(...points),
-    mx = Math.max(...points);
-  if (mn === mx) {
-    mn -= 1;
-    mx += 1;
-  }
-  const toY = (v: number) => H - PAD - ((v - mn) / (mx - mn)) * (H - 2 * PAD);
   const rolling = movingAverage(points, 7);
   const rollPath =
     'M' +
-    rolling
-      .map((v, i) => `${xy[i][0].toFixed(1)},${toY(v).toFixed(1)}`)
-      .join(' L');
+    rolling.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' L');
   const mean = points.reduce((s, v) => s + v, 0) / points.length;
   const avgText = `AVG ${fmt(mean, decimals)}`;
-  const yAvgLabel = Math.min(Math.max(toY(mean) - 5, 10), H - 4);
+  const yAvgLabel = Math.min(Math.max(y(mean) - 5, 10), H - 4);
+
+  // Map a touch x (View pixels) to the nearest data index and select it.
+  const onTouch = (e: GestureResponderEvent) => {
+    if (layoutW <= 0 || n < 1) return;
+    const vbX = (e.nativeEvent.locationX / layoutW) * W;
+    const step = (W - 2 * PAD) / (n - 1 || 1);
+    const idx = Math.max(0, Math.min(n - 1, Math.round((vbX - PAD) / step)));
+    setSel(idx);
+  };
+  const onLayout = (e: LayoutChangeEvent) =>
+    setLayoutW(e.nativeEvent.layout.width);
+
+  const selBand = sel != null && hasBand ? (band as typeof band)![sel] : null;
 
   return (
-    <Svg width="100%" height={H} viewBox={`0 0 ${W} ${H}`} style={styles.chart}>
-      <Line x1={0} y1={150} x2={W} y2={150} stroke={c.hair} strokeWidth={1} />
-      <Line
-        x1={0}
-        y1={90}
-        x2={W}
-        y2={90}
-        stroke={c.hair}
-        strokeWidth={1}
-        strokeDasharray="3 4"
-      />
-      <Line
-        x1={0}
-        y1={30}
-        x2={W}
-        y2={30}
-        stroke={c.hair}
-        strokeWidth={1}
-        strokeDasharray="3 4"
-      />
-      {/* Rolling-average curve */}
-      <Path
-        d={rollPath}
-        fill="none"
-        stroke={c.mut}
-        strokeWidth={1.5}
-        strokeDasharray="2 4"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <Path
-        d={line}
-        fill="none"
-        stroke={c.acc}
-        strokeWidth={2.5}
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      {labelled.map(i => {
-        const [x, y] = xy[i];
-        const last = i === lastIdx;
-        return (
-          <Circle key={`d${i}`} cx={x} cy={y} r={last ? 4 : 3} fill={c.ink} />
-        );
-      })}
-      {labelled.map(i => {
-        const [x, y] = xy[i];
-        const last = i === lastIdx;
-        const above =
-          i > 0 ? points[i] <= points[i - 1] : points[i] <= points[i + 1];
-        const lx = Math.min(Math.max(x, 16), W - 16);
-        const ly = above ? y - 11 : y + 17;
-        const label = fmt(points[i], decimals);
-        const size = last ? 12 : 10;
-        return (
-          <React.Fragment key={`l${i}`}>
-            <SvgText
-              x={lx}
-              y={ly}
-              fontSize={size}
-              fontFamily={family}
-              fill={c.bg}
-              stroke={c.bg}
-              strokeWidth={4}
-              textAnchor="middle"
-            >
-              {label}
-            </SvgText>
-            <SvgText
-              x={lx}
-              y={ly}
-              fontSize={size}
-              fontFamily={family}
-              fill={last ? c.acc : c.fnt}
-              textAnchor="middle"
-            >
-              {label}
-            </SvgText>
-          </React.Fragment>
-        );
-      })}
-      <SvgText
-        x={2}
-        y={yAvgLabel}
-        fontSize={8.5}
-        fontFamily={family}
-        fill={c.bg}
-        stroke={c.bg}
-        strokeWidth={3}
-        textAnchor="start"
+    <View>
+      {/* Readout: selected day, or a hint before the first tap. */}
+      <View style={styles.readout}>
+        {sel != null ? (
+          <>
+            <Text style={M(700, 10, { ls: 1, color: c.fnt })}>
+              {times[sel] != null ? shortDate(times[sel]).toUpperCase() : '—'}
+            </Text>
+            <Text style={M(800, 13, { color: c.ink })}>
+              {fmt(points[sel], decimals)}
+              <Text style={M(700, 10, { color: c.fnt })}> {unit}</Text>
+              {selBand ? (
+                <Text style={M(700, 10, { color: c.fnt })}>
+                  {`   ${fmt(selBand.lo, decimals)}–${fmt(selBand.hi, decimals)}`}
+                </Text>
+              ) : null}
+            </Text>
+          </>
+        ) : (
+          <Text style={M(700, 9.5, { ls: 1, color: c.fnt })}>
+            TAP CHART FOR DAILY VALUES
+          </Text>
+        )}
+      </View>
+
+      <View
+        onLayout={onLayout}
+        onStartShouldSetResponder={() => true}
+        onMoveShouldSetResponder={() => true}
+        onResponderGrant={onTouch}
+        onResponderMove={onTouch}
       >
-        {avgText}
-      </SvgText>
-      <SvgText
-        x={2}
-        y={yAvgLabel}
-        fontSize={8.5}
-        fontFamily={family}
-        fill={c.mut}
-        textAnchor="start"
-      >
-        {avgText}
-      </SvgText>
-    </Svg>
+        <Svg
+          width="100%"
+          height={H}
+          viewBox={`0 0 ${W} ${H}`}
+          style={styles.chart}
+        >
+          <Line
+            x1={0}
+            y1={150}
+            x2={W}
+            y2={150}
+            stroke={c.hair}
+            strokeWidth={1}
+          />
+          <Line
+            x1={0}
+            y1={90}
+            x2={W}
+            y2={90}
+            stroke={c.hair}
+            strokeWidth={1}
+            strokeDasharray="3 4"
+          />
+          <Line
+            x1={0}
+            y1={30}
+            x2={W}
+            y2={30}
+            stroke={c.hair}
+            strokeWidth={1}
+            strokeDasharray="3 4"
+          />
+          {/* Min–max range band (HRV) */}
+          {bandPath ? (
+            <Path d={bandPath} fill={c.acc} fillOpacity={0.12} />
+          ) : null}
+          {/* Rolling-average curve */}
+          <Path
+            d={rollPath}
+            fill="none"
+            stroke={c.mut}
+            strokeWidth={1.5}
+            strokeDasharray="2 4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          {/* Median / value line */}
+          <Path
+            d={line}
+            fill="none"
+            stroke={c.acc}
+            strokeWidth={2.5}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          {/* Selection guide + marker */}
+          {sel != null ? (
+            <>
+              <Line
+                x1={x(sel)}
+                y1={PAD}
+                x2={x(sel)}
+                y2={H - PAD}
+                stroke={c.fnt}
+                strokeWidth={1}
+                strokeDasharray="2 3"
+              />
+              {selBand ? (
+                <>
+                  <Circle cx={x(sel)} cy={y(selBand.hi)} r={2.5} fill={c.fnt} />
+                  <Circle cx={x(sel)} cy={y(selBand.lo)} r={2.5} fill={c.fnt} />
+                </>
+              ) : null}
+              <Circle cx={x(sel)} cy={y(points[sel])} r={4.5} fill={c.acc} />
+            </>
+          ) : null}
+          {labelled.map(i => {
+            const last = i === lastIdx;
+            return (
+              <Circle
+                key={`d${i}`}
+                cx={x(i)}
+                cy={y(points[i])}
+                r={last ? 4 : 3}
+                fill={c.ink}
+              />
+            );
+          })}
+          {labelled.map(i => {
+            const py = y(points[i]);
+            const last = i === lastIdx;
+            const above =
+              i > 0 ? points[i] <= points[i - 1] : points[i] <= points[i + 1];
+            const lx = Math.min(Math.max(x(i), 16), W - 16);
+            const ly = above ? py - 11 : py + 17;
+            const label = fmt(points[i], decimals);
+            const size = last ? 12 : 10;
+            return (
+              <React.Fragment key={`l${i}`}>
+                <SvgText
+                  x={lx}
+                  y={ly}
+                  fontSize={size}
+                  fontFamily={family}
+                  fill={c.bg}
+                  stroke={c.bg}
+                  strokeWidth={4}
+                  textAnchor="middle"
+                >
+                  {label}
+                </SvgText>
+                <SvgText
+                  x={lx}
+                  y={ly}
+                  fontSize={size}
+                  fontFamily={family}
+                  fill={last ? c.acc : c.fnt}
+                  textAnchor="middle"
+                >
+                  {label}
+                </SvgText>
+              </React.Fragment>
+            );
+          })}
+          <SvgText
+            x={2}
+            y={yAvgLabel}
+            fontSize={8.5}
+            fontFamily={family}
+            fill={c.bg}
+            stroke={c.bg}
+            strokeWidth={3}
+            textAnchor="start"
+          >
+            {avgText}
+          </SvgText>
+          <SvgText
+            x={2}
+            y={yAvgLabel}
+            fontSize={8.5}
+            fontFamily={family}
+            fill={c.mut}
+            textAnchor="start"
+          >
+            {avgText}
+          </SvgText>
+        </Svg>
+      </View>
+    </View>
   );
 }
 
@@ -483,7 +614,14 @@ export function TrendsScreen(_props: ScreenProps) {
 
       {/* Chart */}
       {active.points.length > 1 ? (
-        <TrendChart points={active.points} decimals={decimals} />
+        <TrendChart
+          key={active.key}
+          points={active.points}
+          times={active.times}
+          decimals={decimals}
+          unit={active.unit}
+          band={active.band}
+        />
       ) : (
         <Text
           style={[
@@ -517,7 +655,14 @@ const styles = StyleSheet.create({
   },
   segRow: { gap: 18, paddingVertical: 12 },
   seg: { borderBottomWidth: 2, paddingBottom: 8, paddingTop: 2 },
-  chart: { marginTop: 10 },
+  readout: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'baseline',
+    marginTop: 12,
+    minHeight: 18,
+  },
+  chart: { marginTop: 6 },
   emptyChart: { paddingVertical: 50 },
   axis: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
   section: { marginTop: 20, paddingVertical: 16, borderTopWidth: 1 },

@@ -4,7 +4,7 @@
  * Talks directly to the configured provider's REST API (Anthropic / OpenAI /
  * Gemini) using the key + model the user set in Settings ({@link useAppStore}).
  * There is no backend — requests go device↔provider over TLS, mirroring the
- * Google Health privacy boundary (ADR-005).
+ * Health Connect privacy boundary (ADR-005).
  *
  * The core is {@link runCoach}: it runs a bounded tool-calling loop so the model
  * can call app tools (e.g. log_food) mid-turn, receive the result, and continue

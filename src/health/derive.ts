@@ -47,6 +47,10 @@ const WEEK_MS = 7 * DAY_MS;
  * they are the only writer). Tune as we learn real-world source quality.
  */
 const SOURCE_PRIORITY: Record<string, number> = {
+  // Zepp (Amazfit) — the user's primary strap; writes typed exercise sessions
+  // (real exerciseType; titles are null) plus good HRV/sleep, so it's preferred
+  // across all metrics. Package confirmed from the [HEA-ACT] dataOrigin.
+  'com.huami.watch.hmwatchmanager': 45, // Zepp / Amazfit
   'com.withings.wiscale2': 40, // Withings (scale, sleep mat)
   'com.fitbit.FitbitMobile': 35, // Fitbit (band/watch)
   'com.ouraring.oura': 35, // Oura
@@ -89,31 +93,45 @@ function median(values: number[]): number {
  */
 export function dedupeIntervals<
   T extends { start: number; end: number; source: string },
->(records: T[]): T[] {
+>(records: T[], rankOf: (r: T) => number = r => sourceRank(r.source)): T[] {
   const sorted = [...records].sort((a, b) => a.start - b.start);
   const kept: T[] = [];
   for (const rec of sorted) {
     const overlapsHigher = kept.some(
-      k =>
-        rec.start < k.end &&
-        k.start < rec.end &&
-        sourceRank(k.source) > sourceRank(rec.source),
+      k => rec.start < k.end && k.start < rec.end && rankOf(k) > rankOf(rec),
     );
     if (overlapsHigher) continue;
     // Also remove already-kept records this one outranks on the same window.
     for (let i = kept.length - 1; i >= 0; i--) {
       const k = kept[i];
-      if (
-        rec.start < k.end &&
-        k.start < rec.end &&
-        sourceRank(rec.source) > sourceRank(k.source)
-      ) {
+      if (rec.start < k.end && k.start < rec.end && rankOf(rec) > rankOf(k)) {
         kept.splice(i, 1);
       }
     }
     kept.push(rec);
   }
   return kept;
+}
+
+/**
+ * De-dup rank for overlapping EXERCISE sessions across sources. A record that
+ * actually IDENTIFIES the activity — a real (non-zero) exercise type and/or a
+ * title — beats a generic OTHER_WORKOUT (type 0, no title) even from a
+ * higher-priority app. This is what recovers the activity type when e.g. Fitbit
+ * writes a session as generic type-0 while another connected app wrote the same
+ * workout typed. Ties fall back to normal source priority.
+ */
+export function exerciseInfoRank(e: {
+  exerciseType: number;
+  displayName?: string | null;
+  source: string;
+}): number {
+  // sourceRank is 0..40, so the +1000 / +100 boosts dominate: a typed session
+  // always outranks an untyped one regardless of which app wrote it.
+  let score = sourceRank(e.source);
+  if (e.exerciseType !== 0) score += 1000;
+  if (e.displayName) score += 100;
+  return score;
 }
 
 /** Most recent sample from the highest-priority source that has any samples. */
@@ -150,18 +168,201 @@ function metricWithBaseline(
   };
 }
 
-/** Steps in [from, to), summed from a single primary source (no cross-origin sum). */
+/**
+ * Per-day MEDIAN of a metric's samples, from the single primary source. Used for
+ * metrics whose source logs MANY intraday readings and whose displayed figure is
+ * the day's aggregate — notably HRV: Fitbit (and other wearables) write one RMSSD
+ * value every ~5 minutes through the night, and the app shows the night's central
+ * value, not an arbitrary latest 5-minute sample.
+ *
+ * We use the MEDIAN, not the mean, on purpose: RMSSD spikes high during awake /
+ * movement periods (motion artifact), and those readings are mixed into the same
+ * record stream with no sleep-stage label. A mean gets dragged UP by those
+ * spikes — badly on a restless night — whereas the median tracks the stable
+ * sleeping value the wearable reports. Keyed by UTC day → median value.
+ */
+export function dailyMedianByDay(samples: InstantSample[]): Map<number, number> {
+  const primary = primarySource(samples);
+  const src = primary ? samples.filter(s => s.source === primary) : samples;
+  const byDay = new Map<number, number[]>();
+  for (const s of src) {
+    const day = Math.floor(s.time / DAY_MS);
+    const arr = byDay.get(day);
+    if (arr) arr.push(s.value);
+    else byDay.set(day, [s.value]);
+  }
+  const out = new Map<number, number>();
+  for (const [day, vals] of byDay) out.set(day, median(vals));
+  return out;
+}
+
+/**
+ * HRV metric the way wearables + the Google Health app present it: the most
+ * recent night's MEDIAN RMSSD (robust to awake-period spikes; see
+ * {@link dailyMedianByDay}), with a baseline = median of recent nightly values.
+ * This replaces the generic latest-single-sample selection for HRV, which
+ * surfaced an arbitrary 5-minute value that matched neither the app nor itself
+ * day-to-day.
+ */
+export function hrvMetric(samples: InstantSample[]): MetricWithBaseline | null {
+  const byDay = dailyMedianByDay(samples);
+  if (byDay.size === 0) return null;
+  const latestDay = Math.max(...byDay.keys());
+  const value = byDay.get(latestDay) as number;
+  const baseline = median([...byDay.values()]) || value;
+  return { value, baseline, delta: value - baseline };
+}
+
+/** Per-day MEDIAN series (oldest first) — the trend counterpart of
+ * {@link dailyMedianByDay}, for metrics shown as a nightly/daily aggregate. */
+export function dailyMedianSeries(samples: InstantSample[]): TrendPoint[] {
+  return [...dailyMedianByDay(samples).entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([day, value]) => ({ time: day * DAY_MS, value }));
+}
+
+/**
+ * Per-day {median, min, max} of a metric's primary-source samples, oldest first
+ * — the material for a range band. HRV's nightly spread (min–max of that night's
+ * ~5-min readings) is wide and informative, so the Trends chart shades it behind
+ * the median line.
+ */
+export function dailyStats(
+  samples: InstantSample[],
+): { time: number; median: number; min: number; max: number }[] {
+  const primary = primarySource(samples);
+  const src = primary ? samples.filter(s => s.source === primary) : samples;
+  const byDay = new Map<number, number[]>();
+  for (const s of src) {
+    const day = Math.floor(s.time / DAY_MS);
+    const arr = byDay.get(day);
+    if (arr) arr.push(s.value);
+    else byDay.set(day, [s.value]);
+  }
+  return [...byDay.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([day, vals]) => ({
+      time: day * DAY_MS,
+      median: median(vals),
+      min: Math.min(...vals),
+      max: Math.max(...vals),
+    }));
+}
+
+/**
+ * Steps in [from, to) from a SINGLE source (no cross-origin sum), but choosing
+ * that source by best coverage rather than brand priority alone.
+ *
+ * The old rule "sum only the highest-priority source present" undercounts badly
+ * when the top-priority app synced only a sparse stub for the window while a
+ * lower-priority source actually tracked it — the "6 steps when I have thousands
+ * this week" bug (a wearable that hadn't synced yet outranking the phone counter
+ * that had). So we sum per source, then among the sources whose total is within
+ * 20% of the best-covered source (i.e. they plausibly tracked the same window)
+ * trust the highest-priority one. Comparable counts still defer to the trusted
+ * device (no phone-vs-wearable double count); a source that clearly didn't track
+ * the window (orders of magnitude fewer steps) is ignored.
+ */
 export function stepsInWindow(
   steps: StepsRecord[],
   from: number,
   to: number,
 ): number {
   const inWindow = steps.filter(s => s.end > from && s.start < to);
-  const primary = primarySource(inWindow);
-  if (primary == null) return 0;
-  return inWindow
-    .filter(s => s.source === primary)
-    .reduce((sum, s) => sum + s.count, 0);
+  if (inWindow.length === 0) return 0;
+  const totals = new Map<string, number>();
+  for (const s of inWindow)
+    totals.set(s.source, (totals.get(s.source) ?? 0) + s.count);
+  return bestCoveredTotal(totals);
+}
+
+/**
+ * Among per-source totals, choose the ONE source that best covered the window —
+ * preferring real coverage over brand priority. Sources whose total is within
+ * 20% of the best-covered (highest-total) source are treated as having tracked
+ * the same window; among those we trust the highest {@link sourceRank}. This is
+ * what stops a high-priority source that wrote only a sparse stub — a watch that
+ * logged one short workout, say — from shadowing the source that tracked the
+ * whole day (the steps "6 steps when I walked thousands" bug and the identical
+ * "BURNED 65 vs 1000+" energy undercount). Returns null for an empty map.
+ */
+function bestCoveredSource(totals: Map<string, number>): string | null {
+  if (totals.size === 0) return null;
+  const entries = [...totals.entries()].map(([source, total]) => ({
+    source,
+    total,
+    rank: sourceRank(source),
+  }));
+  const maxTotal = Math.max(...entries.map(e => e.total));
+  const threshold = maxTotal * 0.8;
+  const candidates = entries.filter(e => e.total >= threshold);
+  candidates.sort((a, b) => b.rank - a.rank || b.total - a.total);
+  return candidates[0].source;
+}
+
+/** The best-covered source's total (see {@link bestCoveredSource}). */
+function bestCoveredTotal(totals: Map<string, number>): number {
+  const source = bestCoveredSource(totals);
+  return source == null ? 0 : (totals.get(source) ?? 0);
+}
+
+/**
+ * Energy summed over the UNION of the records' time coverage, prorating any
+ * overlap so each instant is counted at most once. Health Connect can hold
+ * overlapping or duplicate energy buckets from a SINGLE source and de-overlaps
+ * them in its own aggregate (what its UI shows); a naive raw sum does not, which
+ * double-counted the day's burn — the "BURNED 1800 while Health Connect shows
+ * ~1000" overcount. Non-overlapping records are summed exactly as before.
+ */
+function unionEnergyKcal(records: EnergyRecord[]): number {
+  const sorted = [...records].sort((a, b) => a.start - b.start);
+  let sum = 0;
+  let coveredUntil = -Infinity;
+  for (const r of sorted) {
+    if (r.end <= r.start) {
+      // Degenerate/instant record: count once if it opens a new instant.
+      if (r.start >= coveredUntil) {
+        sum += r.kcal;
+        coveredUntil = Math.max(coveredUntil, r.start);
+      }
+      continue;
+    }
+    if (r.start >= coveredUntil) {
+      sum += r.kcal; // wholly new coverage
+      coveredUntil = r.end;
+    } else if (r.end > coveredUntil) {
+      // Partial overlap: keep only the not-yet-covered tail, prorated by time.
+      sum += r.kcal * ((r.end - coveredUntil) / (r.end - r.start));
+      coveredUntil = r.end;
+    }
+    // else fully inside already-covered time → skip (pure duplicate bucket)
+  }
+  return sum;
+}
+
+/**
+ * Clip an energy record to [from, to], prorating its kcal by the fraction of its
+ * duration inside the window. Some sources (notably Google Fit,
+ * `com.google.android.apps.fitness`) write TotalCaloriesBurned as WHOLE-DAY
+ * forecast buckets that run past `now` to local midnight; summing their full
+ * kcal counts hours that haven't happened yet — the "BURNED 1832 for a day
+ * that's only ~960 so far" overcount. Returns null if the record lies entirely
+ * outside the window.
+ */
+function clipEnergyToWindow(
+  e: EnergyRecord,
+  from: number,
+  to: number,
+): EnergyRecord | null {
+  if (e.end <= e.start) {
+    // Instantaneous record: keep iff its instant falls inside the window.
+    return e.start >= from && e.start < to ? e : null;
+  }
+  const start = Math.max(e.start, from);
+  const end = Math.min(e.end, to);
+  if (end <= start) return null;
+  const frac = (end - start) / (e.end - e.start);
+  return { ...e, start, end, kcal: e.kcal * frac };
 }
 
 function activeEnergyInWindow(
@@ -169,12 +370,43 @@ function activeEnergyInWindow(
   from: number,
   to: number,
 ): number {
-  const inWindow = energy.filter(e => e.end > from && e.start < to);
-  const primary = primarySource(inWindow);
-  if (primary == null) return 0;
-  return inWindow
-    .filter(e => e.source === primary)
-    .reduce((sum, e) => sum + e.kcal, 0);
+  // Clip+prorate each record to the window FIRST — a source that writes a
+  // full-day forecast (Google Fit) must contribute only its elapsed portion,
+  // not the projected remainder of the day.
+  const inWindow = energy
+    .map(e => clipEnergyToWindow(e, from, to))
+    .filter((e): e is EnergyRecord => e != null);
+  if (inWindow.length === 0) return 0;
+  // Take each source's UNION-coverage total (de-overlapped), then trust the
+  // source that actually covered the window — not merely the highest-priority
+  // one, and not the one reporting the largest number (which may be a whole-day
+  // projection). Together this fixes the 65 undercount (sparse high-priority
+  // stub), the overlapping-bucket overcount, and the Google-Fit forecast
+  // overcount.
+  const bySource = new Map<string, EnergyRecord[]>();
+  for (const e of inWindow) {
+    const arr = bySource.get(e.source);
+    if (arr) arr.push(e);
+    else bySource.set(e.source, [e]);
+  }
+  const totals = new Map<string, number>();
+  for (const [source, recs] of bySource)
+    totals.set(source, unionEnergyKcal(recs));
+  const source = bestCoveredSource(totals);
+  return source == null ? 0 : (totals.get(source) ?? 0);
+}
+
+/**
+ * The energy records to treat as "burned": total expenditure (TDEE) when any
+ * source writes {@link RawHealthData.totalEnergy}, else active energy as a
+ * fallback. On Android several sources (notably Fitbit and Zepp/Amazfit) write
+ * only `ActiveCaloriesBurned` to Health Connect and no `TotalCaloriesBurned`, so
+ * keying "burned" strictly off total energy left the dashboard showing nothing
+ * ("BURNED ——", no net) after the switch to Health Connect. Falling back to
+ * active energy shows a real, if conservative, burned figure instead of 0.
+ */
+function burnEnergyRecords(raw: RawHealthData): EnergyRecord[] {
+  return raw.totalEnergy.length > 0 ? raw.totalEnergy : raw.activeEnergy;
 }
 
 /**
@@ -182,9 +414,12 @@ function activeEnergyInWindow(
  * sources. Values are the documented AndroidX constants. Anything not listed is
  * treated as generic cardio for the zone-2 minutes tally.
  */
-const STRENGTH_TYPES = new Set([70, 65]); // STRENGTH_TRAINING, WEIGHTLIFTING
+// Authoritative AndroidX / react-native-health-connect exercise-type ints:
+// STRENGTH_TRAINING=70, WEIGHTLIFTING=81 (NOT 65 — that's SOFTBALL, an old bug),
+// PILATES=48, YOGA=83, WALKING=79.
+const STRENGTH_TYPES = new Set([70, 81]); // STRENGTH_TRAINING, WEIGHTLIFTING
 const CORE_TYPES = new Set([48, 83]); // PILATES, YOGA (closest core proxies)
-const NON_CARDIO_TYPES = new Set([70, 65, 48, 83, 79]); // + WALKING(79) excluded from zone-2
+const NON_CARDIO_TYPES = new Set([70, 81, 48, 83, 79]); // + WALKING(79) excluded from zone-2
 
 /**
  * Auto-tracked weekly totals per goal source from real activity.
@@ -204,6 +439,7 @@ export function trackedFromExercise(
   const weekAgo = now - WEEK_MS;
   const sessions = dedupeIntervals(
     exercise.filter(e => e.end > weekAgo && e.start <= now),
+    exerciseInfoRank,
   );
 
   let strength = 0;
@@ -226,7 +462,7 @@ export function trackedFromExercise(
 
 /** How many recent weeks of goal history the snapshot exposes for computation.
  * Matches the Trends 12-week grid; the paginated exercise fetch (see
- * EXERCISE_HISTORY_DAYS in GoogleHealthApi) reaches back far enough to cover it,
+ * the exercise fetch window) reaches back far enough to cover it,
  * and older weeks additionally persist in SQLite. Weeks with no data still read
  * as "no data" (never a fabricated miss) via {@link WeekCoverage}. */
 const HISTORY_WEEKS = 12;
@@ -250,6 +486,7 @@ export function trackedForWindow(
 ): Partial<Record<GoalSourceKey, number>> {
   const sessions = dedupeIntervals(
     exercise.filter(e => e.start >= from && e.start < to),
+    exerciseInfoRank,
   );
   let strength = 0;
   let core = 0;
@@ -350,7 +587,10 @@ export function activitiesInWindow(
   from: number,
   to: number,
 ): ActivitySummary[] {
-  return dedupeIntervals(exercise.filter(e => e.start >= from && e.start < to))
+  return dedupeIntervals(
+    exercise.filter(e => e.start >= from && e.start < to),
+    exerciseInfoRank,
+  )
     .sort((a, b) => b.start - a.start)
     .map(toSummary);
 }
@@ -367,6 +607,7 @@ export function activitiesFromExercise(
   const weekAgo = now - WEEK_MS;
   return dedupeIntervals(
     exercise.filter(e => e.end > weekAgo && e.start <= now),
+    exerciseInfoRank,
   )
     .sort((a, b) => b.start - a.start)
     .map(toSummary);
@@ -394,6 +635,7 @@ export function activityGoalOptions(
   const from = now - windowMs;
   const sessions = dedupeIntervals(
     exercise.filter(e => e.end > from && e.start <= now),
+    exerciseInfoRank,
   );
 
   const byKey = new Map<string, ActivityOption>();
@@ -453,6 +695,7 @@ export function cardioFromExercise(
   const from = startOfToday - 6 * DAY_MS;
   const sessions = dedupeIntervals(
     exercise.filter(e => e.start >= from && e.start <= now),
+    exerciseInfoRank,
   );
 
   const zones7d: CardioZones = {
@@ -463,16 +706,31 @@ export function cardioFromExercise(
   };
   const loadByDay = new Map<number, number>();
   let hasZoneData = false;
+  let hasFallbackLoad = false;
 
   for (const s of sessions) {
-    if (!s.hrZones) continue;
-    hasZoneData = true;
-    zones7d.lightMin += s.hrZones.lightMin;
-    zones7d.moderateMin += s.hrZones.moderateMin;
-    zones7d.vigorousMin += s.hrZones.vigorousMin;
-    zones7d.peakMin += s.hrZones.peakMin;
     const day = s.start - (s.start % DAY_MS);
-    loadByDay.set(day, (loadByDay.get(day) ?? 0) + zoneLoad(s.hrZones));
+    if (s.hrZones) {
+      hasZoneData = true;
+      zones7d.lightMin += s.hrZones.lightMin;
+      zones7d.moderateMin += s.hrZones.moderateMin;
+      zones7d.vigorousMin += s.hrZones.vigorousMin;
+      zones7d.peakMin += s.hrZones.peakMin;
+      loadByDay.set(day, (loadByDay.get(day) ?? 0) + zoneLoad(s.hrZones));
+    } else if (!NON_CARDIO_TYPES.has(s.exerciseType)) {
+      // A CARDIO session with no readable HR samples — e.g. Fitbit writes the
+      // ExerciseSession to Health Connect but not its per-second HeartRate, so
+      // we can't bin zones. Rather than let it read as 0 load (the "cardio load
+      // shows 0 for Fitbit" bug), estimate a load from its duration at a
+      // moderate-intensity weight. It contributes to the load number only, never
+      // the (honest, HR-derived) zone breakdown. Non-cardio types (strength,
+      // core, walking) are excluded so they don't inflate cardio load.
+      const est = s.durationMin * CARDIO_ZONE_WEIGHTS.moderate;
+      if (est > 0) {
+        hasFallbackLoad = true;
+        loadByDay.set(day, (loadByDay.get(day) ?? 0) + est);
+      }
+    }
   }
 
   const daily: CardioDay[] = [];
@@ -492,6 +750,7 @@ export function cardioFromExercise(
     },
     daily,
     hasZoneData,
+    hasLoadData: hasZoneData || hasFallbackLoad,
   };
 }
 
@@ -609,6 +868,7 @@ export function dailyEnergyInWindow(
   from: number,
   to: number,
 ): DailyEnergy[] {
+  const burnRecords = burnEnergyRecords(raw);
   const out: DailyEnergy[] = [];
   for (let dayStart = from; dayStart < to; dayStart += DAY_MS) {
     const dayEnd = dayStart + DAY_MS;
@@ -618,7 +878,7 @@ export function dailyEnergyInWindow(
     const eaten = meals.length
       ? Math.round(meals.reduce((s, e) => s + (e.kcal ?? 0), 0))
       : null;
-    const buckets = raw.totalEnergy.filter(
+    const buckets = burnRecords.filter(
       e => e.start >= dayStart && e.start < dayEnd,
     );
     const burned = buckets.length
@@ -706,11 +966,12 @@ export function sleepQualitySeries(sleep: SleepRecord[]): TrendPoint[] {
 /** Per-day readiness, computed from that day's HRV/RHR vs the 30-day baseline
  * plus that night's sleep. Only days with HRV or RHR produce a point. */
 export function readinessSeries(raw: RawHealthData): TrendPoint[] {
-  const hrvBase = dailyBaseline(raw.hrvRmssd);
+  // HRV uses nightly MEDIANs (per {@link hrvMetric}); RHR stays latest-per-day.
+  const hrvDay = dailyMedianByDay(raw.hrvRmssd);
+  const hrvBase = median([...hrvDay.values()]);
   const rhrBase = dailyBaseline(raw.restingHr);
   const toDayMap = (pts: TrendPoint[]) =>
     new Map(pts.map(p => [Math.floor(p.time / DAY_MS), p.value]));
-  const hrvDay = toDayMap(dailySeries(raw.hrvRmssd));
   const rhrDay = toDayMap(dailySeries(raw.restingHr));
   const sleepDay = toDayMap(sleepHoursSeries(raw.sleep));
 
@@ -740,11 +1001,47 @@ export function readinessSeries(raw: RawHealthData): TrendPoint[] {
   return out;
 }
 
+/**
+ * A ROLLING min/max band around a daily series: for each day, the min and max of
+ * the series values within a centered `±half`-day window (clamped at the ends).
+ *
+ * This is the material for the Trends range band, and it deliberately replaces
+ * the old per-day INTRADAY min/max. Intraday spread was wrong for both banded
+ * metrics: HRV's nightly spread of ~5-minute RMSSD readings is so wide it
+ * flattened the median line on the shared y-axis, and resting HR has a single
+ * reading per day so its intraday range collapsed to lo==hi (the "RHR shows
+ * 50–50, no range" report). A rolling band of the DAILY values instead shows
+ * real recent day-to-day variability, on the same scale as the line, for both.
+ */
+export function rollingRange(
+  points: TrendPoint[],
+  half = 3,
+): { time: number; lo: number; hi: number }[] {
+  return points.map((p, i) => {
+    let lo = p.value;
+    let hi = p.value;
+    const from = Math.max(0, i - half);
+    const to = Math.min(points.length - 1, i + half);
+    for (let j = from; j <= to; j++) {
+      if (points[j].value < lo) lo = points[j].value;
+      if (points[j].value > hi) hi = points[j].value;
+    }
+    return { time: p.time, lo, hi };
+  });
+}
+
 /** Build every metric's daily history for the Trends screen. */
 export function buildTrendSeries(raw: RawHealthData): TrendSeries {
+  // HRV line = nightly MEDIAN (matches the wearable app, robust to awake-period
+  // spikes). RHR line = the daily resting value. Both get a ROLLING min/max band
+  // (see {@link rollingRange}) rather than an intraday spread.
+  const hrv = dailyMedianSeries(raw.hrvRmssd);
+  const restingHr = dailySeries(raw.restingHr);
   return {
-    hrv: dailySeries(raw.hrvRmssd),
-    restingHr: dailySeries(raw.restingHr),
+    hrv,
+    hrvRange: rollingRange(hrv),
+    restingHr,
+    rhrRange: rollingRange(restingHr),
     sleepHours: sleepHoursSeries(raw.sleep),
     sleepQuality: sleepQualitySeries(raw.sleep),
     readiness: readinessSeries(raw),
@@ -837,10 +1134,14 @@ export function deriveSnapshot(
   raw: RawHealthData,
   now: number,
 ): HealthSnapshot {
-  const hrvBase = metricWithBaseline(raw.hrvRmssd);
-  // Tagged SDNN: the mapping now uses the daily-average HRV field (what the
-  // Google Health app shows), which is SDNN-class, not the deep-sleep RMSSD.
-  const hrv = hrvBase ? { ...hrvBase, algorithm: 'SDNN' as const } : null;
+  const hrvBase = hrvMetric(raw.hrvRmssd);
+  // Tag with the algorithm the source actually measured: Health Connect reports
+  // RMSSD (Android), HealthKit reports SDNN (iOS). These are NOT numerically
+  // comparable (HEA-4), so the tag travels with every HRV value and is never
+  // assumed. Legacy raw data without the field defaults to RMSSD.
+  const hrv = hrvBase
+    ? { ...hrvBase, algorithm: raw.hrvAlgorithm ?? ('RMSSD' as const) }
+    : null;
   const restingHr = metricWithBaseline(raw.restingHr);
 
   const lastSleepSession = lastSleep(raw.sleep);
@@ -865,9 +1166,15 @@ export function deriveSnapshot(
     stepsThisWeek: stepsInWindow(raw.steps, now - WEEK_MS, now),
     readiness: readiness(hrv, restingHr, sleep),
     nutrition: nutritionToday(raw.nutrition, now),
-    energyBurnedToday: Math.round(
-      activeEnergyInWindow(raw.totalEnergy, startOfToday, now),
-    ),
+    // Prefer Health Connect's own cross-source aggregate (matches the Google
+    // Health UI exactly); fall back to the single-source record computation on
+    // platforms/reads without it (iOS/HealthKit, tests, aggregate failure).
+    energyBurnedToday:
+      raw.energyBurnedTodayAgg != null
+        ? raw.energyBurnedTodayAgg
+        : Math.round(
+            activeEnergyInWindow(burnEnergyRecords(raw), startOfToday, now),
+          ),
     activities: activitiesFromExercise(raw.exercise, now),
     cardio: cardioFromExercise(raw.exercise, now),
     activityOptions: activityGoalOptions(raw.exercise, now),

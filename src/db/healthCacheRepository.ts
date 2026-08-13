@@ -2,7 +2,7 @@ import { RawHealthData } from '../health/types';
 import { getDb } from './database';
 
 /**
- * A single-row cache of the last DEEP (full-history) Google Health read, stored
+ * A single-row cache of the last DEEP (full-history) Health Connect read, stored
  * as JSON. It lets the app open instantly with the previous snapshot and, on a
  * routine refresh, fetch only the recent slice and splice it onto this cached
  * history instead of re-paginating 12 weeks of exercise + calories every time.

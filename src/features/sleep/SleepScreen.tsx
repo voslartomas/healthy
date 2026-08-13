@@ -65,7 +65,7 @@ export function SleepScreen({ navigation }: ScreenProps) {
         <Text style={[styles.heroSub, { color: t.colors.muted }]}>
           {sleep
             ? `${sleep.performancePct}% of your 8h sleep need`
-            : 'Connect Google Health in Settings to see your sleep.'}
+            : 'Connect Health Connect in Settings to see your sleep.'}
         </Text>
       </Card>
 

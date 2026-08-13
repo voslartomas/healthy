@@ -11,7 +11,7 @@ import {
   Quad,
   Section,
 } from '../../components/brief';
-import { HealthSnapshot } from '../../health';
+import { HealthSnapshot, healthSourceName } from '../../health';
 import { useHealthStore } from '../../state/useHealthStore';
 import { useTheme } from '../../theme/theme';
 import { WeeklyGoalsCard } from '../goals/WeeklyGoalsCard';
@@ -123,7 +123,7 @@ export function DashboardScreen({ navigation }: ScreenProps) {
   const latestFat = fPts.length ? fPts[fPts.length - 1].value : null;
 
   const syncNote = snap.live
-    ? `SYNCED · GOOGLE HEALTH · ${snap.sources.length} SOURCE${snap.sources.length === 1 ? '' : 'S'}`
+    ? `SYNCED · ${healthSourceName().toUpperCase()} · ${snap.sources.length} SOURCE${snap.sources.length === 1 ? '' : 'S'}`
     : 'NO HEALTH DATA YET — CONNECT IN SETUP';
 
   return (
@@ -170,7 +170,7 @@ export function DashboardScreen({ navigation }: ScreenProps) {
               ),
             },
             {
-              value: snap.cardio.hasZoneData
+              value: snap.cardio.hasLoadData
                 ? String(snap.cardio.todayLoad)
                 : '——',
               color: c.acc,

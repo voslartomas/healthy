@@ -15,14 +15,16 @@ export interface MetricConfig {
   goodUp: boolean;
 }
 
+// HRV and RHR lead — they are the recovery signals the user checks first (and
+// the two metrics that carry a range band). Body-composition metrics trail.
 export const METRIC_CONFIG: MetricConfig[] = [
-  { key: 'weight', label: 'WEIGHT', unit: 'kg', decimals: 1, goodUp: false },
-  { key: 'bodyfat', label: 'BODYFAT', unit: '%', decimals: 1, goodUp: false },
   { key: 'hrv', label: 'HRV', unit: 'ms', decimals: 0, goodUp: true },
   { key: 'rhr', label: 'RHR', unit: 'bpm', decimals: 0, goodUp: false },
   { key: 'sleep', label: 'SLEEP', unit: 'h', decimals: 1, goodUp: true },
   { key: 'sleepq', label: 'SLEEP Q', unit: '%', decimals: 0, goodUp: true },
   { key: 'recovery', label: 'RECOV', unit: '%', decimals: 0, goodUp: true },
+  { key: 'weight', label: 'WEIGHT', unit: 'kg', decimals: 1, goodUp: false },
+  { key: 'bodyfat', label: 'BODYFAT', unit: '%', decimals: 1, goodUp: false },
 ];
 
 /** Maps each metric key to its daily series in the snapshot's TrendSeries. */
@@ -40,8 +42,14 @@ export function fmt(n: number, decimals: number): string {
   return decimals > 0 ? n.toFixed(decimals) : String(Math.round(n));
 }
 
-/** Turn a daily series into the view-model, "—" everywhere when it is empty. */
-export function toMetric(cfg: MetricConfig, series: TrendPoint[]): TrendMetric {
+/** Turn a daily series into the view-model, "—" everywhere when it is empty.
+ * `band` (optional, same order/length as `series`) carries a per-day min/max
+ * spread for a range band — currently only HRV. */
+export function toMetric(
+  cfg: MetricConfig,
+  series: TrendPoint[],
+  band?: { lo: number; hi: number }[],
+): TrendMetric {
   if (series.length === 0) {
     return {
       key: cfg.key,
@@ -51,6 +59,7 @@ export function toMetric(cfg: MetricConfig, series: TrendPoint[]): TrendMetric {
       delta: '',
       colorKey: 'accent',
       points: [],
+      times: [],
       avg: '—',
       range: '—',
     };
@@ -74,13 +83,23 @@ export function toMetric(cfg: MetricConfig, series: TrendPoint[]): TrendMetric {
     delta,
     colorKey: 'accent',
     points: values,
+    times: series.map(p => p.time),
+    band: band && band.length === series.length ? band : undefined,
     avg: fmt(avg, cfg.decimals),
     range: `${fmt(Math.min(...values), cfg.decimals)}–${fmt(Math.max(...values), cfg.decimals)}`,
   };
 }
 
-/** Every metric, in the order they appear as segments (and the first four as
- * the body-metric quad: weight / bodyfat / HRV / RHR). */
+/** Every metric, in the order they appear as segments (HRV/RHR lead). */
 export function buildMetrics(trends: TrendSeries): TrendMetric[] {
-  return METRIC_CONFIG.map(cfg => toMetric(cfg, SERIES[cfg.key](trends)));
+  // HRV and resting-HR carry a rolling min/max range band (see rollingRange);
+  // the other metrics have no band.
+  const bandFor = (key: string): { lo: number; hi: number }[] | undefined => {
+    const src =
+      key === 'hrv' ? trends.hrvRange : key === 'rhr' ? trends.rhrRange : null;
+    return src ? src.map(r => ({ lo: r.lo, hi: r.hi })) : undefined;
+  };
+  return METRIC_CONFIG.map(cfg =>
+    toMetric(cfg, SERIES[cfg.key](trends), bandFor(cfg.key)),
+  );
 }

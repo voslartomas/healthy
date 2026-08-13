@@ -78,7 +78,7 @@ export function buildDataContext(): string {
 
   if (!snap.live) {
     lines.push(
-      'No health data is connected yet (Google Health is not linked in Setup), so most numbers are unavailable.',
+      'No health data is connected yet (Health Connect is not linked in Setup), so most numbers are unavailable.',
     );
   }
 

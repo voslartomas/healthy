@@ -9,9 +9,10 @@ import {
   M,
 } from '../../components/brief';
 import {
-  connectGoogleHealth,
-  isGoogleHealthClientConfigured,
-} from '../../health/googleAuth';
+  connectHealthSource,
+  healthSourceName,
+  isHealthSourceConfigured,
+} from '../../health';
 import { useAppStore } from '../../state/useAppStore';
 import { useHealthStore } from '../../state/useHealthStore';
 import { useTheme } from '../../theme/theme';
@@ -50,7 +51,7 @@ function SkeletonSection({
   );
 }
 
-/** First-run Welcome brief. Connecting Google Health (or skipping past it) marks
+/** First-run Welcome brief. Connecting Health Connect (or skipping past it) marks
  * the user onboarded, after which the tab brief opens on every launch. */
 export function WelcomeScreen() {
   const t = useTheme();
@@ -65,9 +66,9 @@ export function WelcomeScreen() {
     if (busy) return;
     setBusy(true);
     try {
-      if (isGoogleHealthClientConfigured()) {
-        const ok = await connectGoogleHealth();
-        setConnection('googleHealth', ok);
+      if (isHealthSourceConfigured()) {
+        const ok = await connectHealthSource();
+        setConnection('device', ok);
         if (ok) await refreshHealth();
       }
     } catch {
@@ -109,14 +110,14 @@ export function WelcomeScreen() {
           onPress={connect}
           disabled={busy}
           accessibilityRole="button"
-          accessibilityLabel="Connect Google Health"
+          accessibilityLabel={`Connect ${healthSourceName()}`}
           style={[
             styles.cta,
             { backgroundColor: c.ink, opacity: busy ? 0.6 : 1 },
           ]}
         >
           <Text style={M(700, 13, { ls: 1, color: c.inv })}>
-            CONNECT GOOGLE HEALTH
+            {`CONNECT ${healthSourceName().toUpperCase()}`}
           </Text>
         </Pressable>
         <Text

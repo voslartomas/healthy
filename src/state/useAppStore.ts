@@ -60,9 +60,10 @@ export const PROVIDER_ORDER: AiProvider[] = [
   'ondevice',
 ];
 
-// Google Health is the single cross-platform data source (the REST API behaves
-// identically on iOS and Android, so there is no separate Apple Health path).
-export type HealthSource = 'googleHealth';
+// The single on-device data source: Android Health Connect / iOS HealthKit,
+// selected by platform behind the health adapter. One connection key covers
+// both — the UI labels it per platform.
+export type HealthSource = 'device';
 
 interface AppState {
   aiProvider: AiProvider;
@@ -103,7 +104,7 @@ export const useAppStore = create<AppState>()(
       model: PROVIDERS.ondevice.models[0],
       apiKey: '',
       coachLanguage: 'Automatic',
-      connections: { googleHealth: false },
+      connections: { device: false },
       onboarded: false,
       setOnboarded: onboarded => set({ onboarded }),
       setAiProvider: provider =>

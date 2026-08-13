@@ -79,7 +79,7 @@ export interface EnergyRecord {
 
 /**
  * One logged food / nutrition entry. Unlike the other record types this is the
- * one thing the user *writes* (see {@link ./GoogleHealthApi.writeFoodEntry}) as
+ * one thing the user *writes* (see the adapters' `createFoodEntry`) as
  * well as reads. `start`/`end` bound the meal; macros are grams; `kcal` is the
  * entry's energy. All macros optional — a quick calorie-only log is valid.
  */
@@ -103,7 +103,15 @@ export interface NutritionEntry {
  * but NOT yet deduped or aggregated. This is the boundary between native and TS.
  */
 export interface RawHealthData {
+  /** HRV daily samples. Despite the field name, the *algorithm* is carried by
+   * {@link hrvAlgorithm} — Health Connect reports RMSSD, HealthKit reports SDNN,
+   * and the two are NOT numerically comparable (HEA-4 landmine). The derivation
+   * layer tags the metric with {@link hrvAlgorithm} and never mixes the two. */
   hrvRmssd: InstantSample[];
+  /** The algorithm the {@link hrvRmssd} samples were measured with, set by the
+   * platform adapter: 'RMSSD' on Android (Health Connect), 'SDNN' on iOS
+   * (HealthKit). Defaults to 'RMSSD' when a legacy source omits it. */
+  hrvAlgorithm: HrvAlgorithm;
   restingHr: InstantSample[];
   sleep: SleepRecord[];
   steps: StepsRecord[];
@@ -119,6 +127,17 @@ export interface RawHealthData {
   bodyFat: InstantSample[];
   /** Distinct source packages seen across all record types. */
   sources: string[];
+  /**
+   * Today's total calories burned as computed by Health Connect's OWN
+   * cross-source aggregate — deduped by the user's data-source priority and
+   * clipped to [device-local midnight, now], i.e. exactly the figure the Health
+   * Connect / Google Health UI shows. Preferred by {@link deriveSnapshot} over
+   * the record-level single-source sum, which can disagree when sources like
+   * Fitbit and Google Fit report different TDEE. Optional/undefined on sources
+   * without an aggregate (iOS HealthKit, tests, or a failed aggregate read),
+   * where the record-level fallback is used.
+   */
+  energyBurnedTodayAgg?: number | null;
   /** Epoch ms when the read completed. */
   readAt: number;
 }
@@ -180,7 +199,13 @@ export interface TrendPoint {
  * the ~30-day raw reads. */
 export interface TrendSeries {
   hrv: TrendPoint[];
+  /** Per-day HRV min/max spread (same days/order as {@link hrv}), so the Trends
+   * chart can draw the nightly range band behind the median line. */
+  hrvRange: { time: number; lo: number; hi: number }[];
   restingHr: TrendPoint[];
+  /** Per-day resting-HR min/max spread (same days/order as {@link restingHr}).
+   * Often flat when the source writes one resting-HR value per day. */
+  rhrRange: { time: number; lo: number; hi: number }[];
   sleepHours: TrendPoint[];
   /** Sleep quality (efficiency %) from the stage breakdown; distinct from
    * length. Only nights with reported stages produce a point. */
@@ -237,7 +262,7 @@ export interface ActivityOption {
   maxDurationMin: number;
 }
 
-/** Minutes spent in each of Google Health's four HR zones over a window. */
+/** Minutes spent in each of the four HR zones over a window. */
 export interface CardioZones {
   lightMin: number;
   moderateMin: number;
@@ -266,7 +291,14 @@ export interface CardioSummary {
   zones7d: CardioZones;
   /** Per-day load for the last 7 days, oldest first. */
   daily: CardioDay[];
+  /** True when at least one session carried HR-zone data, so the per-zone
+   * breakdown is real. */
   hasZoneData: boolean;
+  /** True when any session contributed training load — either from HR zones or
+   * from the duration-based fallback for cardio sessions whose source didn't
+   * expose in-session HR (e.g. Fitbit via Health Connect). Gates the load
+   * number even when the zone breakdown is unavailable. */
+  hasLoadData: boolean;
 }
 
 /**

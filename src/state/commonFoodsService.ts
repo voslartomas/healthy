@@ -2,6 +2,7 @@ import {
   deleteCommonFood,
   insertCommonFood,
   loadCommonFoods,
+  updateCommonFood,
 } from '../db/commonFoodsRepository';
 import { CommonFood, useCommonFoodsStore } from './useCommonFoodsStore';
 
@@ -33,6 +34,8 @@ export interface NewCommonFood {
   carbsG?: number | null;
   fatG?: number | null;
   mealType?: string | null;
+  servingSize?: number | null;
+  servingUnit?: string | null;
 }
 
 /**
@@ -55,9 +58,35 @@ export async function addCommonFood(input: NewCommonFood): Promise<CommonFood> {
     carbsG: input.carbsG ?? null,
     fatG: input.fatG ?? null,
     mealType: input.mealType ?? null,
+    servingSize: input.servingSize ?? null,
+    servingUnit: input.servingUnit ?? null,
   };
   await insertCommonFood(food);
   useCommonFoodsStore.getState().addFoodLocal(food);
+  return food;
+}
+
+/**
+ * Update a saved food in place by id. Preserves sort order and its position in
+ * the list. Write-through to SQLite, then the store.
+ */
+export async function editCommonFood(
+  id: string,
+  input: NewCommonFood,
+): Promise<CommonFood> {
+  const food: CommonFood = {
+    id,
+    name: input.name.trim(),
+    kcal: input.kcal,
+    proteinG: input.proteinG ?? null,
+    carbsG: input.carbsG ?? null,
+    fatG: input.fatG ?? null,
+    mealType: input.mealType ?? null,
+    servingSize: input.servingSize ?? null,
+    servingUnit: input.servingUnit ?? null,
+  };
+  await updateCommonFood(food);
+  useCommonFoodsStore.getState().updateFoodLocal(food);
   return food;
 }
 

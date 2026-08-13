@@ -10,11 +10,14 @@ import { useWhisperStore } from '../coach/ondevice/useWhisperStore';
 import { WHISPER_MODEL } from '../coach/ondevice/whisperModels';
 import { CalorieGoalSection } from '../nutrition/CalorieGoalSection';
 import {
-  connectGoogleHealth,
-  disconnectGoogleHealth,
-  isGoogleHealthClientConfigured,
-  isGoogleHealthConnected,
-} from '../../health/googleAuth';
+  connectHealthSource,
+  disconnectHealthSource,
+  healthSourceName,
+  isHealthSourceConfigured,
+  isHealthSourceConnected,
+} from '../../health';
+import { ProfileSection } from './ProfileSection';
+import { createBackup, restoreBackup } from '../../state/backupService';
 import { PROVIDERS, useAppStore } from '../../state/useAppStore';
 import { useHealthStore } from '../../state/useHealthStore';
 import { useTheme } from '../../theme/theme';
@@ -25,11 +28,12 @@ export function SettingsScreen(_props: ScreenProps) {
   const c = t.colors;
   const model = useAppStore(s => s.model);
   const aiProvider = useAppStore(s => s.aiProvider);
-  const connected = useAppStore(s => s.connections.googleHealth);
+  const connected = useAppStore(s => s.connections.device);
   const setAiProvider = useAppStore(s => s.setAiProvider);
   const setConnection = useAppStore(s => s.setConnection);
   const refreshHealth = useHealthStore(s => s.refresh);
-  const clientConfigured = isGoogleHealthClientConfigured();
+  const clientConfigured = isHealthSourceConfigured();
+  const sourceName = healthSourceName();
 
   // The coach is on-device only now — migrate any legacy cloud selection so the
   // download card always reflects the local Gemma provider.
@@ -39,43 +43,42 @@ export function SettingsScreen(_props: ScreenProps) {
   const modelLabel = modelByLabel(model)?.label ?? PROVIDERS.ondevice.models[0];
 
   React.useEffect(() => {
-    isGoogleHealthConnected()
-      .then(on => setConnection('googleHealth', on))
+    isHealthSourceConnected()
+      .then(on => setConnection('device', on))
       .catch(() => undefined);
   }, [setConnection]);
 
   const onToggle = React.useCallback(
     async (next: boolean) => {
       if (!next) {
-        await disconnectGoogleHealth();
-        setConnection('googleHealth', false);
+        await disconnectHealthSource();
+        setConnection('device', false);
         return;
       }
       if (!clientConfigured) {
         Alert.alert(
-          'Google Health unavailable',
-          'Native Google sign-in is only available on Android and iOS builds.',
+          `${sourceName} unavailable`,
+          `${sourceName} is only available on a native device build.`,
         );
         return;
       }
       try {
-        const ok = await connectGoogleHealth();
-        setConnection('googleHealth', ok);
+        const ok = await connectHealthSource();
+        setConnection('device', ok);
         if (ok) await refreshHealth();
         else
-          Alert.alert('Not connected', 'Google Health sign-in was cancelled.');
+          Alert.alert(
+            'Not connected',
+            `${sourceName} permission was not granted.`,
+          );
       } catch (err) {
-        // connectGoogleHealth throws only on real failures (e.g. DEVELOPER_ERROR
-        // from a package/SHA-1 mismatch) — show that reason, not a generic line.
         Alert.alert(
           'Connection failed',
-          err instanceof Error
-            ? err.message
-            : 'Could not connect to Google Health.',
+          err instanceof Error ? err.message : `Could not connect to ${sourceName}.`,
         );
       }
     },
-    [clientConfigured, refreshHealth, setConnection],
+    [clientConfigured, refreshHealth, setConnection, sourceName],
   );
 
   return (
@@ -84,7 +87,7 @@ export function SettingsScreen(_props: ScreenProps) {
       <Section n="01" title="Data sources" first>
         <View style={[styles.conn, { borderBottomColor: c.hair }]}>
           <View style={styles.connText}>
-            <Text style={S(600, 13.5, { color: c.ink })}>Google Health</Text>
+            <Text style={S(600, 13.5, { color: c.ink })}>{sourceName}</Text>
             <Text
               style={[
                 M(600, 9.5, { ls: 1, color: connected ? c.grn : c.fnt }),
@@ -99,18 +102,21 @@ export function SettingsScreen(_props: ScreenProps) {
           <Toggle
             on={connected}
             onToggle={() => onToggle(!connected)}
-            label="Google Health connection"
+            label={`${sourceName} connection`}
           />
         </View>
         <Text style={[M(600, 10.5, { color: c.fnt }), styles.note]}>
           {clientConfigured
-            ? 'GOOGLE HEALTH IS YOUR DATA SOURCE — ACTIVITIES AUTO-FILL YOUR GOALS, AND FOOD YOU LOG IS WRITTEN BACK TO IT.'
-            : 'NATIVE GOOGLE SIGN-IN IS ONLY AVAILABLE ON ANDROID & IOS BUILDS. UNTIL CONNECTED, METRICS SHOW "—".'}
+            ? `${sourceName.toUpperCase()} IS YOUR DATA SOURCE — IT STAYS ON YOUR PHONE, ACTIVITIES AUTO-FILL YOUR GOALS, AND FOOD YOU LOG IS WRITTEN BACK TO IT.`
+            : `${sourceName.toUpperCase()} IS ONLY AVAILABLE ON A NATIVE DEVICE BUILD. UNTIL CONNECTED, METRICS SHOW "—".`}
         </Text>
       </Section>
 
-      {/* ── 02 AI coach ─────────────────────────────────────────────── */}
-      <Section n="02" title="AI coach">
+      {/* ── Profile ─────────────────────────────────────────────────── */}
+      <ProfileSection n="02" />
+
+      {/* ── 03 AI coach ─────────────────────────────────────────────── */}
+      <Section n="03" title="AI coach">
         <Text style={[M(600, 10.5, { color: c.fnt }), styles.coachNote]}>
           YOUR COACH RUNS FULLY ON YOUR PHONE — PRIVATE, NO API KEY, WORKS
           OFFLINE ONCE THE MODEL IS DOWNLOADED.
@@ -126,9 +132,103 @@ export function SettingsScreen(_props: ScreenProps) {
         <VoiceModelCard />
       </Section>
 
-      {/* ── 03 Calorie goal ─────────────────────────────────────────── */}
-      <CalorieGoalSection n="03" />
+      {/* ── 04 Calorie goal ─────────────────────────────────────────── */}
+      <CalorieGoalSection n="04" />
+
+      {/* ── 05 Backup ───────────────────────────────────────────────── */}
+      <BackupSection n="05" />
     </BriefScreen>
+  );
+}
+
+/**
+ * Back up / restore local data (goals, calorie goals, weekly history, common
+ * foods, profile, conversations) to a JSON file via the OS share sheet and
+ * document picker — so the user can save to Google Drive/Files and restore on a
+ * new device. Health metrics themselves live in Health Connect/HealthKit and
+ * re-sync on their own; this covers the app's own local state.
+ */
+function BackupSection({ n }: { n: string }) {
+  const t = useTheme();
+  const c = t.colors;
+  const [busy, setBusy] = React.useState<null | 'backup' | 'restore'>(null);
+
+  const onBackup = React.useCallback(async () => {
+    if (busy) return;
+    setBusy('backup');
+    const res = await createBackup();
+    setBusy(null);
+    if (!res.ok && !res.canceled) {
+      Alert.alert('Backup failed', res.error ?? 'Could not create a backup.');
+    }
+  }, [busy]);
+
+  const onRestore = React.useCallback(() => {
+    if (busy) return;
+    Alert.alert(
+      'Restore backup',
+      'This replaces your current goals and local data with the backup file. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Choose file',
+          style: 'destructive',
+          onPress: async () => {
+            setBusy('restore');
+            const res = await restoreBackup();
+            setBusy(null);
+            if (res.ok) {
+              Alert.alert('Restored', 'Your data was restored from the backup.');
+            } else if (!res.canceled) {
+              Alert.alert(
+                'Restore failed',
+                res.error ?? 'Could not restore the backup.',
+              );
+            }
+          },
+        },
+      ],
+    );
+  }, [busy]);
+
+  return (
+    <Section n={n} title="Backup">
+      <Text style={[M(600, 10.5, { color: c.fnt }), styles.coachNote]}>
+        SAVE YOUR GOALS AND LOCAL DATA TO A FILE YOU CAN KEEP IN GOOGLE DRIVE OR
+        FILES, AND RESTORE IT LATER OR ON A NEW PHONE.
+      </Text>
+      <View style={styles.backupRow}>
+        <Pressable
+          onPress={onBackup}
+          disabled={busy != null}
+          accessibilityRole="button"
+          accessibilityLabel="Back up data to a file"
+          style={[
+            styles.backupBtn,
+            { backgroundColor: c.ink, opacity: busy != null ? 0.5 : 1 },
+          ]}
+        >
+          <Text style={M(700, 11, { ls: 0.6, color: c.inv })}>
+            {busy === 'backup' ? 'BACKING UP…' : 'BACK UP'}
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={onRestore}
+          disabled={busy != null}
+          accessibilityRole="button"
+          accessibilityLabel="Restore data from a backup file"
+          style={[
+            styles.backupBtn,
+            styles.backupBtnAlt,
+            { borderColor: c.ink, opacity: busy != null ? 0.5 : 1 },
+          ]}
+        >
+          <Text style={M(700, 11, { ls: 0.6, color: c.ink })}>
+            {busy === 'restore' ? 'RESTORING…' : 'RESTORE'}
+          </Text>
+        </Pressable>
+      </View>
+    </Section>
   );
 }
 
@@ -422,4 +522,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   modelErr: { lineHeight: 15 },
+  backupRow: { flexDirection: 'row', gap: 10, marginTop: 16 },
+  backupBtn: {
+    flex: 1,
+    borderRadius: 12,
+    paddingVertical: 13,
+    alignItems: 'center',
+  },
+  backupBtnAlt: { backgroundColor: 'transparent', borderWidth: 1 },
 });

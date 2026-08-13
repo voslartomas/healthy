@@ -77,16 +77,18 @@ async function ensureSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       updated_at INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS common_foods (
-      id         TEXT PRIMARY KEY NOT NULL,
-      name       TEXT NOT NULL,
-      kcal       REAL NOT NULL,
-      protein_g  REAL,
-      carbs_g    REAL,
-      fat_g      REAL,
-      meal_type  TEXT,
-      sort_order INTEGER NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL,
-      updated_at INTEGER NOT NULL
+      id           TEXT PRIMARY KEY NOT NULL,
+      name         TEXT NOT NULL,
+      kcal         REAL NOT NULL,
+      protein_g    REAL,
+      carbs_g      REAL,
+      fat_g        REAL,
+      meal_type    TEXT,
+      serving_size REAL,
+      serving_unit TEXT,
+      sort_order   INTEGER NOT NULL DEFAULT 0,
+      created_at   INTEGER NOT NULL,
+      updated_at   INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS conversations (
       id         TEXT PRIMARY KEY NOT NULL,
@@ -95,8 +97,17 @@ async function ensureSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS profile (
+      id            INTEGER PRIMARY KEY CHECK (id = 1),
+      date_of_birth INTEGER,
+      height_cm     REAL,
+      weight_kg     REAL,
+      sex           TEXT,
+      updated_at    INTEGER NOT NULL
+    );
   `);
   await ensureGoalColumns(db);
+  await ensureCommonFoodColumns(db);
   await runMigrations(db);
 }
 
@@ -116,6 +127,25 @@ async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
     // only; real history re-accrues from the live reads.
     await db.execAsync('DELETE FROM goal_weeks;');
     await db.execAsync('PRAGMA user_version = 1;');
+  }
+  if (version < 2) {
+    // v2: the health source switched from the Google Health cloud API to
+    // on-device Health Connect / HealthKit. The cached RawHealthData from the
+    // old source is stale and would paint on launch (before the first native
+    // read lands), so drop it once — the native read repopulates the cache.
+    await db.execAsync('DELETE FROM health_cache;');
+    await db.execAsync('DELETE FROM daily_energy;');
+    await db.execAsync('PRAGMA user_version = 2;');
+  }
+  if (version < 3) {
+    // v3: finish the Google Health → Health Connect cutover. v2 dropped the raw
+    // cache + daily energy, but the per-goal weekly attainment in `goal_weeks`
+    // was still frozen from Google-era reads and never overwritten (syncGoalHistory
+    // only upserts weeks it re-covers). That left the weekly-goals grid showing
+    // stale cached numbers instead of current Health Connect data. Wipe it once;
+    // it re-accrues from the live native reads (covered weeks only).
+    await db.execAsync('DELETE FROM goal_weeks;');
+    await db.execAsync('PRAGMA user_version = 3;');
   }
 }
 
@@ -140,6 +170,32 @@ async function ensureGoalColumns(db: SQLite.SQLiteDatabase): Promise<void> {
   for (const [name, type] of additions) {
     if (!have.has(name)) {
       await db.execAsync(`ALTER TABLE goals ADD COLUMN ${name} ${type};`);
+    }
+  }
+}
+
+/**
+ * Add the portion columns introduced after the initial `common_foods` schema.
+ * A DB created by an earlier build lacks `serving_size` / `serving_unit`; add
+ * them idempotently (guarded, since SQLite has no `ADD COLUMN IF NOT EXISTS`).
+ * New installs already have them from the DDL above.
+ */
+async function ensureCommonFoodColumns(
+  db: SQLite.SQLiteDatabase,
+): Promise<void> {
+  const cols = await db.getAllAsync<{ name: string }>(
+    'PRAGMA table_info(common_foods);',
+  );
+  const have = new Set(cols.map(c => c.name));
+  const additions: [string, string][] = [
+    ['serving_size', 'REAL'],
+    ['serving_unit', 'TEXT'],
+  ];
+  for (const [name, type] of additions) {
+    if (!have.has(name)) {
+      await db.execAsync(
+        `ALTER TABLE common_foods ADD COLUMN ${name} ${type};`,
+      );
     }
   }
 }

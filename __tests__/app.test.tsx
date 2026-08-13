@@ -31,12 +31,12 @@ describe('useAppStore', () => {
     expect(useAppStore.getState().model).toBe('Gemini 2.5 Pro');
   });
 
-  it('sets the Google Health connection state', () => {
-    expect(useAppStore.getState().connections.googleHealth).toBe(false);
-    useAppStore.getState().setConnection('googleHealth', true);
-    expect(useAppStore.getState().connections.googleHealth).toBe(true);
-    useAppStore.getState().setConnection('googleHealth', false);
-    expect(useAppStore.getState().connections.googleHealth).toBe(false);
+  it('sets the device health-source connection state', () => {
+    expect(useAppStore.getState().connections.device).toBe(false);
+    useAppStore.getState().setConnection('device', true);
+    expect(useAppStore.getState().connections.device).toBe(true);
+    useAppStore.getState().setConnection('device', false);
+    expect(useAppStore.getState().connections.device).toBe(false);
   });
 
   it('marks the user onboarded once past the Welcome screen', () => {

@@ -66,7 +66,7 @@ function buildSystemPrompt(): string {
 }
 
 /** AI coach chat, presented as a native modal screen. A live, provider-backed
- * conversation that logs food to Google Health via tool calls. Provider, model
+ * conversation that logs food to Health Connect via tool calls. Provider, model
  * and key come from Setup. */
 export function CoachScreen({ navigation }: ScreenProps) {
   const t = useTheme();

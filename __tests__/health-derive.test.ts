@@ -29,6 +29,7 @@ const NOW = 1_754_000_000_000; // fixed epoch ms so all derivations are determin
 function emptyRaw(): RawHealthData {
   return {
     hrvRmssd: [],
+    hrvAlgorithm: 'RMSSD',
     restingHr: [],
     sleep: [],
     steps: [],
@@ -174,8 +175,8 @@ describe('trackedFromExercise', () => {
 });
 
 describe('deriveSnapshot', () => {
-  it('tags HRV as SDNN and computes deltas vs baseline', () => {
-    const raw = emptyRaw();
+  it('tags HRV with the source algorithm and computes deltas vs baseline', () => {
+    const raw = emptyRaw(); // emptyRaw defaults hrvAlgorithm to 'RMSSD'
     raw.hrvRmssd = [
       { value: 50, time: NOW - 3 * DAY, source: FITBIT },
       { value: 55, time: NOW - 2 * DAY, source: FITBIT },
@@ -184,7 +185,7 @@ describe('deriveSnapshot', () => {
     raw.restingHr = [{ value: 54, time: NOW - DAY, source: FITBIT }];
     raw.sources = [FITBIT];
     const snap = deriveSnapshot(raw, NOW);
-    expect(snap.hrv?.algorithm).toBe('SDNN');
+    expect(snap.hrv?.algorithm).toBe('RMSSD');
     expect(snap.hrv?.value).toBe(62);
     expect(snap.hrv?.baseline).toBe(55); // median of 50/55/62
     expect(snap.hrv?.delta).toBe(7);
@@ -681,12 +682,12 @@ describe('cardioFromExercise', () => {
     expect(c.hasZoneData).toBe(true);
   });
 
-  it('reports no zone data when sessions lack HR zones', () => {
+  it('reports no zone data AND no load for a non-cardio session lacking HR zones', () => {
     const today = NOW - (NOW % DAY);
     const c = cardioFromExercise(
       [
         {
-          exerciseType: 70,
+          exerciseType: 70, // STRENGTH_TRAINING — non-cardio, no fallback load
           typeName: 'STRENGTH_TRAINING',
           start: today + 3_600_000,
           end: today + 7_200_000,
@@ -698,7 +699,38 @@ describe('cardioFromExercise', () => {
       NOW,
     );
     expect(c.hasZoneData).toBe(false);
+    expect(c.hasLoadData).toBe(false);
     expect(c.weekLoad).toBe(0);
+    expect(c.zones7d).toEqual({
+      lightMin: 0,
+      moderateMin: 0,
+      vigorousMin: 0,
+      peakMin: 0,
+    });
+  });
+
+  it('estimates load from duration for a CARDIO session with no HR samples (Fitbit fix)', () => {
+    const today = NOW - (NOW % DAY);
+    const c = cardioFromExercise(
+      [
+        {
+          exerciseType: 56, // RUNNING — cardio, but no hrZones (e.g. Fitbit)
+          typeName: 'RUNNING',
+          start: today + 3_600_000,
+          end: today + 5_400_000,
+          durationMin: 30,
+          energyKcal: null,
+          source: FITBIT,
+        },
+      ],
+      NOW,
+    );
+    // Zone breakdown stays honest (no HR → no zones), but load is no longer 0:
+    // 30 min × moderate weight (2) = 60.
+    expect(c.hasZoneData).toBe(false);
+    expect(c.hasLoadData).toBe(true);
+    expect(c.weekLoad).toBe(60);
+    expect(c.todayLoad).toBe(60);
     expect(c.zones7d).toEqual({
       lightMin: 0,
       moderateMin: 0,

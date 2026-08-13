@@ -20,7 +20,7 @@ import {
 /** The coach's opening line, shown as the first bubble of a fresh conversation.
  * Lives here (not in CoachScreen) so new conversations can seed it. */
 export const GREETING =
-  "Hey! I'm your nutrition coach — ask me anything about your calories, macros, or what to eat. When you want something saved, just tell me to log it (e.g. “log 4 eggs and 2 slices of toast”) and I'll add it to Google Health.";
+  "Hey! I'm your nutrition coach — ask me anything about your calories, macros, or what to eat. When you want something saved, just tell me to log it (e.g. “log 4 eggs and 2 slices of toast”) and I'll add it to Health Connect.";
 
 let idCounter = 0;
 

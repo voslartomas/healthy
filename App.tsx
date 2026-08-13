@@ -18,13 +18,13 @@ import { useModelStore } from './src/features/coach/ondevice/useModelStore';
 import { useWhisperStore } from './src/features/coach/ondevice/useWhisperStore';
 import { SplashScreen } from './src/features/onboarding/SplashScreen';
 import { WelcomeScreen } from './src/features/onboarding/WelcomeScreen';
-import { registerGoogleHealthAuth } from './src/health/googleAuth';
 import { initCalorieGoals } from './src/state/calorieGoalsService';
 import { initCommonFoods } from './src/state/commonFoodsService';
 import { initConversations } from './src/state/conversationsService';
 import { initDailyEnergy } from './src/state/dailyEnergyService';
 import { initGoalHistory } from './src/state/goalHistoryService';
 import { initGoals } from './src/state/goalsService';
+import { initProfile } from './src/state/profileService';
 import { useAppStore } from './src/state/useAppStore';
 import { initHealth, useHealthStore } from './src/state/useHealthStore';
 import { colors } from './src/theme/colors';
@@ -90,7 +90,6 @@ export default function App() {
 
   // Load persisted goals from SQLite and the live health snapshot on startup.
   useEffect(() => {
-    registerGoogleHealthAuth();
     // Initialise on-device model status from disk so a previously downloaded
     // coach/voice model is usable immediately — the coach and daily brief gate
     // on this status, so without it the user would have to open Settings first.
@@ -112,6 +111,7 @@ export default function App() {
     initGoalHistory().catch(err =>
       console.warn('Failed to load goal history', err),
     );
+    initProfile().catch(err => console.warn('Failed to load profile', err));
     initHealth().catch(err => console.warn('Failed to load health data', err));
   }, []);
 

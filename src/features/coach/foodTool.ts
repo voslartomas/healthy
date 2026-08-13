@@ -1,5 +1,5 @@
 /**
- * Food-logging tools the AI coach can call, bridged to Google Health via
+ * Food-logging tools the AI coach can call, bridged to Health Connect via
  * {@link useHealthStore}. The model estimates calories + macros from a natural
  * description ("Breakfast — 4 eggs, 2 slices of bread") and calls `log_food`.
  *
@@ -31,11 +31,34 @@ const ENTRY_FIELDS = {
   mealType: { type: 'string', enum: MEAL_TYPES },
 };
 
+/** Units a saved food's portion can be measured in. 'g'/'ml'/'piece' scale the
+ * kcal/macros when logged; anything else is treated as a whole serving. */
+const SERVING_UNITS = ['g', 'ml', 'piece', 'serving'];
+
+/** Extra fields only `save_common_food` accepts: the reference portion the
+ * kcal/macros describe, so the user can later slide the amount up or down. */
+const SERVING_FIELDS = {
+  servingSize: {
+    type: 'number',
+    description:
+      'The reference portion the kcal/macros describe, e.g. 100 for per-100 g ' +
+      'values or 1 for a single piece. Omit for a whole-serving favourite.',
+  },
+  servingUnit: {
+    type: 'string',
+    enum: SERVING_UNITS,
+    description:
+      "Unit for servingSize: 'g' or 'ml' (with a size like 100), 'piece' for " +
+      "countable items, or 'serving' when it's just one portion. Prefer 'g' " +
+      'with per-100 g values when you know them.',
+  },
+};
+
 export const FOOD_TOOLS: ToolSpec[] = [
   {
     name: 'log_food',
     description:
-      'Log one or more foods the user ate to their Google Health nutrition log. ' +
+      'Log one or more foods the user ate to their Health Connect nutrition log. ' +
       'Estimate calories (kcal) and macros (protein, carbs, fat in grams) from the ' +
       'description using standard nutrition data. Combine items the user mentions as ' +
       'one meal into a single entry with summed totals, unless they clearly describe ' +
@@ -61,11 +84,13 @@ export const FOOD_TOOLS: ToolSpec[] = [
     description:
       "Save a food to the user's Common Foods list so they can tap to log it again " +
       'later. Use when the user asks to save or remember a food (e.g. "save this to ' +
-      'common foods"). Estimate calories and macros the same way as log_food. This ' +
-      'does NOT log the food for today — it only saves it for quick re-use.',
+      'common foods"). Estimate calories and macros the same way as log_food. When ' +
+      'you know a natural portion, set servingSize + servingUnit (e.g. 100 g, or 1 ' +
+      'piece) and give the kcal/macros PER THAT portion — the app then lets the user ' +
+      'slide the amount when logging. This does NOT log the food for today.',
     parameters: {
       type: 'object',
-      properties: ENTRY_FIELDS,
+      properties: { ...ENTRY_FIELDS, ...SERVING_FIELDS },
       required: ['name', 'kcal'],
     },
   },
@@ -151,11 +176,11 @@ function summarize(input: FoodEntryInput): string {
 /** Turn a raw write-failure reason into a clear, user-facing sentence. */
 function describeError(err?: string): string {
   if (!err || err === 'not-connected' || err === 'not-signed-in') {
-    return "Couldn't reach Google Health — open Settings and connect Google Health, then try again.";
+    return "Couldn't reach Health Connect — open Settings and connect Health Connect, then try again.";
   }
   return (
-    `Google Health rejected the request (${err}). ` +
-    'Your nutrition write permission may be missing — reconnect Google Health in Settings and allow nutrition access.'
+    `Health Connect rejected the request (${err}). ` +
+    'Your nutrition write permission may be missing — reconnect Health Connect in Settings and allow nutrition access.'
   );
 }
 
@@ -213,6 +238,22 @@ export function makeFoodToolset(onLog: (summary: string) => void): FoodToolset {
 
     if (name === 'save_common_food') {
       const input = toInput(args);
+      // Only g/ml/piece carry a scalable size; 'serving'/absent stays unitless
+      // (a plain multiplier at log time). Mirrors the manual form's rule.
+      const rawUnit =
+        typeof args.servingUnit === 'string'
+          ? args.servingUnit.toLowerCase()
+          : '';
+      const isUnit =
+        rawUnit === 'g' || rawUnit === 'ml' || rawUnit === 'piece';
+      const rawSize = Number(args.servingSize);
+      const servingUnit = isUnit ? rawUnit : null;
+      const servingSize = isUnit
+        ? Number.isFinite(rawSize) && rawSize > 0
+          ? rawSize
+          : 1
+        : null;
+      const saved = { ...input, servingSize, servingUnit };
       try {
         await addCommonFood({
           name: input.name,
@@ -221,9 +262,13 @@ export function makeFoodToolset(onLog: (summary: string) => void): FoodToolset {
           carbsG: input.carbsG ?? null,
           fatG: input.fatG ?? null,
           mealType: input.mealType ?? null,
+          servingSize,
+          servingUnit,
         });
-        onLog(`Saved to Common Foods: ${summarize(input)}`);
-        return JSON.stringify({ ok: true, saved: input });
+        const portion =
+          servingUnit != null ? ` · per ${servingSize} ${servingUnit}` : '';
+        onLog(`Saved to Common Foods: ${summarize(input)}${portion}`);
+        return JSON.stringify({ ok: true, saved });
       } catch (err) {
         return JSON.stringify({
           ok: false,
@@ -263,7 +308,7 @@ export function makeFoodToolset(onLog: (summary: string) => void): FoodToolset {
         return JSON.stringify({
           ok: false,
           error:
-            'Delete failed — the entry may no longer exist, or Google Health is not connected.',
+            'Delete failed — the entry may no longer exist, or Health Connect is not connected.',
         });
       }
       onLog('Deleted a food entry.');

@@ -31,26 +31,37 @@ export function CardioScreen(_props: ScreenProps) {
   const c = t.colors;
   const activities = useHealthStore(s => s.snapshot.activities);
   const cardio = useHealthStore(s => s.snapshot.cardio);
-  const has = cardio.hasZoneData;
+  // Two distinct signals: `hasLoad` is true when any activity contributed
+  // training load (HR zones OR the duration fallback for HR-less cardio like
+  // Fitbit); `hasZones` is true only when a real HR-zone breakdown exists.
+  const hasLoad = cardio.hasLoadData;
+  const hasZones = cardio.hasZoneData;
 
   const maxZone = Math.max(1, ...ZONE_ROWS.map(z => cardio.zones7d[z.key]));
   const avgDaily = cardio.daily.length
     ? Math.round(cardio.weekLoad / cardio.daily.length)
     : 0;
 
-  const pill: PillSpec = has
+  const pill: PillSpec = hasLoad
     ? { text: `WEEK LOAD ${cardio.weekLoad}`, bg: c.ink, textColor: c.inv }
-    : { text: 'NO HR DATA', dot: c.fnt };
+    : { text: 'NO CARDIO DATA', dot: c.fnt };
 
   return (
     <BriefScreen>
       <BigStat
-        value={has ? String(cardio.todayLoad) : '—'}
+        value={hasLoad ? String(cardio.todayLoad) : '—'}
         pill={pill}
         caption="CARDIO LOAD · TODAY"
       />
 
       <Section n="01" title="HR zones · 7 days" first>
+        {!hasZones ? (
+          <Text style={[S(600, 13, { color: c.mut }), styles.empty]}>
+            {hasLoad
+              ? 'No per-zone heart-rate data for these workouts — load is estimated from duration.'
+              : 'No heart-rate zone data yet.'}
+          </Text>
+        ) : null}
         {ZONE_ROWS.map(z => {
           const min = cardio.zones7d[z.key];
           return (
@@ -61,7 +72,7 @@ export function CardioScreen(_props: ScreenProps) {
               <View style={[styles.track, { backgroundColor: c.track }]}>
                 <View
                   style={{
-                    width: `${(has ? frac(min, maxZone) : 0) * 100}%`,
+                    width: `${(hasZones ? frac(min, maxZone) : 0) * 100}%`,
                     height: '100%',
                     borderRadius: 3,
                     backgroundColor: c[z.colorKey],
@@ -69,7 +80,7 @@ export function CardioScreen(_props: ScreenProps) {
                 />
               </View>
               <Text style={[M(700, 10, { color: c.ink }), styles.zm]}>
-                {has ? `${min}M` : '—'}
+                {hasZones ? `${min}M` : '—'}
               </Text>
             </View>
           );
@@ -80,7 +91,7 @@ export function CardioScreen(_props: ScreenProps) {
         n="02"
         title="Activities"
         titleRight={
-          has ? (
+          hasLoad ? (
             <Text style={M(700, 10.5, { color: c.fnt })}>
               {avgDaily} AVG/DAY
             </Text>

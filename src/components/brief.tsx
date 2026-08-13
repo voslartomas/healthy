@@ -6,8 +6,11 @@
  * mono eyebrow row and, usually, one oversized mono hero number. These pieces
  * encode that vocabulary so each screen stays declarative.
  */
+import { HeaderHeightContext } from '@react-navigation/elements';
 import React from 'react';
 import {
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleProp,
@@ -79,28 +82,44 @@ export function BriefScreen({
   scrollRef?: React.Ref<ScrollView>;
 }) {
   const t = useTheme();
+  // Lift the whole sheet above the keyboard so a focused input is never hidden.
+  // Under Android edge-to-edge (SDK 57 / RN 0.86) `adjustResize` no longer
+  // shrinks the window, so a bare ScrollView gets overlapped; KeyboardAvoidingView
+  // is the JS-only fix that works on both platforms. Offset by the nav header
+  // height (0 when there is no header) so the avoided distance is measured from
+  // the top of the scroll area, matching CoachScreen.
+  const headerHeight = React.useContext(HeaderHeightContext) ?? 0;
   return (
-    <ScrollView
-      ref={scrollRef}
-      style={{ backgroundColor: t.colors.bg }}
-      contentContainerStyle={{
-        alignItems: 'center',
-        paddingTop: 4,
-        paddingBottom: 120,
-      }}
-      showsVerticalScrollIndicator={false}
-      contentInsetAdjustmentBehavior="never"
+    <KeyboardAvoidingView
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={headerHeight}
+      style={{ flex: 1 }}
     >
-      <View
-        style={{
-          width: '100%',
-          maxWidth: BRIEF_MAX_WIDTH,
-          paddingHorizontal: 24,
+      <ScrollView
+        ref={scrollRef}
+        style={{ backgroundColor: t.colors.bg }}
+        contentContainerStyle={{
+          alignItems: 'center',
+          paddingTop: 4,
+          paddingBottom: 120,
         }}
+        showsVerticalScrollIndicator={false}
+        contentInsetAdjustmentBehavior="never"
+        // Let a Save/＋ button fire on the first tap while the keyboard is up,
+        // instead of that tap only dismissing the keyboard.
+        keyboardShouldPersistTaps="handled"
       >
-        {children}
-      </View>
-    </ScrollView>
+        <View
+          style={{
+            width: '100%',
+            maxWidth: BRIEF_MAX_WIDTH,
+            paddingHorizontal: 24,
+          }}
+        >
+          {children}
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
