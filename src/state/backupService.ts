@@ -11,6 +11,7 @@ import { initDailyEnergy } from './dailyEnergyService';
 import { initGoalHistory } from './goalHistoryService';
 import { initGoals } from './goalsService';
 import { initProfile } from './profileService';
+import { initStrength } from './strengthService';
 import { useHealthStore } from './useHealthStore';
 
 /**
@@ -78,6 +79,7 @@ async function rehydrateStores(): Promise<void> {
     initCommonFoods(),
     initDailyEnergy(),
     initConversations(),
+    initStrength(),
   ]);
   // Goal history depends on goals being present, so run it after.
   await initGoalHistory();

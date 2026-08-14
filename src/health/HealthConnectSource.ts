@@ -497,12 +497,20 @@ export class HealthConnectSource implements HealthSource {
       const start = toMs(r.startTime);
       const end = toMs(r.endTime);
       if (start == null || end == null || end <= start) continue;
+      const stages = accumulateStages(r.stages);
+      // Total sleep time is time actually ASLEEP (deep+REM+light), NOT the whole
+      // in-bed session: awake minutes must LOWER sleep length/score, not pad it.
+      // Falls back to the full span only when no stages were reported (can't
+      // separate awake). Mirrors HealthKitSource's asleepMin semantics.
+      const asleepMin = stages
+        ? stages.deepMin + stages.remMin + stages.lightMin
+        : 0;
       sleep.push({
         start,
         end,
-        durationMin: (end - start) / 60000,
+        durationMin: asleepMin > 0 ? asleepMin : (end - start) / 60000,
         source: tag(r),
-        stages: accumulateStages(r.stages),
+        stages,
       });
     }
 

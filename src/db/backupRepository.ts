@@ -4,8 +4,9 @@ import { getDb } from './database';
  * Whole-database backup/restore for the app's LOCAL data.
  *
  * The app keeps its durable state — goals, calorie goals, per-goal weekly
- * history, common foods, per-day energy, coach conversations and the user
- * profile — in SQLite. This module serializes those tables to a plain JSON
+ * history, common foods, per-day energy, coach conversations, saved strength
+ * workouts and their completed sessions, and the user profile — in SQLite. This
+ * module serializes those tables to a plain JSON
  * document the user can save to their own cloud (Google Drive, Files, etc.) and
  * restore later or on a new device, so goals and other local data survive a
  * reinstall.
@@ -26,6 +27,12 @@ export const BACKUP_TABLES = [
   'common_foods',
   'daily_energy',
   'conversations',
+  // Strength feature: saved workouts + their exercise rows, and completed
+  // sessions + their logged set rows. Parents before children.
+  'strength_workouts',
+  'strength_workout_exercises',
+  'strength_sessions',
+  'strength_session_sets',
 ] as const;
 
 /** Bumped only if the backup envelope shape (not the table columns) changes. */
