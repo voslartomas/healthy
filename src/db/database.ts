@@ -105,9 +105,48 @@ async function ensureSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       sex           TEXT,
       updated_at    INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS strength_workouts (
+      id         TEXT PRIMARY KEY NOT NULL,
+      name       TEXT NOT NULL,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS strength_workout_exercises (
+      id               TEXT PRIMARY KEY NOT NULL,
+      workout_id       TEXT NOT NULL,
+      exercise_id      TEXT NOT NULL,
+      position         INTEGER NOT NULL,
+      target_sets      INTEGER NOT NULL,
+      target_reps      INTEGER NOT NULL,
+      target_weight_kg REAL,
+      rest_sec         INTEGER NOT NULL,
+      set_targets      TEXT
+    );
+    CREATE TABLE IF NOT EXISTS strength_sessions (
+      id              TEXT PRIMARY KEY NOT NULL,
+      workout_id      TEXT,
+      name            TEXT NOT NULL,
+      started_at      INTEGER NOT NULL,
+      ended_at        INTEGER,
+      total_volume_kg REAL NOT NULL DEFAULT 0,
+      sets_completed  INTEGER NOT NULL DEFAULT 0,
+      created_at      INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS strength_session_sets (
+      id           TEXT PRIMARY KEY NOT NULL,
+      session_id   TEXT NOT NULL,
+      exercise_id  TEXT NOT NULL,
+      position     INTEGER NOT NULL,
+      set_index    INTEGER NOT NULL,
+      weight_kg    REAL,
+      reps         INTEGER NOT NULL,
+      completed_at INTEGER NOT NULL
+    );
   `);
   await ensureGoalColumns(db);
   await ensureCommonFoodColumns(db);
+  await ensureStrengthColumns(db);
   await runMigrations(db);
 }
 
@@ -197,6 +236,24 @@ async function ensureCommonFoodColumns(
         `ALTER TABLE common_foods ADD COLUMN ${name} ${type};`,
       );
     }
+  }
+}
+
+/**
+ * Add the per-set targets column introduced after the initial
+ * `strength_workout_exercises` schema. A DB from an earlier build lacks
+ * `set_targets`; add it idempotently (guarded, since SQLite has no `ADD COLUMN
+ * IF NOT EXISTS`). New installs already have it from the DDL above.
+ */
+async function ensureStrengthColumns(db: SQLite.SQLiteDatabase): Promise<void> {
+  const cols = await db.getAllAsync<{ name: string }>(
+    'PRAGMA table_info(strength_workout_exercises);',
+  );
+  const have = new Set(cols.map(c => c.name));
+  if (!have.has('set_targets')) {
+    await db.execAsync(
+      'ALTER TABLE strength_workout_exercises ADD COLUMN set_targets TEXT;',
+    );
   }
 }
 

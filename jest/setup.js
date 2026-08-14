@@ -9,6 +9,22 @@ jest.mock(
   () => require('react-native-safe-area-context/jest/mock').default,
 );
 
+// Notifee backs the ongoing "workout in progress" notification; it's a native
+// module, so stub the handful of calls workoutNotifications.ts makes.
+jest.mock('@notifee/react-native', () => ({
+  __esModule: true,
+  default: {
+    requestPermission: jest.fn(() => Promise.resolve({ authorizationStatus: 1 })),
+    createChannel: jest.fn(() => Promise.resolve('workout-session')),
+    displayNotification: jest.fn(() => Promise.resolve()),
+    cancelNotification: jest.fn(() => Promise.resolve()),
+    createTriggerNotification: jest.fn(() => Promise.resolve()),
+    cancelTriggerNotification: jest.fn(() => Promise.resolve()),
+  },
+  AndroidImportance: { NONE: 0, MIN: 1, LOW: 2, DEFAULT: 3, HIGH: 4 },
+  TriggerType: { TIMESTAMP: 0, INTERVAL: 1 },
+}));
+
 // The native splash module has no behaviour to exercise in tests; stub its
 // async hold/hide calls so importing App doesn't pull the native side in.
 jest.mock('expo-splash-screen', () => ({

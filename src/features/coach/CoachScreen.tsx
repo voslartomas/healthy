@@ -33,11 +33,12 @@ import {
   useConversationsStore,
 } from '../../state/useConversationsStore';
 import { useTheme } from '../../theme/theme';
-import { CoachError, CoachMessage, runCoach } from './aiClient';
+import { CoachError, CoachMessage, runCoach, ToolExecutor } from './aiClient';
 import { CoachMarkdown } from './CoachMarkdown';
 import { ConversationDrawer } from './ConversationDrawer';
 import { buildDataContext } from './dataContext';
 import { makeFoodToolset } from './foodTool';
+import { makeWorkoutToolset } from './workoutTool';
 import { languageDirective } from './languages';
 import { llamaEngine } from './ondevice/llamaEngine';
 import { useVoiceInput, VoiceState } from './useVoiceInput';
@@ -59,6 +60,7 @@ function buildSystemPrompt(): string {
     'To log a meal, estimate its calories and macros and call log_food, then confirm what you logged with the numbers.',
     'To change or remove a meal, call list_food_log to find its id, then update_food_log (with corrected full values) or delete_food_log using that id.',
     'To save a food for quick re-use later (not log it for today), call save_common_food.',
+    'To build a strength workout when the user asks (e.g. “make a biceps and hamstrings workout with 6 exercises”), call create_workout with the target muscles and exercise count — it picks exercises from the app’s database and sets each one’s weight and reps from the user’s own training history.',
     'If the user is just chatting or asking a question, reply in words and do not call any tool.',
     'Keep replies short and concrete. Use grams for macros and kcal for energy. Do not invent numbers that are not in the data.',
   ].join(' ');
@@ -154,9 +156,14 @@ export function CoachScreen({ navigation }: ScreenProps) {
       scrollToEnd();
 
       const { apiKey, model, aiProvider } = useAppStore.getState();
-      const toolset = makeFoodToolset(summary =>
-        appendMessage('system', summary),
-      );
+      const onToolLog = (summary: string) => appendMessage('system', summary);
+      const food = makeFoodToolset(onToolLog);
+      const workoutTools = makeWorkoutToolset(onToolLog);
+      const workoutNames = new Set(workoutTools.tools.map(t => t.name));
+      const exec: ToolExecutor = (name, args) =>
+        workoutNames.has(name)
+          ? workoutTools.exec(name, args)
+          : food.exec(name, args);
       const started = Date.now();
 
       try {
@@ -165,8 +172,8 @@ export function CoachScreen({ navigation }: ScreenProps) {
           {
             system: buildSystemPrompt(),
             history: [...history, { role: 'user', content: value }],
-            tools: toolset.tools,
-            exec: toolset.exec,
+            tools: [...food.tools, ...workoutTools.tools],
+            exec,
           },
         );
         if (reply) appendMessage('ai', reply, Date.now() - started);

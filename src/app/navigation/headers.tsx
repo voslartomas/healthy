@@ -14,6 +14,7 @@ import {
   useCalorieGoalsStore,
 } from '../../state/useCalorieGoalsStore';
 import { useHealthStore } from '../../state/useHealthStore';
+import { useStrengthStore } from '../../state/useStrengthStore';
 import { useTrendsStore } from '../../state/useTrendsStore';
 import { useTheme } from '../../theme/theme';
 
@@ -116,6 +117,41 @@ export function FuelRight() {
   if (goal)
     return <Status text={`Goal ${signed(goal.targetNet)}`} color={c.acc} />;
   return <Status text="No goal" color={c.fnt} />;
+}
+
+// ── Strength ─────────────────────────────────────────────────────────────────
+export const StrengthTitle = () => <Eyebrow text="Strength" />;
+export function StrengthRight() {
+  const c = useTheme().colors;
+  const count = useStrengthStore(s => s.workouts.length);
+  if (count > 0) {
+    return (
+      <Status
+        text={`${count} ${count === 1 ? 'Workout' : 'Workouts'}`}
+        color={c.acc}
+      />
+    );
+  }
+  return <Status text="No workouts" color={c.fnt} />;
+}
+
+export const WorkoutBuilderTitle = () => <Eyebrow text="Build workout" />;
+export const WorkoutRunTitle = () => <Eyebrow text="In progress" />;
+export const WorkoutSummaryTitle = () => <Eyebrow text="Session complete" />;
+
+/** Live "exercise x/N" progress in the runner header. */
+export function WorkoutRunRight() {
+  const c = useTheme().colors;
+  const session = useStrengthStore(s => s.session);
+  if (!session || session.plan.length === 0) {
+    return <Status text="—" color={c.fnt} />;
+  }
+  return (
+    <Status
+      text={`Set ${session.exerciseIndex + 1}/${session.plan.length}`}
+      color={c.acc}
+    />
+  );
 }
 
 // ── Trends ───────────────────────────────────────────────────────────────────

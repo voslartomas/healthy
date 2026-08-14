@@ -69,19 +69,29 @@ const CCACHE_MARKER = '// rnllama-ccache-launcher';
  * without a re-prebuild; harmless when ccache isn't installed and the var unset. */
 const CCACHE_BLOCK = `
 ${CCACHE_MARKER}
-allprojects {
-    afterEvaluate { project ->
-        if (System.getenv('RNLLAMA_CCACHE') == '1' && project.plugins.hasPlugin('com.android.library')) {
-            project.android {
-                defaultConfig {
-                    externalNativeBuild {
-                        cmake {
-                            arguments "-DCMAKE_C_COMPILER_LAUNCHER=ccache", "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
-                        }
+// Applied per-project. Registering \`afterEvaluate\` on an already-evaluated
+// project throws ("Cannot run Project.afterEvaluate when the project is already
+// evaluated"). That happens under \`org.gradle.configureondemand\` (set above)
+// once extra native modules shift the evaluation order, so guard on
+// \`project.state.executed\`: apply inline if already evaluated, else defer.
+def rnllamaCcache = { project ->
+    if (System.getenv('RNLLAMA_CCACHE') == '1' && project.plugins.hasPlugin('com.android.library')) {
+        project.android {
+            defaultConfig {
+                externalNativeBuild {
+                    cmake {
+                        arguments "-DCMAKE_C_COMPILER_LAUNCHER=ccache", "-DCMAKE_CXX_COMPILER_LAUNCHER=ccache"
                     }
                 }
             }
         }
+    }
+}
+allprojects { project ->
+    if (project.state.executed) {
+        rnllamaCcache(project)
+    } else {
+        project.afterEvaluate(rnllamaCcache)
     }
 }
 `;

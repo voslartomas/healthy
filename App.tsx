@@ -25,8 +25,10 @@ import { initDailyEnergy } from './src/state/dailyEnergyService';
 import { initGoalHistory } from './src/state/goalHistoryService';
 import { initGoals } from './src/state/goalsService';
 import { initProfile } from './src/state/profileService';
+import { initStrength } from './src/state/strengthService';
 import { useAppStore } from './src/state/useAppStore';
 import { initHealth, useHealthStore } from './src/state/useHealthStore';
+import { initWorkoutNotifications } from './src/state/workoutNotifications';
 import { colors } from './src/theme/colors';
 import { useAppFonts } from './src/theme/fonts';
 
@@ -112,7 +114,13 @@ export default function App() {
       console.warn('Failed to load goal history', err),
     );
     initProfile().catch(err => console.warn('Failed to load profile', err));
+    initStrength().catch(err =>
+      console.warn('Failed to load strength workouts', err),
+    );
     initHealth().catch(err => console.warn('Failed to load health data', err));
+    // Mirror the active workout into an ongoing Android notification (elapsed
+    // chronometer + sets done/remaining). No-op off Android.
+    initWorkoutNotifications();
   }, []);
 
   // Refresh when the app returns to the foreground so today's data + goals are

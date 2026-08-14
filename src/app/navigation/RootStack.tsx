@@ -8,12 +8,20 @@ import { CoachScreen } from '../../features/coach/CoachScreen';
 import { GoalDefineScreen } from '../../features/goals/GoalDefineScreen';
 import { RecoveryScreen } from '../../features/recovery/RecoveryScreen';
 import { SleepScreen } from '../../features/sleep/SleepScreen';
+import { ExercisePickerScreen } from '../../features/strength/ExercisePickerScreen';
+import { WorkoutBuilderScreen } from '../../features/strength/WorkoutBuilderScreen';
+import { WorkoutRunScreen } from '../../features/strength/WorkoutRunScreen';
+import { WorkoutSummaryScreen } from '../../features/strength/WorkoutSummaryScreen';
 import { useTheme } from '../../theme/theme';
 import {
   CardioRight,
   CardioTitle,
   RecoveryRight,
   RecoveryTitle,
+  WorkoutBuilderTitle,
+  WorkoutRunRight,
+  WorkoutRunTitle,
+  WorkoutSummaryTitle,
 } from './headers';
 import { HeaderClose } from './HeaderClose';
 import { headerOptions } from './headerOptions';
@@ -57,6 +65,35 @@ export function RootStack() {
           name="Sleep"
           component={asScreen(SleepScreen)}
           options={{ title: 'Sleep' }}
+        />
+        <Stack.Screen
+          name="WorkoutBuilder"
+          component={asScreen(WorkoutBuilderScreen)}
+          options={{ headerTitle: WorkoutBuilderTitle }}
+        />
+        <Stack.Screen
+          name="ExercisePicker"
+          component={asScreen(ExercisePickerScreen)}
+          options={({ navigation }) => ({
+            presentation: 'modal',
+            title: 'Add exercise',
+            headerRight: () => <HeaderClose onPress={navigation.goBack} />,
+          })}
+        />
+        <Stack.Screen
+          name="WorkoutRun"
+          component={asScreen(WorkoutRunScreen)}
+          options={{
+            headerTitle: WorkoutRunTitle,
+            headerRight: WorkoutRunRight,
+            headerBackVisible: false,
+            gestureEnabled: false,
+          }}
+        />
+        <Stack.Screen
+          name="WorkoutSummary"
+          component={asScreen(WorkoutSummaryScreen)}
+          options={{ headerTitle: WorkoutSummaryTitle, headerBackVisible: false }}
         />
         <Stack.Screen
           name="Coach"

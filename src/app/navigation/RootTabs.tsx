@@ -10,6 +10,7 @@ import { BRIEF_MAX_WIDTH, M } from '../../components/brief';
 import { DashboardScreen } from '../../features/dashboard/DashboardScreen';
 import { NutritionScreen } from '../../features/nutrition/NutritionScreen';
 import { SettingsScreen } from '../../features/settings/SettingsScreen';
+import { StrengthHomeScreen } from '../../features/strength/StrengthHomeScreen';
 import { TrendsScreen } from '../../features/trends/TrendsScreen';
 import { useTheme } from '../../theme/theme';
 import {
@@ -17,6 +18,8 @@ import {
   FuelTitle,
   SetupRight,
   SetupTitle,
+  StrengthRight,
+  StrengthTitle,
   TodayRight,
   TodayTitle,
   TrendsRight,
@@ -31,8 +34,9 @@ const Tab = createBottomTabNavigator<RootTabParamList>();
 const TABS: Record<keyof RootTabParamList, { num: string; label: string }> = {
   Today: { num: '01', label: 'TODAY' },
   Nutrition: { num: '02', label: 'FUEL' },
-  Trends: { num: '03', label: 'TRENDS' },
-  Settings: { num: '04', label: 'SETUP' },
+  Strength: { num: '03', label: 'LIFT' },
+  Trends: { num: '04', label: 'TRENDS' },
+  Settings: { num: '05', label: 'SETUP' },
 };
 
 /** The flat, numbered v3 tab bar (no icons — just 01/02/03/04 + labels). */
@@ -108,6 +112,11 @@ export function RootTabs() {
         name="Nutrition"
         component={asScreen(NutritionScreen)}
         options={{ headerTitle: FuelTitle, headerRight: FuelRight }}
+      />
+      <Tab.Screen
+        name="Strength"
+        component={asScreen(StrengthHomeScreen)}
+        options={{ headerTitle: StrengthTitle, headerRight: StrengthRight }}
       />
       <Tab.Screen
         name="Trends"
