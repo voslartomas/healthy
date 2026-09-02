@@ -14,7 +14,9 @@ jest.mock(
 jest.mock('@notifee/react-native', () => ({
   __esModule: true,
   default: {
-    requestPermission: jest.fn(() => Promise.resolve({ authorizationStatus: 1 })),
+    requestPermission: jest.fn(() =>
+      Promise.resolve({ authorizationStatus: 1 }),
+    ),
     createChannel: jest.fn(() => Promise.resolve('workout-session')),
     displayNotification: jest.fn(() => Promise.resolve()),
     cancelNotification: jest.fn(() => Promise.resolve()),

@@ -200,6 +200,7 @@ function GoalRow({
             return (
               <View
                 key={d}
+                testID="weekly-goal-bar-filled"
                 style={{
                   flex: 1,
                   borderRadius: 2,
@@ -214,6 +215,7 @@ function GoalRow({
           return (
             <View
               key={d}
+              testID="weekly-goal-bar-empty"
               style={{
                 flex: 1,
                 height: 8,

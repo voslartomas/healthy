@@ -12,6 +12,7 @@ import {
   sleepHoursSeries,
   sleepQualitySeries,
   sourceRank,
+  startOfLocalDay,
   stepsInWindow,
   trackedFromExercise,
   weeklyGoalHistory,
@@ -294,7 +295,7 @@ describe('trend series', () => {
 describe('dailyEnergySeries', () => {
   it('computes per-day net only when both eaten and burned exist', () => {
     const raw = emptyRaw();
-    const startOfToday = NOW - (NOW % DAY);
+    const startOfToday = startOfLocalDay(NOW);
     raw.nutrition = [
       {
         start: startOfToday + 3_600_000,
@@ -449,6 +450,29 @@ describe('weekStartMs', () => {
     // Idempotent and weekly-periodic.
     expect(weekStartMs(ws)).toBe(ws);
     expect(weekStartMs(ts + 7 * DAY)).toBe(ws + 7 * DAY);
+  });
+});
+
+describe('startOfLocalDay', () => {
+  it('cuts the day at LOCAL midnight, not UTC (the burned-calorie shortfall)', () => {
+    // Simulate a user two hours EAST of UTC (e.g. CEST). Local midnight is then
+    // 22:00 UTC the previous day — two hours BEFORE UTC midnight.
+    const spy = jest
+      .spyOn(Date.prototype, 'getTimezoneOffset')
+      .mockReturnValue(-120);
+    try {
+      const now = Date.UTC(2025, 0, 15, 10); // 12:00 local
+      const local = startOfLocalDay(now);
+      expect(local).toBe(Date.UTC(2025, 0, 14, 22)); // 2025-01-15 00:00 local
+      // The naive UTC cut would start the day two hours late and drop the burn
+      // (and steps) logged in that pre-UTC-midnight local window.
+      const utcMidnight = now - (now % DAY);
+      expect(utcMidnight - local).toBe(2 * 60 * 60 * 1000);
+      // Idempotent on a value already at local midnight.
+      expect(startOfLocalDay(local)).toBe(local);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 
@@ -668,7 +692,7 @@ describe('mergeRaw (cached history + recent slice)', () => {
 
 describe('cardioFromExercise', () => {
   it('sums HR-zone minutes and weights them into daily / weekly load', () => {
-    const today = NOW - (NOW % DAY);
+    const today = startOfLocalDay(NOW);
     const y = today - DAY;
     const c = cardioFromExercise(
       [
@@ -722,7 +746,7 @@ describe('cardioFromExercise', () => {
   });
 
   it('reports no zone data AND no load for a non-cardio session lacking HR zones', () => {
-    const today = NOW - (NOW % DAY);
+    const today = startOfLocalDay(NOW);
     const c = cardioFromExercise(
       [
         {
@@ -749,7 +773,7 @@ describe('cardioFromExercise', () => {
   });
 
   it('estimates load from duration for a CARDIO session with no HR samples (Fitbit fix)', () => {
-    const today = NOW - (NOW % DAY);
+    const today = startOfLocalDay(NOW);
     const c = cardioFromExercise(
       [
         {

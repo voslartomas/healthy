@@ -165,6 +165,20 @@ export function nightIndexToTime(index: number): number {
   return approx + new Date(approx).getTimezoneOffset() * 60_000;
 }
 
+/**
+ * Most-recent LOCAL-calendar midnight at or before `time`, as an epoch-ms
+ * timestamp. This is the "today" cut the device's own health apps — and the user
+ * — read by. The tempting `time - (time % DAY_MS)` gives UTC midnight instead,
+ * which for a user east of UTC starts "today" hours late and silently drops the
+ * first local hours of steps and burned energy — the persistent few-hundred-kcal
+ * shortfall against the Google Health total. Matches the local-midnight window
+ * the Health Connect burned-calorie aggregate already uses.
+ */
+export function startOfLocalDay(time: number): number {
+  const offsetMs = new Date(time).getTimezoneOffset() * 60_000;
+  return Math.floor((time - offsetMs) / DAY_MS) * DAY_MS + offsetMs;
+}
+
 /** How far back a self-calibrating baseline looks. Pinned so it stays a 30-day
  * baseline (as documented and as `readiness` assumes) no matter how much history
  * the fetch window returns — the deep read now spans 180 days for Trends. */
@@ -484,24 +498,31 @@ const CORE_TYPES = new Set([48, 83]); // PILATES, YOGA (closest core proxies)
 const NON_CARDIO_TYPES = new Set([70, 81, 48, 83, 79]); // strength/pilates/yoga/walking
 
 /**
- * Minutes a session spent in HR zone 2 or above — moderate (≥60 %HRmax),
- * vigorous and peak, i.e. everything but the light warm-up band. This is what
- * the "Zone 2 minutes" goal counts: real time at an aerobic-or-harder heart
- * rate, not raw session length. A session whose HR zones could not be computed
- * (no in-session HR, or no usable HRmax) contributes nothing — see ADR-006.
+ * Minutes a session counts toward the "Zone 2 minutes" goal — real time at an
+ * aerobic-or-harder heart rate, not raw session length.
+ *
+ * When the session has computed HR zones we sum zone 2 and above (moderate
+ * ≥60 %HRmax + vigorous + peak, i.e. everything but the light warm-up band).
+ * When it does NOT — the source recorded no in-session HR, or no usable HRmax —
+ * we fall back to the session's own minutes for real cardio types (non-cardio
+ * types like strength/walking still contribute nothing). Without this fallback a
+ * user whose watch logs workouts but not a per-session HR stream would see the
+ * goal collapse to zero; the fallback keeps it meaningful while the HR path
+ * makes it accurate wherever the data exists. See ADR-006.
  */
 function zone2PlusMinutes(s: ExerciseRecord): number {
   const z = s.hrZones;
-  if (!z) return 0;
-  return z.moderateMin + z.vigorousMin + z.peakMin;
+  if (z) return z.moderateMin + z.vigorousMin + z.peakMin;
+  return NON_CARDIO_TYPES.has(s.exerciseType) ? 0 : s.durationMin;
 }
 
 /**
  * Auto-tracked weekly totals per goal source from real activity.
  *
- * `zone2` is minutes in HR zone 2 and above ({@link zone2PlusMinutes}); the
- * source adapters compute per-session HR zones for every fetched session so the
- * figure is HR-based, not session length. `core` uses pilates/yoga as the
+ * `zone2` is minutes in HR zone 2 and above ({@link zone2PlusMinutes}), falling
+ * back to a cardio session's own minutes only when it carries no HR zones; the
+ * source adapters compute per-session HR zones for every fetched session, so the
+ * figure is HR-based wherever the data allows. `core` uses pilates/yoga as the
  * closest available session types (called out in the ADR).
  */
 export function trackedFromExercise(
@@ -779,7 +800,7 @@ export function cardioFromExercise(
   exercise: ExerciseRecord[],
   now: number,
 ): CardioSummary {
-  const startOfToday = now - (now % DAY_MS);
+  const startOfToday = startOfLocalDay(now);
   const from = startOfToday - 6 * DAY_MS;
   const sessions = dedupeIntervals(
     exercise.filter(e => e.start >= from && e.start <= now),
@@ -797,7 +818,7 @@ export function cardioFromExercise(
   let hasFallbackLoad = false;
 
   for (const s of sessions) {
-    const day = s.start - (s.start % DAY_MS);
+    const day = startOfLocalDay(s.start);
     if (s.hrZones) {
       hasZoneData = true;
       zones7d.lightMin += s.hrZones.lightMin;
@@ -1091,7 +1112,7 @@ export function nutritionToday(
   entries: NutritionEntry[],
   now: number,
 ): NutritionSummary | null {
-  const startOfToday = now - (now % DAY_MS);
+  const startOfToday = startOfLocalDay(now);
   const today = entries.filter(e => e.start >= startOfToday && e.start <= now);
   if (today.length === 0) return null;
 
@@ -1207,7 +1228,7 @@ export function dailyEnergySeries(
   raw: RawHealthData,
   now: number,
 ): DailyEnergy[] {
-  const startOfToday = now - (now % DAY_MS);
+  const startOfToday = startOfLocalDay(now);
   const from = startOfToday - (ADHERENCE_DAYS - 1) * DAY_MS;
   return dailyEnergyInWindow(raw, from, startOfToday + DAY_MS);
 }
@@ -1546,7 +1567,7 @@ export function deriveSnapshot(
       }
     : null;
 
-  const startOfToday = now - (now % DAY_MS);
+  const startOfToday = startOfLocalDay(now);
 
   return {
     hrv,

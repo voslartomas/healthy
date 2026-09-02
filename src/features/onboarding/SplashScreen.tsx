@@ -1,8 +1,7 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Image, StyleSheet, Text, View } from 'react-native';
 
 import { M, S } from '../../components/brief';
-import { Icon } from '../../components/Icon';
 import { useTheme } from '../../theme/theme';
 
 /**
@@ -17,8 +16,12 @@ export function SplashScreen() {
   return (
     <View style={[styles.root, { backgroundColor: c.bg }]}>
       <View style={styles.center}>
-        <View style={[styles.chip, { backgroundColor: c.acc }]}>
-          <Icon name="heart" size={46} color={c.inv} />
+        <View style={styles.chip}>
+          <Image
+            source={require('../../../assets/brand-mark.png')}
+            style={styles.mark}
+            resizeMode="contain"
+          />
         </View>
         <Text style={[S(800, 32, { ls: -0.4, color: c.ink }), styles.word]}>
           Healthy
@@ -35,14 +38,18 @@ export function SplashScreen() {
 const styles = StyleSheet.create({
   root: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   center: { alignItems: 'center', paddingHorizontal: 24 },
+  // White rounded tile mirrors the home-screen app icon so the launch splash
+  // reads as the same mark in both light and dark schemes.
   chip: {
     width: 88,
     height: 88,
     borderRadius: 24,
+    backgroundColor: '#FFFFFF',
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 26,
   },
+  mark: { width: 58, height: 58 },
   // A little horizontal breathing room so iOS doesn't clip the trailing glyph's
   // ink (the right edge of the wordmark) past its measured advance width.
   word: { marginBottom: 14, paddingHorizontal: 4 },

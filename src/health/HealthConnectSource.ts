@@ -68,6 +68,9 @@ interface HealthConnectModule {
       startTime: string;
       endTime: string;
     };
+    /** Restrict the aggregate to specific writing apps (package names). Used by
+     * the burned-calorie diagnostic to see each source's total in isolation. */
+    dataOriginFilter?: string[];
   }): Promise<{
     ENERGY_TOTAL?: { inKilocalories?: number };
     /** Total sleep time for the window, in SECONDS (the native bridge sends
@@ -953,34 +956,48 @@ export class HealthConnectSource implements HealthSource {
       bodyFat.push({ value: r.percentage, time, source: tag(r) });
     }
 
-    // Burned-calories parity with Google Health: use Health Connect's OWN
-    // cross-source aggregate (deduped by the user's data-source priority and
-    // clipped to [device-local midnight, now]) for today's total, instead of
-    // our single-source record pick. This is the number the Health Connect /
-    // Google Health UI shows — sources like Fitbit and Google Fit disagree on
-    // TDEE, and HC's aggregate resolves them exactly as the system UI does.
+    // Burned-calories parity with the Google Health UI, over [local midnight,
+    // now]. Health Connect's cross-source aggregate deduplicates by the user's
+    // data-source PRIORITY, which on a multi-tracker setup can rank a source
+    // whose TDEE reads low (e.g. Google Fit) above the one the Google Health app
+    // actually displays (e.g. Fitbit) — leaving us a couple hundred kcal short
+    // of what the user sees (HEA-CAL: Fitbit 1576 vs the deduped 1287).
+    //
+    // Each source's own TotalCaloriesBurned is its complete day-so-far estimate
+    // (HC prorates interval records to the window, so a whole-day forecast can't
+    // overcount), so take the LARGEST of the deduped aggregate and the per-source
+    // aggregates: the deduped value wins when it stitches complementary coverage
+    // together; a single source wins when priority buried the fuller tracker.
     let energyBurnedTodayAgg: number | null = null;
-    if (mod.aggregateRecord) {
-      try {
-        const localMidnight = new Date(now);
-        localMidnight.setHours(0, 0, 0, 0);
-        const agg = await mod.aggregateRecord({
-          recordType: 'TotalCaloriesBurned',
-          timeRangeFilter: {
-            operator: 'between',
-            startTime: localMidnight.toISOString(),
-            endTime: new Date(now).toISOString(),
-          },
-        });
-        const kcalVal = agg?.ENERGY_TOTAL?.inKilocalories;
-        if (typeof kcalVal === 'number' && kcalVal > 0)
-          energyBurnedTodayAgg = Math.round(kcalVal);
-      } catch (err) {
-        console.warn(
-          '[HealthConnect] aggregate TotalCaloriesBurned failed',
-          err,
-        );
-      }
+    const aggFn = mod.aggregateRecord;
+    if (aggFn) {
+      const localMidnight = new Date(now);
+      localMidnight.setHours(0, 0, 0, 0);
+      const win = {
+        operator: 'between' as const,
+        startTime: localMidnight.toISOString(),
+        endTime: new Date(now).toISOString(),
+      };
+      const aggTotal = async (source?: string): Promise<number> => {
+        try {
+          const agg = await aggFn({
+            recordType: 'TotalCaloriesBurned',
+            timeRangeFilter: win,
+            ...(source ? { dataOriginFilter: [source] } : {}),
+          });
+          const v = agg?.ENERGY_TOTAL?.inKilocalories;
+          return typeof v === 'number' && v > 0 ? v : 0;
+        } catch (err) {
+          console.warn(
+            '[HealthConnect] aggregate TotalCaloriesBurned failed',
+            err,
+          );
+          return 0;
+        }
+      };
+      let best = await aggTotal();
+      for (const src of sources) best = Math.max(best, await aggTotal(src));
+      if (best > 0) energyBurnedTodayAgg = Math.round(best);
     }
 
     // Per-day burned calories, from Health Connect's OWN grouped aggregate.

@@ -25,7 +25,7 @@
       "package": "cz.healthy",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#0B1220"
+        "backgroundColor": "#FFFFFF"
       },
       "permissions": [
         "android.permission.RECORD_AUDIO",

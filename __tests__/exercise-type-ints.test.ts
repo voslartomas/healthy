@@ -57,4 +57,22 @@ describe('exercise-type categorization (authoritative HC ints)', () => {
     expect(tracked.core).toBe(0);
     expect(tracked.zone2).toBe(30);
   });
+
+  it('falls back to session minutes for a cardio session with no HR zones', () => {
+    // A running-type session (56) with hrZones null → the source logged the
+    // workout but no per-session HR, so zone-2 counts its full 30 minutes rather
+    // than collapsing to 0.
+    const tracked = trackedFromExercise([session(56, 1, null)], [], [], NOW);
+    expect(tracked.zone2).toBe(30);
+  });
+
+  it('never counts a strength/walking session with no HR zones', () => {
+    const tracked = trackedFromExercise(
+      [session(70, 1, null), session(79, 2, null)],
+      [],
+      [],
+      NOW,
+    );
+    expect(tracked.zone2).toBe(0);
+  });
 });
