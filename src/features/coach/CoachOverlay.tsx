@@ -54,14 +54,14 @@ export function CoachOverlay() {
       style={[
         styles.fab,
         {
-          backgroundColor: c.ink,
+          backgroundColor: c.accSolid,
           bottom: insets.bottom + 78,
           right: gutter + 20,
           shadowColor: c.scrim,
         },
       ]}
     >
-      <Sparkle color={c.acc} size={24} />
+      <Sparkle color={c.onAccent} size={24} />
     </Pressable>
   );
 }

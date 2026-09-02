@@ -2,7 +2,7 @@ import React from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ScreenProps } from '../../app/navigation/types';
-import { BriefScreen, M, S, Section } from '../../components/brief';
+import { BriefScreen, M, S, Card } from '../../components/brief';
 import { LanguageSelect } from '../coach/LanguageSelect';
 import { formatBytes, modelByLabel } from '../coach/ondevice/models';
 import { useModelStore } from '../coach/ondevice/useModelStore';
@@ -74,7 +74,9 @@ export function SettingsScreen(_props: ScreenProps) {
       } catch (err) {
         Alert.alert(
           'Connection failed',
-          err instanceof Error ? err.message : `Could not connect to ${sourceName}.`,
+          err instanceof Error
+            ? err.message
+            : `Could not connect to ${sourceName}.`,
         );
       }
     },
@@ -83,8 +85,8 @@ export function SettingsScreen(_props: ScreenProps) {
 
   return (
     <BriefScreen>
-      {/* ── 01 Data sources ─────────────────────────────────────────── */}
-      <Section n="01" title="Data sources" first>
+      {/* ── Data sources ─────────────────────────────────────────── */}
+      <Card title="Data sources" first>
         <View style={[styles.conn, { borderBottomColor: c.hair }]}>
           <View style={styles.connText}>
             <Text style={S(600, 13.5, { color: c.ink })}>{sourceName}</Text>
@@ -110,13 +112,13 @@ export function SettingsScreen(_props: ScreenProps) {
             ? `${sourceName.toUpperCase()} IS YOUR DATA SOURCE — IT STAYS ON YOUR PHONE, ACTIVITIES AUTO-FILL YOUR GOALS, AND FOOD YOU LOG IS WRITTEN BACK TO IT.`
             : `${sourceName.toUpperCase()} IS ONLY AVAILABLE ON A NATIVE DEVICE BUILD. UNTIL CONNECTED, METRICS SHOW "—".`}
         </Text>
-      </Section>
+      </Card>
 
       {/* ── Profile ─────────────────────────────────────────────────── */}
-      <ProfileSection n="02" />
+      <ProfileSection />
 
-      {/* ── 03 AI coach ─────────────────────────────────────────────── */}
-      <Section n="03" title="AI coach">
+      {/* ── AI coach ─────────────────────────────────────────────── */}
+      <Card title="AI coach">
         <Text style={[M(600, 10.5, { color: c.fnt }), styles.coachNote]}>
           YOUR COACH RUNS FULLY ON YOUR PHONE — PRIVATE, NO API KEY, WORKS
           OFFLINE ONCE THE MODEL IS DOWNLOADED.
@@ -130,13 +132,13 @@ export function SettingsScreen(_props: ScreenProps) {
           VOICE INPUT
         </Text>
         <VoiceModelCard />
-      </Section>
+      </Card>
 
-      {/* ── 04 Calorie goal ─────────────────────────────────────────── */}
-      <CalorieGoalSection n="04" />
+      {/* ── Calorie goal ─────────────────────────────────────────── */}
+      <CalorieGoalSection />
 
-      {/* ── 05 Backup ───────────────────────────────────────────────── */}
-      <BackupSection n="05" />
+      {/* ── Backup ───────────────────────────────────────────────── */}
+      <BackupSection />
     </BriefScreen>
   );
 }
@@ -148,7 +150,7 @@ export function SettingsScreen(_props: ScreenProps) {
  * new device. Health metrics themselves live in Health Connect/HealthKit and
  * re-sync on their own; this covers the app's own local state.
  */
-function BackupSection({ n }: { n: string }) {
+function BackupSection() {
   const t = useTheme();
   const c = t.colors;
   const [busy, setBusy] = React.useState<null | 'backup' | 'restore'>(null);
@@ -178,7 +180,10 @@ function BackupSection({ n }: { n: string }) {
             const res = await restoreBackup();
             setBusy(null);
             if (res.ok) {
-              Alert.alert('Restored', 'Your data was restored from the backup.');
+              Alert.alert(
+                'Restored',
+                'Your data was restored from the backup.',
+              );
             } else if (!res.canceled) {
               Alert.alert(
                 'Restore failed',
@@ -192,7 +197,7 @@ function BackupSection({ n }: { n: string }) {
   }, [busy]);
 
   return (
-    <Section n={n} title="Backup">
+    <Card title="Backup">
       <Text style={[M(600, 10.5, { color: c.fnt }), styles.coachNote]}>
         SAVE YOUR GOALS AND LOCAL DATA TO A FILE YOU CAN KEEP IN GOOGLE DRIVE OR
         FILES, AND RESTORE IT LATER OR ON A NEW PHONE.
@@ -205,10 +210,10 @@ function BackupSection({ n }: { n: string }) {
           accessibilityLabel="Back up data to a file"
           style={[
             styles.backupBtn,
-            { backgroundColor: c.ink, opacity: busy != null ? 0.5 : 1 },
+            { backgroundColor: c.accSolid, opacity: busy != null ? 0.5 : 1 },
           ]}
         >
-          <Text style={M(700, 11, { ls: 0.6, color: c.inv })}>
+          <Text style={M(700, 11, { ls: 0.6, color: c.onAccent })}>
             {busy === 'backup' ? 'BACKING UP…' : 'BACK UP'}
           </Text>
         </Pressable>
@@ -228,7 +233,7 @@ function BackupSection({ n }: { n: string }) {
           </Text>
         </Pressable>
       </View>
-    </Section>
+    </Card>
   );
 }
 
@@ -323,9 +328,9 @@ function OnDeviceModelCard({ modelLabel }: { modelLabel: string }) {
           <Pressable
             onPress={() => void download()}
             accessibilityRole="button"
-            style={[styles.downloadBtn, { backgroundColor: c.ink }]}
+            style={[styles.downloadBtn, { backgroundColor: c.accSolid }]}
           >
-            <Text style={M(700, 11, { ls: 0.6, color: c.inv })}>
+            <Text style={M(700, 11, { ls: 0.6, color: c.onAccent })}>
               {status === 'error'
                 ? 'RETRY DOWNLOAD'
                 : `DOWNLOAD ${formatBytes(bytesTotal).toUpperCase()}`}
@@ -367,7 +372,9 @@ function VoiceModelCard() {
   return (
     <View style={[styles.modelCard, { borderColor: c.hair }]}>
       <View style={styles.modelCardHead}>
-        <Text style={S(600, 13.5, { color: c.ink })}>{WHISPER_MODEL.label}</Text>
+        <Text style={S(600, 13.5, { color: c.ink })}>
+          {WHISPER_MODEL.label}
+        </Text>
         <Text style={M(600, 10, { ls: 1, color: c.fnt })}>
           {formatBytes(bytesTotal).toUpperCase()}
         </Text>
@@ -426,9 +433,9 @@ function VoiceModelCard() {
           <Pressable
             onPress={() => void download()}
             accessibilityRole="button"
-            style={[styles.downloadBtn, { backgroundColor: c.ink }]}
+            style={[styles.downloadBtn, { backgroundColor: c.accSolid }]}
           >
-            <Text style={M(700, 11, { ls: 0.6, color: c.inv })}>
+            <Text style={M(700, 11, { ls: 0.6, color: c.onAccent })}>
               {status === 'error'
                 ? 'RETRY DOWNLOAD'
                 : `DOWNLOAD ${formatBytes(bytesTotal).toUpperCase()}`}
@@ -504,7 +511,7 @@ const styles = StyleSheet.create({
   modelCard: {
     marginTop: 16,
     borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 10,
     padding: 14,
     gap: 12,
   },

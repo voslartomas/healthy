@@ -2,8 +2,8 @@ import { Palette } from '../../theme/colors';
 import { sans } from '../../theme/fonts';
 
 /**
- * Shared native-header styling for both navigators, themed to the v3 paper
- * palette: flat (no shadow), paper background, ink title in Hanken Grotesk.
+ * Shared native-header styling for both navigators, themed to the v3 palette:
+ * flat (no shadow), page-ground background, ink title in Archivo.
  * Spread into a navigator's `screenOptions`; per-screen `title`s come from the
  * individual `Screen` options. Typed loosely because native-stack and
  * bottom-tabs option shapes differ but share these header keys.

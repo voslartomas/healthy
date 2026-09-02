@@ -133,6 +133,9 @@ export function MealLogger({ onDone }: { onDone?: () => void }) {
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 11,
+    // The design fills fields with the page ground so they read as insets in
+    // the card rather than as another raised surface.
+    backgroundColor: c.bg,
   } as const;
   const numFont = { fontFamily: M(600, 14).fontFamily } as const;
 
@@ -198,7 +201,7 @@ export function MealLogger({ onDone }: { onDone?: () => void }) {
                   },
                 ]}
               >
-                <Text style={M(800, 12, { color: c.acc })}>+</Text>
+                <Text style={M(700, 12, { color: c.acc })}>+</Text>
                 <Text
                   numberOfLines={1}
                   style={[S(600, 12.5, { color: c.ink }), styles.chipName]}
@@ -233,9 +236,9 @@ export function MealLogger({ onDone }: { onDone?: () => void }) {
           onPress={addManual}
           accessibilityRole="button"
           accessibilityLabel="Add food to the meal"
-          style={[styles.addBtn, { backgroundColor: c.ink }]}
+          style={[styles.addBtn, { backgroundColor: c.accSolid }]}
         >
-          <Text style={M(700, 16, { color: c.inv })}>+</Text>
+          <Text style={M(700, 16, { color: c.onAccent })}>+</Text>
         </Pressable>
       </View>
       <View style={styles.macroRow}>
@@ -279,7 +282,7 @@ export function MealLogger({ onDone }: { onDone?: () => void }) {
               >
                 {it.name}
               </Text>
-              <Text style={[M(800, 12, { color: c.ink }), styles.draftKcal]}>
+              <Text style={[M(700, 12, { color: c.ink }), styles.draftKcal]}>
                 {it.kcal}
               </Text>
               <Pressable
@@ -308,15 +311,15 @@ export function MealLogger({ onDone }: { onDone?: () => void }) {
         style={[
           styles.logBtn,
           {
-            backgroundColor: c.ink,
+            backgroundColor: c.accSolid,
             opacity: busy || items.length === 0 ? 0.4 : 1,
           },
         ]}
       >
-        <Text style={M(700, 12, { ls: 0.6, color: c.inv })}>
+        <Text style={M(700, 12, { ls: 0.6, color: c.onAccent })}>
           {`LOG ${mealType}`}
           {items.length > 0 ? (
-            <Text style={M(700, 12, { color: c.inv })}>
+            <Text style={M(700, 12, { color: c.onAccent })}>
               {`  ·  ${items.length} ITEM${items.length > 1 ? 'S' : ''}  ·  ${totalKcal} KCAL`}
             </Text>
           ) : null}

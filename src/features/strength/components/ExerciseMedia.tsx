@@ -1,9 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Animated, StyleSheet, Text, View } from 'react-native';
+import { Animated, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import Svg, { Circle, Line, Rect } from 'react-native-svg';
 
-import { exerciseOrUnknown, MUSCLE_LABELS } from '../../../data/exerciseCatalog';
 import { M } from '../../../components/brief';
+import {
+  exerciseOrUnknown,
+  MUSCLE_LABELS,
+} from '../../../data/exerciseCatalog';
 import { useTheme } from '../../../theme/theme';
 import { GENERATED_FRAMES } from './frames.generated';
 
@@ -19,7 +22,14 @@ import { GENERATED_FRAMES } from './frames.generated';
  *     (translateY loop) so every exercise shows motion even without bundled
  *     photos.
  *
- * A future video/Rive upgrade is just a third branch here.
+ * The v3 Lift screens use three shapes of the same surface, chosen with
+ * `variant`:
+ *  - `hero`   — full-bleed banner at the top of a `flush` card (no border/radius
+ *               of its own; the card clips it), with a mono caption overlay.
+ *  - `panel`  — the standalone rounded block used inside a padded card.
+ *  - `thumb`  — a square list thumbnail (62 / 76 / 64 / 56 px in the design).
+ *
+ * A future video/Rive upgrade is just a third branch in the render paths.
  */
 
 /**
@@ -30,20 +40,31 @@ import { GENERATED_FRAMES } from './frames.generated';
  */
 export const FRAMES = GENERATED_FRAMES;
 
+export type MediaVariant = 'hero' | 'panel' | 'thumb';
+
 export function ExerciseMedia({
   exerciseId,
   playing = true,
   height = 168,
+  variant = 'panel',
+  sub,
+  style,
 }: {
   exerciseId: string;
   /** Pause the loop (e.g. while resting) to save a little battery. */
   playing?: boolean;
+  /** Height for hero/panel; also the side length for a `thumb`. */
   height?: number;
+  variant?: MediaVariant;
+  /** Mono caption shown over hero/panel media ("LOOP · FORM"). Defaults to the
+   * exercise's muscle group; pass `''` to hide it. */
+  sub?: string;
+  style?: ViewStyle;
 }) {
-  const t = useTheme();
-  const c = t.colors;
+  const c = useTheme().colors;
   const def = exerciseOrUnknown(exerciseId);
   const frames = FRAMES[def.mediaKey ?? exerciseId];
+  const isThumb = variant === 'thumb';
 
   // A single 0→1→0 driver powers both the image crossfade and the placeholder
   // motion. useNativeDriver keeps it off the JS thread.
@@ -71,9 +92,22 @@ export function ExerciseMedia({
     return () => loop.stop();
   }, [anim, playing, exerciseId]);
 
+  const shape: ViewStyle = isThumb
+    ? { width: height, height, borderRadius: 8, borderWidth: 1 }
+    : variant === 'hero'
+      ? { width: '100%', height, borderRadius: 0, borderWidth: 0 }
+      : { width: '100%', height, borderRadius: 10, borderWidth: 1 };
+
+  const caption = sub ?? MUSCLE_LABELS[def.muscleGroup].toUpperCase();
+
   return (
     <View
-      style={[styles.panel, { height, backgroundColor: c.track, borderColor: c.hair }]}
+      style={[
+        styles.panel,
+        shape,
+        { backgroundColor: c.track, borderColor: c.hair },
+        style,
+      ]}
       accessibilityRole="image"
       accessibilityLabel={`${def.name} demonstration`}
     >
@@ -82,23 +116,37 @@ export function ExerciseMedia({
           <Animated.Image
             testID="exercise-frame"
             source={frames[0]}
-            resizeMode="contain"
-            style={[styles.frame, { opacity: anim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }]}
+            resizeMode={isThumb ? 'cover' : 'contain'}
+            accessibilityIgnoresInvertColors
+            style={[
+              styles.frame,
+              {
+                opacity: anim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [1, 0],
+                }),
+              },
+            ]}
           />
           <Animated.Image
             source={frames[1]}
-            resizeMode="contain"
+            resizeMode={isThumb ? 'cover' : 'contain'}
+            accessibilityIgnoresInvertColors
             style={[styles.frame, { opacity: anim }]}
           />
         </>
+      ) : isThumb ? (
+        <Text style={M(700, 13, { color: c.fnt })}>
+          {MUSCLE_LABELS[def.muscleGroup][0]}
+        </Text>
       ) : (
         <Placeholder anim={anim} color={c.acc} faint={c.fnt} />
       )}
-      <View style={styles.badge}>
-        <Text style={M(700, 9, { ls: 1.4, color: c.fnt })}>
-          {MUSCLE_LABELS[def.muscleGroup].toUpperCase()}
-        </Text>
-      </View>
+      {!isThumb && caption ? (
+        <View style={styles.badge}>
+          <Text style={M(700, 9, { ls: 1.4, color: c.fnt })}>{caption}</Text>
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -121,7 +169,15 @@ function Placeholder({
     <Animated.View style={{ transform: [{ translateY }] }}>
       <Svg width={120} height={72} viewBox="0 0 120 72">
         {/* bar */}
-        <Line x1={30} y1={36} x2={90} y2={36} stroke={color} strokeWidth={5} strokeLinecap="round" />
+        <Line
+          x1={30}
+          y1={36}
+          x2={90}
+          y2={36}
+          stroke={color}
+          strokeWidth={5}
+          strokeLinecap="round"
+        />
         {/* left plates */}
         <Rect x={18} y={20} width={10} height={32} rx={3} fill={color} />
         <Circle cx={30} cy={36} r={10} fill={faint} />
@@ -135,13 +191,9 @@ function Placeholder({
 
 const styles = StyleSheet.create({
   panel: {
-    width: '100%',
-    borderRadius: 18,
-    borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
-    marginTop: 4,
   },
   frame: {
     position: 'absolute',

@@ -8,7 +8,7 @@ import { useTheme } from '../../theme/theme';
 /**
  * Branded launch splash — shown while the first health read settles (and for a
  * short minimum beat) so the app opens on "Healthy" rather than a flash of
- * empty content. Deliberately calm: no spinner, just the wordmark on the paper
+ * empty content. Deliberately calm: no spinner, just the wordmark on the page
  * palette. Uses {@link useTheme} directly (no provider needed) so it can render
  * before the navigation tree mounts.
  */

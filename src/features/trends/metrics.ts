@@ -38,6 +38,21 @@ const SERIES: Record<string, (t: TrendSeries) => TrendPoint[]> = {
   recovery: t => t.readiness,
 };
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** The trailing `days` of a daily series, measured from its newest point (not
+ * from `now`) so a metric that stopped reporting still shows its own last window
+ * rather than collapsing to empty. */
+export function withinRange<T extends { time: number }>(
+  points: T[],
+  days: number,
+): T[] {
+  if (points.length === 0) return points;
+  const newest = points[points.length - 1].time;
+  const from = newest - days * DAY_MS;
+  return points.filter(p => p.time > from);
+}
+
 export function fmt(n: number, decimals: number): string {
   return decimals > 0 ? n.toFixed(decimals) : String(Math.round(n));
 }
@@ -49,6 +64,8 @@ export function toMetric(
   cfg: MetricConfig,
   series: TrendPoint[],
   band?: { lo: number; hi: number }[],
+  /** Span the series covers, for the delta's "/ 30D" suffix. */
+  rangeDays = 30,
 ): TrendMetric {
   if (series.length === 0) {
     return {
@@ -71,10 +88,11 @@ export function toMetric(
   const d = last - first;
   const rounded = cfg.decimals > 0 ? Math.round(d * 10) / 10 : Math.round(d);
   const unitSuffix = cfg.unit === '%' ? '%' : ` ${cfg.unit}`;
+  const span = `${rangeDays}D`;
   const delta =
     rounded === 0
-      ? 'FLAT / MO'
-      : `${rounded > 0 ? '▲' : '▼'}${Math.abs(rounded)}${unitSuffix} / MO`.toUpperCase();
+      ? `FLAT / ${span}`
+      : `${rounded > 0 ? '▲' : '▼'}${Math.abs(rounded)}${unitSuffix} / ${span}`.toUpperCase();
   return {
     key: cfg.key,
     label: cfg.label,
@@ -90,16 +108,28 @@ export function toMetric(
   };
 }
 
-/** Every metric, in the order they appear as segments (HRV/RHR lead). */
-export function buildMetrics(trends: TrendSeries): TrendMetric[] {
+/** Every metric over the last `rangeDays`, in the order they appear as segments
+ * (HRV/RHR lead). The band is sliced against the SAME window as its series, so
+ * `toMetric`'s length check still pairs them one-to-one. */
+export function buildMetrics(
+  trends: TrendSeries,
+  rangeDays = 30,
+): TrendMetric[] {
   // HRV and resting-HR carry a rolling min/max range band (see rollingRange);
   // the other metrics have no band.
   const bandFor = (key: string): { lo: number; hi: number }[] | undefined => {
     const src =
       key === 'hrv' ? trends.hrvRange : key === 'rhr' ? trends.rhrRange : null;
-    return src ? src.map(r => ({ lo: r.lo, hi: r.hi })) : undefined;
+    return src
+      ? withinRange(src, rangeDays).map(r => ({ lo: r.lo, hi: r.hi }))
+      : undefined;
   };
   return METRIC_CONFIG.map(cfg =>
-    toMetric(cfg, SERIES[cfg.key](trends), bandFor(cfg.key)),
+    toMetric(
+      cfg,
+      withinRange(SERIES[cfg.key](trends), rangeDays),
+      bandFor(cfg.key),
+      rangeDays,
+    ),
   );
 }

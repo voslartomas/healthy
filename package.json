@@ -20,8 +20,8 @@
     "submit-android": "eas submit -p android --profile production"
   },
   "dependencies": {
-    "@expo-google-fonts/hanken-grotesk": "^0.4.3",
-    "@expo-google-fonts/jetbrains-mono": "^0.4.1",
+    "@expo-google-fonts/archivo": "^0.4.2",
+    "@expo-google-fonts/oswald": "^0.4.2",
     "@fugood/react-native-audio-pcm-stream": "^1.1.4",
     "@kingstinct/react-native-healthkit": "^9.0.0",
     "@notifee/react-native": "^9.1.8",

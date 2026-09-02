@@ -15,6 +15,7 @@ import {
   NutritionEntry,
   NutritionSummary,
   RawHealthData,
+  ReadinessContribution,
   ReadinessMetric,
   SleepRecord,
   SleepStages,
@@ -134,6 +135,60 @@ export function exerciseInfoRank(e: {
   return score;
 }
 
+const HALF_DAY_MS = DAY_MS / 2;
+
+/**
+ * The "night index" a timestamp belongs to — the material fix for HRV reading
+ * LOW against the Google Health / wearable figure.
+ *
+ * Nightly HRV samples must be grouped by NIGHT, in LOCAL time. Bucketing them by
+ * UTC day (`floor(t / DAY_MS)`) splits every night in two for any timezone off
+ * UTC: in UTC+2, UTC midnight is 02:00 local, so the early hours of sleep — the
+ * deep-sleep cycles where RMSSD runs highest — are filed under *yesterday*, and
+ * "today" is left holding only the pre-waking tail, where RMSSD is at its lowest.
+ * The displayed value came out systematically below what the source app shows.
+ *
+ * Grouping noon→local-noon puts a whole night in one bucket, labelled by the
+ * morning it ends on — the convention wearables use. A daytime reading after
+ * local noon (a nap, a spot check) files under the coming night; that is the
+ * documented trade-off of a single cut point, and it is rare for nightly HRV.
+ */
+export function nightIndex(time: number): number {
+  const localMs = time - new Date(time).getTimezoneOffset() * 60_000;
+  return Math.floor((localMs + HALF_DAY_MS) / DAY_MS);
+}
+
+/** Inverse of {@link nightIndex} for display: a timestamp on the morning that
+ * night ended (local midnight), so chart labels and tooltips read as that date. */
+export function nightIndexToTime(index: number): number {
+  const approx = index * DAY_MS;
+  return approx + new Date(approx).getTimezoneOffset() * 60_000;
+}
+
+/** How far back a self-calibrating baseline looks. Pinned so it stays a 30-day
+ * baseline (as documented and as `readiness` assumes) no matter how much history
+ * the fetch window returns — the deep read now spans 180 days for Trends. */
+export const BASELINE_DAYS = 30;
+
+/** Keep only the samples within the last {@link BASELINE_DAYS} of the newest one. */
+function baselineWindow<T extends { time: number }>(samples: T[]): T[] {
+  if (samples.length === 0) return samples;
+  let newest = samples[0].time;
+  for (const s of samples) if (s.time > newest) newest = s.time;
+  const from = newest - BASELINE_DAYS * DAY_MS;
+  return samples.filter(s => s.time >= from);
+}
+
+/** The same trailing-window trim for an already-bucketed `[nightIndex, value]`
+ * map: the most recent {@link BASELINE_DAYS} nights' values. */
+function baselineNights(entries: [number, number][]): number[] {
+  if (entries.length === 0) return [];
+  const newest = Math.max(...entries.map(([night]) => night));
+  return entries
+    .filter(([night]) => night > newest - BASELINE_DAYS)
+    .map(([, value]) => value);
+}
+
 /** Most recent sample from the highest-priority source that has any samples. */
 export function latestFromPrimary(
   samples: InstantSample[],
@@ -144,10 +199,11 @@ export function latestFromPrimary(
   return fromPrimary.reduce((a, b) => (b.time > a.time ? b : a));
 }
 
-/** Baseline = median of one representative (latest) value per day. */
+/** Baseline = median of one representative (latest) value per day, over the
+ * trailing {@link BASELINE_DAYS} only. */
 function dailyBaseline(samples: InstantSample[]): number {
   const byDay = new Map<number, InstantSample>();
-  for (const s of samples) {
+  for (const s of baselineWindow(samples)) {
     const day = Math.floor(s.time / DAY_MS);
     const existing = byDay.get(day);
     if (!existing || s.time > existing.time) byDay.set(day, s);
@@ -169,56 +225,62 @@ function metricWithBaseline(
 }
 
 /**
- * Per-day MEDIAN of a metric's samples, from the single primary source. Used for
- * metrics whose source logs MANY intraday readings and whose displayed figure is
- * the day's aggregate — notably HRV: Fitbit (and other wearables) write one RMSSD
- * value every ~5 minutes through the night, and the app shows the night's central
- * value, not an arbitrary latest 5-minute sample.
+ * Per-NIGHT MEAN of a metric's samples, from the single primary source. Used for
+ * metrics whose source logs MANY readings through the night and whose displayed
+ * figure is the night's aggregate — that is, HRV: wearables write one RMSSD value
+ * every ~5 minutes of sleep, and the app shows the night's average, not an
+ * arbitrary 5-minute sample.
  *
- * We use the MEDIAN, not the mean, on purpose: RMSSD spikes high during awake /
- * movement periods (motion artifact), and those readings are mixed into the same
- * record stream with no sleep-stage label. A mean gets dragged UP by those
- * spikes — badly on a restless night — whereas the median tracks the stable
- * sleeping value the wearable reports. Keyed by UTC day → median value.
+ * MEAN, not median, for parity with the source. An earlier revision used the
+ * median to blunt awake-period RMSSD spikes, but the reference apps (Google
+ * Health, and Fitbit's own nightly HRV) average the night's samples, and the
+ * median read consistently BELOW them on real data — for a right-skewed
+ * distribution like RMSSD it sits well under the mean. Matching what the user
+ * sees in their own source app matters more here than our own smoothing
+ * preference; the value is compared against a baseline computed the same way, so
+ * the readiness heuristic is unaffected either way.
+ *
+ * Keyed by NIGHT (local noon→noon), not UTC day — see {@link nightIndex}.
  */
-export function dailyMedianByDay(samples: InstantSample[]): Map<number, number> {
+export function nightlyAverage(samples: InstantSample[]): Map<number, number> {
   const primary = primarySource(samples);
   const src = primary ? samples.filter(s => s.source === primary) : samples;
-  const byDay = new Map<number, number[]>();
+  const byNight = new Map<number, number[]>();
   for (const s of src) {
-    const day = Math.floor(s.time / DAY_MS);
-    const arr = byDay.get(day);
+    const night = nightIndex(s.time);
+    const arr = byNight.get(night);
     if (arr) arr.push(s.value);
-    else byDay.set(day, [s.value]);
+    else byNight.set(night, [s.value]);
   }
   const out = new Map<number, number>();
-  for (const [day, vals] of byDay) out.set(day, median(vals));
+  for (const [night, vals] of byNight) {
+    out.set(night, vals.reduce((a, b) => a + b, 0) / vals.length);
+  }
   return out;
 }
 
 /**
  * HRV metric the way wearables + the Google Health app present it: the most
- * recent night's MEDIAN RMSSD (robust to awake-period spikes; see
- * {@link dailyMedianByDay}), with a baseline = median of recent nightly values.
- * This replaces the generic latest-single-sample selection for HRV, which
- * surfaced an arbitrary 5-minute value that matched neither the app nor itself
- * day-to-day.
+ * recent night's AVERAGE RMSSD (see {@link nightlyAverage}), with a baseline =
+ * median of the recent nightly values. This replaces the generic
+ * latest-single-sample selection for HRV, which surfaced an arbitrary 5-minute
+ * value that matched neither the app nor itself day-to-day.
  */
 export function hrvMetric(samples: InstantSample[]): MetricWithBaseline | null {
-  const byDay = dailyMedianByDay(samples);
-  if (byDay.size === 0) return null;
-  const latestDay = Math.max(...byDay.keys());
-  const value = byDay.get(latestDay) as number;
-  const baseline = median([...byDay.values()]) || value;
+  const byNight = nightlyAverage(samples);
+  if (byNight.size === 0) return null;
+  const latestNight = Math.max(...byNight.keys());
+  const value = byNight.get(latestNight) as number;
+  const baseline = median(baselineNights([...byNight.entries()])) || value;
   return { value, baseline, delta: value - baseline };
 }
 
-/** Per-day MEDIAN series (oldest first) — the trend counterpart of
- * {@link dailyMedianByDay}, for metrics shown as a nightly/daily aggregate. */
-export function dailyMedianSeries(samples: InstantSample[]): TrendPoint[] {
-  return [...dailyMedianByDay(samples).entries()]
+/** Per-night average series (oldest first) — the trend counterpart of
+ * {@link nightlyAverage}, for metrics shown as a nightly aggregate. */
+export function nightlyAverageSeries(samples: InstantSample[]): TrendPoint[] {
+  return [...nightlyAverage(samples).entries()]
     .sort((a, b) => a[0] - b[0])
-    .map(([day, value]) => ({ time: day * DAY_MS, value }));
+    .map(([night, value]) => ({ time: nightIndexToTime(night), value }));
 }
 
 /**
@@ -232,17 +294,17 @@ export function dailyStats(
 ): { time: number; median: number; min: number; max: number }[] {
   const primary = primarySource(samples);
   const src = primary ? samples.filter(s => s.source === primary) : samples;
-  const byDay = new Map<number, number[]>();
+  const byNight = new Map<number, number[]>();
   for (const s of src) {
-    const day = Math.floor(s.time / DAY_MS);
-    const arr = byDay.get(day);
+    const night = nightIndex(s.time);
+    const arr = byNight.get(night);
     if (arr) arr.push(s.value);
-    else byDay.set(day, [s.value]);
+    else byNight.set(night, [s.value]);
   }
-  return [...byDay.entries()]
+  return [...byNight.entries()]
     .sort((a, b) => a[0] - b[0])
-    .map(([day, vals]) => ({
-      time: day * DAY_MS,
+    .map(([night, vals]) => ({
+      time: nightIndexToTime(night),
       median: median(vals),
       min: Math.min(...vals),
       max: Math.max(...vals),
@@ -535,6 +597,19 @@ export function weeklyGoalHistory(
     const complete = weekEnd <= now;
     const activities = activitiesInWindow(raw.exercise, weekStart, to);
     const energy = dailyEnergyInWindow(raw, weekStart, to);
+    // One tracked total per day (Mon→Sun) so the Week tile can draw per-day
+    // bars. Reuses trackedForWindow, so a day's number can never disagree with
+    // the week's — the week is just these seven summed.
+    const dailyTracked = Array.from({ length: 7 }, (_, d) => {
+      const dayStart = weekStart + d * DAY_MS;
+      return trackedForWindow(
+        raw.exercise,
+        raw.steps,
+        raw.activeEnergy,
+        dayStart,
+        Math.min(dayStart + DAY_MS, to),
+      );
+    });
     out.push({
       weekStart,
       complete,
@@ -546,6 +621,7 @@ export function weeklyGoalHistory(
         weekStart,
         to,
       ),
+      dailyTracked,
       energy,
       coverage: {
         steps: raw.steps.some(s => s.end > weekStart && s.start < to),
@@ -754,11 +830,171 @@ export function cardioFromExercise(
   };
 }
 
-/** Most recent sleep session (dedup keeps the trusted source per night). */
-function lastSleep(sleep: SleepRecord[]): SleepRecord | null {
-  const deduped = dedupeIntervals(sleep);
-  if (deduped.length === 0) return null;
-  return deduped.reduce((a, b) => (b.end > a.end ? b : a));
+/** Sessions closer together than this are one interrupted sleep period; further
+ * apart they are separate (a nap vs the night). */
+const SLEEP_MERGE_GAP_MS = 3 * 60 * 60 * 1000;
+
+/** Add `b`'s stage minutes into `a`. */
+function addStages(a: SleepStages, b: SleepStages): SleepStages {
+  return {
+    deepMin: a.deepMin + b.deepMin,
+    remMin: a.remMin + b.remMin,
+    lightMin: a.lightMin + b.lightMin,
+    awakeMin: a.awakeMin + b.awakeMin,
+  };
+}
+
+/**
+ * Collapse the deduped sessions into sleep PERIODS: consecutive sessions less
+ * than {@link SLEEP_MERGE_GAP_MS} apart are one night, summed.
+ *
+ * Sources routinely write a single night as several SleepSession records — one
+ * per uninterrupted block, split around a long wake-up. Treating each record as
+ * a whole night made the app show only one block of an interrupted night, which
+ * is the bulk of why our total ran short of the source app's. Merging on the gap
+ * (rather than bucketing by clock time) also keeps an afternoon nap out of the
+ * night's total, since it is hours away from it.
+ */
+export function sleepPeriods(sleep: SleepRecord[]): SleepRecord[] {
+  const sorted = [...dedupeIntervals(sleep)].sort((a, b) => a.start - b.start);
+  const out: SleepRecord[] = [];
+  for (const rec of sorted) {
+    const prev = out[out.length - 1];
+    if (prev && rec.start - prev.end < SLEEP_MERGE_GAP_MS) {
+      // Stage totals only exist for the sessions that reported them; a session
+      // without stages still contributes its asleep minutes, so fold those into
+      // light — the same "asleep but unclassified" rule the adapters apply.
+      const merged: SleepStages | null =
+        prev.stages && rec.stages
+          ? addStages(prev.stages, rec.stages)
+          : prev.stages
+            ? {
+                ...prev.stages,
+                lightMin: prev.stages.lightMin + rec.durationMin,
+              }
+            : rec.stages
+              ? {
+                  ...rec.stages,
+                  lightMin: rec.stages.lightMin + prev.durationMin,
+                }
+              : null;
+      out[out.length - 1] = {
+        start: Math.min(prev.start, rec.start),
+        end: Math.max(prev.end, rec.end),
+        durationMin: prev.durationMin + rec.durationMin,
+        source: prev.source,
+        stages: merged,
+      };
+    } else {
+      out.push(rec);
+    }
+  }
+  return out;
+}
+
+/** How far back "last night" can reach — enough for someone opening the app late
+ * in the evening, without pulling in the night before that. */
+const LAST_SLEEP_WINDOW_MS = 36 * 60 * 60 * 1000;
+
+/**
+ * The night the app calls "last night": the LONGEST sleep period to end within
+ * {@link LAST_SLEEP_WINDOW_MS}, falling back to the most recent period when
+ * nothing is that fresh.
+ *
+ * Not simply the latest-ending session, which was wrong twice over: it showed
+ * one block of a night written as several sessions, and it let a twenty-minute
+ * afternoon nap replace the previous night's seven hours purely because the nap
+ * ends later.
+ */
+function lastSleep(
+  sleep: SleepRecord[],
+  now: number,
+  agg?: { night: number; minutes: number }[] | null,
+): SleepRecord | null {
+  const byNight = mainSleepByNight(sleep, agg);
+  const periods = [...byNight.values()].sort((a, b) => a.end - b.end);
+  if (periods.length === 0) return null;
+  const longest = (xs: SleepRecord[]) =>
+    xs.reduce((a, b) => (b.durationMin > a.durationMin ? b : a));
+  const recent = periods.filter(p => now - p.end <= LAST_SLEEP_WINDOW_MS);
+  return recent.length > 0 ? longest(recent) : periods[periods.length - 1];
+}
+
+/**
+ * Raise a night's duration to the platform's own total, crediting the difference
+ * to light sleep so the stage split still adds up to what is shown.
+ *
+ * A FLOOR, never a ceiling. Health Connect's SLEEP_DURATION_TOTAL subtracts all
+ * wake, including the brief arousals the app (and Google Health's own display)
+ * count inside the sleep period, so it legitimately reads lower than what we
+ * show — letting it pull the number down would reintroduce the short night. It
+ * is still worth having as a floor: if the platform counts MORE sleep for a
+ * night than we assembled, we are missing a session and should not under-report.
+ *
+ * Light is where the difference goes because that is what it is: sleep the
+ * platform counted and our stage mapping did not classify — the same rule the
+ * adapter applies to unlabelled time inside a session.
+ */
+function withPlatformTotal(period: SleepRecord, minutes: number): SleepRecord {
+  const delta = minutes - period.durationMin;
+  if (delta < 1) return period;
+  return {
+    ...period,
+    durationMin: minutes,
+    stages: period.stages
+      ? {
+          ...period.stages,
+          lightMin: Math.max(0, period.stages.lightMin + delta),
+        }
+      : period.stages,
+  };
+}
+
+/**
+ * One record per night, keyed by night index — every sleep period the night
+ * contains, SUMMED, then reconciled against the platform's own nightly total
+ * when the read provided one.
+ *
+ * Summing (rather than picking the night's longest period) is what Health
+ * Connect does over the same window, and it is the second half of the fix for a
+ * night reading short: periods too far apart for `sleepPeriods` to merge used to
+ * be dropped entirely, taking their minutes — and their light sleep — with them.
+ * An afternoon nap does not inflate the night it follows: `nightIndex` cuts at
+ * local noon, so it opens the next night's bucket.
+ */
+function mainSleepByNight(
+  sleep: SleepRecord[],
+  agg?: { night: number; minutes: number }[] | null,
+): Map<number, SleepRecord> {
+  const byNight = new Map<number, SleepRecord>();
+  for (const p of sleepPeriods(sleep)) {
+    const night = nightIndex(p.end);
+    const cur = byNight.get(night);
+    if (!cur) {
+      byNight.set(night, p);
+      continue;
+    }
+    byNight.set(night, {
+      start: Math.min(cur.start, p.start),
+      end: Math.max(cur.end, p.end),
+      durationMin: cur.durationMin + p.durationMin,
+      source: cur.source,
+      stages:
+        cur.stages && p.stages
+          ? addStages(cur.stages, p.stages)
+          : cur.stages
+            ? { ...cur.stages, lightMin: cur.stages.lightMin + p.durationMin }
+            : p.stages
+              ? { ...p.stages, lightMin: p.stages.lightMin + cur.durationMin }
+              : null,
+    });
+  }
+  if (!agg) return byNight;
+  for (const { night, minutes } of agg) {
+    const period = byNight.get(night);
+    if (period) byNight.set(night, withPlatformTotal(period, minutes));
+  }
+  return byNight;
 }
 
 const SLEEP_NEED_MIN = 8 * 60;
@@ -778,22 +1014,41 @@ const SLEEP_NEED_MIN = 8 * 60;
 export function readiness(
   hrv: MetricWithBaseline | null,
   restingHr: MetricWithBaseline | null,
-  sleep: { performancePct: number } | null,
+  sleep: { performancePct: number; hours?: number } | null,
 ): ReadinessMetric | null {
   if (!hrv && !restingHr) return null;
 
-  const parts: { score: number; weight: number }[] = [];
+  const parts: ReadinessContribution[] = [];
   if (hrv && hrv.baseline > 0) {
     // ±20% around baseline maps to 0..100, centered at 65.
     const ratio = (hrv.value - hrv.baseline) / hrv.baseline;
-    parts.push({ score: clamp(65 + ratio * 175), weight: 0.5 });
+    parts.push({
+      key: 'hrv',
+      value: hrv.value,
+      reference: hrv.baseline,
+      score: clamp(65 + ratio * 175),
+      weight: 0.5,
+    });
   }
   if (restingHr && restingHr.baseline > 0) {
     const ratio = (restingHr.baseline - restingHr.value) / restingHr.baseline;
-    parts.push({ score: clamp(65 + ratio * 300), weight: 0.3 });
+    parts.push({
+      key: 'rhr',
+      value: restingHr.value,
+      reference: restingHr.baseline,
+      score: clamp(65 + ratio * 300),
+      weight: 0.3,
+    });
   }
   if (sleep) {
-    parts.push({ score: clamp(sleep.performancePct), weight: 0.2 });
+    parts.push({
+      key: 'sleep',
+      value:
+        sleep.hours ?? (sleep.performancePct / 100) * (SLEEP_NEED_MIN / 60),
+      reference: SLEEP_NEED_MIN / 60,
+      score: clamp(sleep.performancePct),
+      weight: 0.2,
+    });
   }
 
   const totalWeight = parts.reduce((s, p) => s + p.weight, 0);
@@ -802,7 +1057,13 @@ export function readiness(
   );
   const state: ReadinessMetric['state'] =
     pct >= 66 ? 'Recovered' : pct >= 34 ? 'Balanced' : 'Strained';
-  return { pct, state };
+  // Renormalise the shares over the inputs we actually had, so what the UI
+  // prints ("50% of score") is the weight that was really applied.
+  const contributors = parts.map(p => ({
+    ...p,
+    weight: p.weight / totalWeight,
+  }));
+  return { pct, state, contributors };
 }
 
 function clamp(n: number, lo = 0, hi = 100): number {
@@ -878,16 +1139,52 @@ export function dailyEnergyInWindow(
     const eaten = meals.length
       ? Math.round(meals.reduce((s, e) => s + (e.kcal ?? 0), 0))
       : null;
-    const buckets = burnRecords.filter(
-      e => e.start >= dayStart && e.start < dayEnd,
-    );
-    const burned = buckets.length
-      ? Math.round(buckets.reduce((s, e) => s + e.kcal, 0))
-      : null;
+    // Prefer the platform's own per-day total (see dailyBurnedAgg) — the record
+    // sum is the fallback for reads without it (iOS, tests, aggregate failure).
+    const burned =
+      burnedFromAgg(raw.dailyBurnedAgg, dayStart, dayEnd) ??
+      sumRecords(burnRecords, dayStart, dayEnd);
     const net = eaten != null && burned != null ? eaten - burned : null;
     out.push({ dayStart, eaten, burned, net });
   }
   return out;
+}
+
+/** Sum energy records that START inside the window; null when there are none. */
+function sumRecords(
+  records: EnergyRecord[],
+  from: number,
+  to: number,
+): number | null {
+  const buckets = records.filter(e => e.start >= from && e.start < to);
+  return buckets.length
+    ? Math.round(buckets.reduce((s, e) => s + e.kcal, 0))
+    : null;
+}
+
+/**
+ * The platform's per-day burned total for a window, or null when it has none.
+ *
+ * The aggregate buckets on LOCAL calendar days while these windows are UTC-day
+ * aligned, so the two grids are offset by the timezone. Match on greatest
+ * OVERLAP rather than on an exact boundary, and require more than half a day of
+ * it so a given aggregate day is only ever credited to one window.
+ */
+function burnedFromAgg(
+  agg: { dayStart: number; kcal: number }[] | null | undefined,
+  from: number,
+  to: number,
+): number | null {
+  if (!agg || agg.length === 0) return null;
+  let best: { kcal: number; overlap: number } | null = null;
+  for (const day of agg) {
+    const overlap =
+      Math.min(to, day.dayStart + DAY_MS) - Math.max(from, day.dayStart);
+    if (overlap > DAY_MS / 2 && (!best || overlap > best.overlap)) {
+      best = { kcal: day.kcal, overlap };
+    }
+  }
+  return best ? best.kcal : null;
 }
 
 /**
@@ -920,14 +1217,11 @@ export function dailySeries(samples: InstantSample[]): TrendPoint[] {
 }
 
 /** Per-night sleep hours (deduped, one session per night), oldest first. */
-export function sleepHoursSeries(sleep: SleepRecord[]): TrendPoint[] {
-  const byDay = new Map<number, SleepRecord>();
-  for (const s of dedupeIntervals(sleep)) {
-    const day = Math.floor(s.end / DAY_MS);
-    const cur = byDay.get(day);
-    if (!cur || s.end > cur.end) byDay.set(day, s);
-  }
-  return [...byDay.values()]
+export function sleepHoursSeries(
+  sleep: SleepRecord[],
+  agg?: { night: number; minutes: number }[] | null,
+): TrendPoint[] {
+  return [...mainSleepByNight(sleep, agg).values()]
     .sort((a, b) => a.end - b.end)
     .map(s => ({
       time: s.end,
@@ -936,42 +1230,68 @@ export function sleepHoursSeries(sleep: SleepRecord[]): TrendPoint[] {
 }
 
 /**
- * Per-night sleep QUALITY (efficiency %) — time actually asleep as a share of
- * the whole session (deep+REM+light ÷ including awake), from the stage
- * breakdown. This is distinct from sleep *length*: a long but restless night
- * scores low. Only nights whose source reported stages produce a point (else we
- * cannot judge quality, never guess). Oldest first.
+ * A full night's worth of DEEP and REM sleep, in minutes — the reference the
+ * quality score is graded against. These are the middle of the normal adult
+ * ranges (deep ~13–23% of the night, REM ~20–25%) applied to the 8h sleep need,
+ * so "100%" means a full night that also had a full night's restorative sleep.
  */
-export function sleepQualitySeries(sleep: SleepRecord[]): TrendPoint[] {
+const DEEP_TARGET_MIN = 0.2 * SLEEP_NEED_MIN; // 96 min
+const REM_TARGET_MIN = 0.22 * SLEEP_NEED_MIN; // ~105 min
+
+/**
+ * Sleep quality 0–100 — NON-CLINICAL, the same kind of disclosed blend as the
+ * readiness heuristic (ADR-004):
+ *   • length vs the 8h need           (weight 0.5)
+ *   • deep sleep vs a full night's    (weight 0.25)
+ *   • REM sleep vs a full night's     (weight 0.25)
+ *
+ * Graded on ABSOLUTE minutes, not on each stage's share of the night. That is
+ * the point: a short night yields less deep and REM in absolute terms, and the
+ * score has to fall for it. Scoring shares instead would let a bad night keep a
+ * high mark just for having normal proportions.
+ *
+ * This replaces sleep EFFICIENCY (time asleep ÷ time in bed), which stopped
+ * discriminating once brief arousals were counted inside the sleep period —
+ * every night scored ~98%, including six-hour ones.
+ */
+export function sleepQualityScore(
+  durationMin: number,
+  stages: SleepStages,
+): number {
+  const lengthScore = clamp((durationMin / SLEEP_NEED_MIN) * 100);
+  const deepScore = clamp((stages.deepMin / DEEP_TARGET_MIN) * 100);
+  const remScore = clamp((stages.remMin / REM_TARGET_MIN) * 100);
+  return Math.round(lengthScore * 0.5 + deepScore * 0.25 + remScore * 0.25);
+}
+
+/**
+ * Per-night sleep QUALITY (see {@link sleepQualityScore}) — how restorative the
+ * night was, distinct from its length alone. Only nights whose source reported
+ * stages produce a point (without them we cannot judge quality, and never
+ * guess). Oldest first.
+ */
+export function sleepQualitySeries(
+  sleep: SleepRecord[],
+  agg?: { night: number; minutes: number }[] | null,
+): TrendPoint[] {
   const staged = sleep.filter(s => s.stages);
-  const byDay = new Map<number, SleepRecord>();
-  for (const s of dedupeIntervals(staged)) {
-    const day = Math.floor(s.end / DAY_MS);
-    const cur = byDay.get(day);
-    if (!cur || s.end > cur.end) byDay.set(day, s);
-  }
-  return [...byDay.values()]
+  return [...mainSleepByNight(staged, agg).values()]
     .sort((a, b) => a.end - b.end)
-    .map(s => {
-      const st = s.stages as SleepStages;
-      const asleep = st.deepMin + st.remMin + st.lightMin;
-      const total = asleep + st.awakeMin;
-      return {
-        time: s.end,
-        value: total > 0 ? Math.round((asleep / total) * 100) : 0,
-      };
-    });
+    .map(s => ({
+      time: s.end,
+      value: sleepQualityScore(s.durationMin, s.stages as SleepStages),
+    }));
 }
 
 /** Per-day readiness, computed from that day's HRV/RHR vs the 30-day baseline
  * plus that night's sleep. Only days with HRV or RHR produce a point. */
 export function readinessSeries(raw: RawHealthData): TrendPoint[] {
   // HRV uses nightly MEDIANs (per {@link hrvMetric}); RHR stays latest-per-day.
-  const hrvDay = dailyMedianByDay(raw.hrvRmssd);
-  const hrvBase = median([...hrvDay.values()]);
+  const hrvDay = nightlyAverage(raw.hrvRmssd);
+  const hrvBase = median(baselineNights([...hrvDay.entries()]));
   const rhrBase = dailyBaseline(raw.restingHr);
   const toDayMap = (pts: TrendPoint[]) =>
-    new Map(pts.map(p => [Math.floor(p.time / DAY_MS), p.value]));
+    new Map(pts.map(p => [nightIndex(p.time), p.value]));
   const rhrDay = toDayMap(dailySeries(raw.restingHr));
   const sleepDay = toDayMap(sleepHoursSeries(raw.sleep));
 
@@ -996,7 +1316,7 @@ export function readinessSeries(raw: RawHealthData): TrendPoint[] {
         ? { performancePct: clamp(((sh * 60) / SLEEP_NEED_MIN) * 100) }
         : null;
     const r = readiness(hrv, rhr, sleep);
-    if (r) out.push({ time: day * DAY_MS, value: r.pct });
+    if (r) out.push({ time: nightIndexToTime(day), value: r.pct });
   }
   return out;
 }
@@ -1032,18 +1352,18 @@ export function rollingRange(
 
 /** Build every metric's daily history for the Trends screen. */
 export function buildTrendSeries(raw: RawHealthData): TrendSeries {
-  // HRV line = nightly MEDIAN (matches the wearable app, robust to awake-period
-  // spikes). RHR line = the daily resting value. Both get a ROLLING min/max band
+  // HRV line = nightly AVERAGE (matches the wearable app). RHR line = the daily
+  // resting value. Both get a ROLLING min/max band
   // (see {@link rollingRange}) rather than an intraday spread.
-  const hrv = dailyMedianSeries(raw.hrvRmssd);
+  const hrv = nightlyAverageSeries(raw.hrvRmssd);
   const restingHr = dailySeries(raw.restingHr);
   return {
     hrv,
     hrvRange: rollingRange(hrv),
     restingHr,
     rhrRange: rollingRange(restingHr),
-    sleepHours: sleepHoursSeries(raw.sleep),
-    sleepQuality: sleepQualitySeries(raw.sleep),
+    sleepHours: sleepHoursSeries(raw.sleep, raw.nightlySleepAgg),
+    sleepQuality: sleepQualitySeries(raw.sleep, raw.nightlySleepAgg),
     readiness: readinessSeries(raw),
     weight: dailySeries(raw.weight),
     bodyFat: dailySeries(raw.bodyFat),
@@ -1081,21 +1401,48 @@ function spliceByKey<T>(
 
 /**
  * Merge a cached deep-history read with a fresh recent read into one
- * RawHealthData for {@link deriveSnapshot}. The cheap, wide metrics (HRV, RHR,
- * sleep, weight, body-fat, nutrition) are taken entirely from `recent` — the
- * light refresh still fetches those at full 30-day depth. The heavy, sequential
- * exercise/steps/energy arrays are SPLICED: `history` supplies everything before
- * `cutoff`, `recent` supplies `cutoff`→now, de-duplicated by natural key so no
- * session or day is double-counted. This is what lets a routine refresh pull
- * only the recent slice yet still derive the full 12-week history.
+ * RawHealthData for {@link deriveSnapshot}. EVERY time-series array is SPLICED:
+ * `history` supplies everything before its cutoff, `recent` supplies cutoff→now,
+ * de-duplicated by natural key so no session, sample or day is double-counted.
+ * This is what lets a routine refresh read only the last few days yet still
+ * derive the full history — six months of daily metrics and twelve weeks of
+ * exercise — without re-paginating any of it.
+ *
+ * The two cutoffs differ because the two groups are fetched over different spans
+ * (LIGHT_WINDOWS): `cutoff` covers the heavy exercise/steps/energy slice,
+ * `metricsCutoff` the short daily-metrics slice. Each must be no older than the
+ * span its group was actually read over, or the splice leaves a hole.
  */
 export function mergeRaw(
   history: RawHealthData,
   recent: RawHealthData,
   cutoff: number,
+  metricsCutoff: number = cutoff,
 ): RawHealthData {
+  const sampleKey = (s: InstantSample) => `${s.time}|${s.source}`;
+  const spliceSamples = (h: InstantSample[], r: InstantSample[]) =>
+    spliceByKey(h, r, metricsCutoff, s => s.time, sampleKey);
   return {
     ...recent,
+    hrvRmssd: spliceSamples(history.hrvRmssd, recent.hrvRmssd),
+    restingHr: spliceSamples(history.restingHr, recent.restingHr),
+    weight: spliceSamples(history.weight, recent.weight),
+    bodyFat: spliceSamples(history.bodyFat, recent.bodyFat),
+    sleep: spliceByKey(
+      history.sleep,
+      recent.sleep,
+      metricsCutoff,
+      s => s.start,
+      s => `${s.start}|${s.end}|${s.source}`,
+    ),
+    nutrition: spliceByKey(
+      history.nutrition,
+      recent.nutrition,
+      metricsCutoff,
+      n => n.start,
+      // The source's own record id when it gave one; otherwise the natural key.
+      n => n.id ?? `${n.start}|${n.name}|${n.source}`,
+    ),
     exercise: spliceByKey(
       history.exercise,
       recent.exercise,
@@ -1129,6 +1476,37 @@ export function mergeRaw(
   };
 }
 
+/**
+ * Drop everything older than `days` from a merged read, so the cache the app
+ * carries forward stays bounded. `mergeRaw` deliberately keeps history the
+ * latest fetch no longer covers — that is how the HRV series grows past its
+ * 30-day read window — and this is the other half of that deal: the horizon the
+ * app can actually display (the longest Trends range) is also its ceiling.
+ */
+export function pruneRaw(
+  raw: RawHealthData,
+  now: number,
+  days: number,
+): RawHealthData {
+  const from = now - days * DAY_MS;
+  const keepInstant = (xs: InstantSample[]) => xs.filter(x => x.time >= from);
+  const keepFrom = <T extends { start: number }>(xs: T[]) =>
+    xs.filter(x => x.start >= from);
+  return {
+    ...raw,
+    hrvRmssd: keepInstant(raw.hrvRmssd),
+    restingHr: keepInstant(raw.restingHr),
+    weight: keepInstant(raw.weight),
+    bodyFat: keepInstant(raw.bodyFat),
+    sleep: keepFrom(raw.sleep),
+    nutrition: keepFrom(raw.nutrition),
+    steps: keepFrom(raw.steps),
+    exercise: keepFrom(raw.exercise),
+    activeEnergy: keepFrom(raw.activeEnergy),
+    totalEnergy: keepFrom(raw.totalEnergy),
+  };
+}
+
 /** Derive the full snapshot the UI consumes from one raw read. */
 export function deriveSnapshot(
   raw: RawHealthData,
@@ -1144,7 +1522,7 @@ export function deriveSnapshot(
     : null;
   const restingHr = metricWithBaseline(raw.restingHr);
 
-  const lastSleepSession = lastSleep(raw.sleep);
+  const lastSleepSession = lastSleep(raw.sleep, now, raw.nightlySleepAgg);
   const sleep = lastSleepSession
     ? {
         hours: lastSleepSession.durationMin / 60,

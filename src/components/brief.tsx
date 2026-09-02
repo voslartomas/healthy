@@ -1,10 +1,14 @@
 /**
  * Shared primitives for the v3 "data brief" layout (HealthApp v3.dc.html).
  *
- * The design is a flat editorial sheet — no cards. Screens are a scrolling
- * column of numbered sections (01 / 02 / 03) divided by hairlines, headed by a
- * mono eyebrow row and, usually, one oversized mono hero number. These pieces
- * encode that vocabulary so each screen stays declarative.
+ * The design is a scrolling column of cards on a cool page ground: each section
+ * is a `card`-filled block outlined in a `hair` hairline, 10px radius, 16/18
+ * padding, separated by a 12px gap. Titles are Archivo ExtraBold; every number,
+ * label and eyebrow is Oswald, uppercase. These pieces encode that vocabulary so
+ * each screen stays declarative.
+ *
+ * (The previous revision was a flat editorial sheet with numbered 01/02/03
+ * sections and hairline rules — hence no `n` prop here any more.)
  */
 import { HeaderHeightContext } from '@react-navigation/elements';
 import React from 'react';
@@ -21,8 +25,9 @@ import {
   ViewStyle,
 } from 'react-native';
 
+import { Palette } from '../theme/colors';
 import { mono, sans, Weight } from '../theme/fonts';
-import { useTheme } from '../theme/theme';
+import { card as cardGeom, useTheme } from '../theme/theme';
 
 /** Build a text style from a family + size, with optional line-height,
  * letter-spacing, colour and uppercasing. Keeps one-off labels terse. */
@@ -38,11 +43,11 @@ export function txt(
   } = {},
 ): TextStyle {
   const s: TextStyle = { fontFamily: family, fontSize: size };
-  // iOS clips the top of tall glyphs (caps, accents) in some custom faces — most
-  // visibly Hanken Grotesk ExtraBold — when no lineHeight is set and layout falls
-  // back to the font's own slightly-too-tight metrics. Default to a roomy line
-  // box so ascenders are never cut; callers pass an explicit `lh` when they need
-  // a precise rhythm (e.g. the oversized hero numbers), and that always wins.
+  // iOS clips the top of tall glyphs (caps, accents) in some custom faces when
+  // no lineHeight is set and layout falls back to the font's own slightly-too-
+  // tight metrics. Default to a roomy line box so ascenders are never cut;
+  // callers pass an explicit `lh` when they need a precise rhythm (e.g. the
+  // oversized hero numbers), and that always wins.
   s.lineHeight = opts.lh ?? Math.ceil(size * 1.3);
   if (opts.ls != null) s.letterSpacing = opts.ls;
   if (opts.color != null) s.color = opts.color;
@@ -53,7 +58,7 @@ export function txt(
 
 /** Convenience wrappers so screens read `M(700, 10, …)` / `S(800, 16, …)`.
  * IMPORTANT: only `fontFamily` is set — the weight-specific family (e.g.
- * `HankenGrotesk_700Bold`) already carries the weight. Do NOT add `fontWeight`
+ * `Archivo_700Bold`) already carries the weight. Do NOT add `fontWeight`
  * here: on iOS, pairing a weighted custom family with `fontWeight` makes the
  * face fail to resolve and silently fall back to the system font. */
 export const M = (
@@ -72,8 +77,30 @@ export const S = (
  * mobile layout never stretches edge-to-edge. */
 export const BRIEF_MAX_WIDTH = 440;
 
-/** Paper-backed scrolling screen body with the v3 padding, centered and capped
- * to a phone-width column on wide screens. */
+/** Horizontal gutter of the card column (the design's `padding: 4px 22px`). */
+export const BRIEF_GUTTER = 22;
+
+/** The card title face — Archivo ExtraBold 16, used by {@link Card} and by the
+ * few screens that head a block without wrapping it in one. */
+export function cardTitleStyle(ink: string): TextStyle {
+  return S(800, 16, { ls: -0.16, color: ink });
+}
+
+/** Shared field styling for the design's text inputs: hairline box on the page
+ * ground, 12px radius, 12/14 padding. */
+export function inputStyle(c: Palette): ViewStyle {
+  return {
+    borderWidth: 1,
+    borderColor: c.hair,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: c.bg,
+  };
+}
+
+/** Page-ground scrolling screen body with the v3 gutter, centered and capped to
+ * a phone-width column on wide screens. */
 export function BriefScreen({
   children,
   scrollRef,
@@ -113,7 +140,7 @@ export function BriefScreen({
           style={{
             width: '100%',
             maxWidth: BRIEF_MAX_WIDTH,
-            paddingHorizontal: 24,
+            paddingHorizontal: BRIEF_GUTTER,
           }}
         >
           {children}
@@ -154,35 +181,56 @@ export function BriefHeader({
   );
 }
 
+/** A free-standing mono label above a card ("OVERNIGHT VITALS"). */
+export function GroupLabel({
+  children,
+  style,
+}: {
+  children: React.ReactNode;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const c = useTheme().colors;
+  return (
+    <View style={[styles.groupLabel, style]}>
+      <Text style={M(700, 10, { ls: 2, upper: true, color: c.fnt })}>
+        {children}
+      </Text>
+    </View>
+  );
+}
+
 export interface PillSpec {
   text: string;
   /** Dot colour before the text; omit for no dot. */
   dot?: string;
-  /** Fill; omit for a hairline-outlined pill. */
-  bg?: string;
+  /** Fill; defaults to the tinted `pillBg`. Pass `null` for a hairline outline. */
+  bg?: string | null;
   textColor?: string;
 }
 
-/** Small rounded status pill (ink fill or hairline outline). */
-export function Pill({ spec }: { spec: PillSpec }) {
-  const t = useTheme();
-  const outlined = spec.bg == null;
+/** Small rounded status pill — a tinted fill by default, hairline when `bg` is
+ * explicitly null. `small` is the tighter variant the Today "Body & fuel" rows
+ * use (9.5px text, 4/8 padding) so the trailing pill sits inside a metric row
+ * without crowding it. */
+export function Pill({ spec, small }: { spec: PillSpec; small?: boolean }) {
+  const c = useTheme().colors;
+  const outlined = spec.bg === null;
   return (
     <View
       style={[
-        styles.pill,
+        small ? styles.pillSmall : styles.pill,
         outlined
-          ? { borderWidth: 1, borderColor: t.colors.hair }
-          : { backgroundColor: spec.bg },
+          ? { borderWidth: 1, borderColor: c.hair }
+          : { backgroundColor: spec.bg ?? c.pillBg },
       ]}
     >
       {spec.dot ? (
         <View style={[styles.pillDot, { backgroundColor: spec.dot }]} />
       ) : null}
       <Text
-        style={M(700, 10.5, {
-          ls: 1,
-          color: spec.textColor ?? (outlined ? t.colors.fnt : t.colors.inv),
+        style={M(700, small ? 9.5 : 10.5, {
+          ls: small ? 0.3 : 1,
+          color: spec.textColor ?? (outlined ? c.fnt : c.pillText),
         })}
       >
         {spec.text}
@@ -191,41 +239,118 @@ export function Pill({ spec }: { spec: PillSpec }) {
   );
 }
 
-/** The oversized mono hero number with an optional unit suffix, status pill and
- * caption. Becomes a button when `onPress` is set (e.g. tap → Recovery). */
+/**
+ * A section card: the design's `background:card; border:1px hair; radius:10;
+ * padding:16px 18px` block. `title` renders the Archivo ExtraBold heading with
+ * an optional `right` slot; `flush` drops the padding so edge-to-edge media can
+ * sit inside; `first` uses the tighter top gap the first card gets under the
+ * native header.
+ */
+export function Card({
+  title,
+  right,
+  onTitlePress,
+  onPress,
+  first,
+  flush,
+  children,
+  style,
+  accessibilityLabel,
+}: {
+  title?: string;
+  right?: React.ReactNode;
+  /** Tap target on the title row only (e.g. "Fuel →"). */
+  onTitlePress?: () => void;
+  /** Makes the whole card a button (e.g. the Today sleep card). */
+  onPress?: () => void;
+  first?: boolean;
+  flush?: boolean;
+  children?: React.ReactNode;
+  style?: StyleProp<ViewStyle>;
+  accessibilityLabel?: string;
+}) {
+  const c = useTheme().colors;
+  const header = title ? (
+    <View style={styles.cardTitleRow}>
+      <Text style={cardTitleStyle(c.ink)}>{title}</Text>
+      {right}
+    </View>
+  ) : null;
+  const body = (
+    <>
+      {onTitlePress && header ? (
+        <Pressable onPress={onTitlePress}>{header}</Pressable>
+      ) : (
+        header
+      )}
+      {children}
+    </>
+  );
+  const shell = [
+    styles.card,
+    {
+      backgroundColor: c.card,
+      borderColor: c.hair,
+      marginTop: first ? cardGeom.firstGap : cardGeom.gap,
+    },
+    flush ? styles.cardFlush : null,
+    style,
+  ];
+  if (onPress) {
+    return (
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+        style={shell}
+      >
+        {body}
+      </Pressable>
+    );
+  }
+  return <View style={shell}>{body}</View>;
+}
+
+/**
+ * The oversized mono hero number with an optional unit suffix, status pill and
+ * caption, wrapped in its own card. Becomes a button when `onPress` is set
+ * (e.g. tap → Recovery).
+ */
 export function BigStat({
   value,
   suffix,
+  suffixSize = 30,
   valueColor,
   pill,
   caption,
   onPress,
+  first = true,
   accessibilityLabel,
 }: {
   value: string;
   suffix?: string;
+  suffixSize?: number;
   valueColor?: string;
   pill?: PillSpec;
   caption?: string;
   onPress?: () => void;
+  first?: boolean;
   accessibilityLabel?: string;
 }) {
-  const t = useTheme();
+  const c = useTheme().colors;
   const body = (
     <>
       <Text
         style={[
-          styles.big,
-          { color: valueColor ?? t.colors.ink },
-          M(800, 64, { ls: -4 }),
+          { color: valueColor ?? c.ink },
           // lineHeight must stay >= fontSize or iOS clips the tops of the digits
           // (a shorter line box crops the glyph). Keep it snug but not clipping.
-          { lineHeight: 70 },
+          M(700, 64, { ls: -1, lh: 68 }),
         ]}
       >
         {value}
         {suffix ? (
-          <Text style={[M(800, 30, { ls: -1, color: t.colors.fnt })]}>
+          <Text style={M(700, suffixSize, { ls: -0.2, color: c.fnt })}>
             {suffix}
           </Text>
         ) : null}
@@ -236,7 +361,7 @@ export function BigStat({
           {caption ? (
             <Text
               style={[
-                M(700, 10, { ls: 1, upper: true, color: t.colors.fnt }),
+                M(700, 10, { ls: 1, upper: true, color: c.fnt }),
                 { lineHeight: 16, marginTop: 5 },
               ]}
             >
@@ -247,77 +372,24 @@ export function BigStat({
       ) : null}
     </>
   );
+  const cardStyle: ViewStyle = {
+    backgroundColor: c.card,
+    borderColor: c.hair,
+    marginTop: first ? cardGeom.firstGap : cardGeom.gap,
+  };
   if (onPress) {
     return (
       <Pressable
         onPress={onPress}
         accessibilityRole="button"
         accessibilityLabel={accessibilityLabel}
-        style={styles.bigRow}
+        style={[styles.card, styles.bigRow, cardStyle]}
       >
         {body}
       </Pressable>
     );
   }
-  return <View style={styles.bigRow}>{body}</View>;
-}
-
-/** A numbered section (01 / 02 / …) headed by a title, divided by a hairline —
- * a 2px ink rule for the first section, a 1px hairline otherwise. */
-export function Section({
-  n,
-  title,
-  first,
-  titleRight,
-  onTitlePress,
-  children,
-  style,
-}: {
-  n: string;
-  title: string;
-  first?: boolean;
-  titleRight?: React.ReactNode;
-  onTitlePress?: () => void;
-  children?: React.ReactNode;
-  style?: StyleProp<ViewStyle>;
-}) {
-  const t = useTheme();
-  const header = (
-    <View style={styles.sectTitleRow}>
-      <Text style={S(800, 16, { ls: -0.16, color: t.colors.ink })}>
-        {title}
-      </Text>
-      {titleRight}
-    </View>
-  );
-  return (
-    <View
-      style={[
-        styles.section,
-        first
-          ? { borderTopWidth: 2, borderTopColor: t.colors.ink }
-          : { borderTopWidth: 1, borderTopColor: t.colors.hair },
-        style,
-      ]}
-    >
-      <Text
-        style={[
-          M(800, 15, { color: first ? t.colors.acc : t.colors.acc }),
-          styles.sectNum,
-        ]}
-      >
-        {n}
-      </Text>
-      <View style={styles.sectBody}>
-        {onTitlePress ? (
-          <Pressable onPress={onTitlePress}>{header}</Pressable>
-        ) : (
-          header
-        )}
-        {children}
-      </View>
-    </View>
-  );
+  return <View style={[styles.card, styles.bigRow, cardStyle]}>{body}</View>;
 }
 
 export interface QuadItem {
@@ -329,22 +401,17 @@ export interface QuadItem {
 
 /** A four-up row of mono stats (HRV / RHR / SLEEP / LOAD). */
 export function Quad({ items }: { items: QuadItem[] }) {
-  const t = useTheme();
+  const c = useTheme().colors;
   return (
     <View style={styles.quad}>
       {items.map((it, i) => {
         const inner = (
           <>
-            <Text
-              style={M(800, 20, { ls: -1, color: it.color ?? t.colors.ink })}
-            >
+            <Text style={M(700, 20, { ls: -0.2, color: it.color ?? c.ink })}>
               {it.value}
             </Text>
             <Text
-              style={[
-                M(600, 9, { ls: 1, color: t.colors.fnt }),
-                { lineHeight: 14 },
-              ]}
+              style={[M(600, 9, { ls: 1, color: c.fnt }), { lineHeight: 14 }]}
             >
               {it.label}
             </Text>
@@ -365,13 +432,16 @@ export function Quad({ items }: { items: QuadItem[] }) {
 }
 
 /** A labelled macro/target bar: caption row + track + fill, with an optional
- * target marker line pinned to the right edge. */
+ * target marker line pinned to the right edge. `compact` is the slimmer variant
+ * the Today fuel row uses (9.5px caption, 6px track) so the bars nest under a
+ * metric row rather than heading their own card. */
 export function MacroBar({
   label,
   right,
   fill,
   fillColor,
   marker,
+  compact,
   style,
 }: {
   label: React.ReactNode;
@@ -379,30 +449,107 @@ export function MacroBar({
   fill: number;
   fillColor: string;
   marker?: string;
+  compact?: boolean;
   style?: StyleProp<ViewStyle>;
 }) {
-  const t = useTheme();
+  const c = useTheme().colors;
   const pct = `${Math.max(0, Math.min(1, fill)) * 100}%` as const;
+  const capSize = compact ? 9.5 : 11;
   return (
     <View style={style}>
-      <View style={styles.macroCap}>
-        <Text style={M(700, 11, { color: t.colors.mut })}>{label}</Text>
-        <Text style={M(700, 11, { color: t.colors.ink })}>{right}</Text>
+      <View style={compact ? styles.macroCapCompact : styles.macroCap}>
+        <Text style={M(700, capSize, { color: c.mut })}>{label}</Text>
+        <Text style={M(700, capSize, { color: c.ink })}>{right}</Text>
       </View>
-      <View style={[styles.macroTrack, { backgroundColor: t.colors.track }]}>
+      <View
+        style={[
+          compact ? styles.macroTrackCompact : styles.macroTrack,
+          { backgroundColor: c.track },
+        ]}
+      >
         <View
           style={{
             width: pct,
             height: '100%',
-            borderRadius: 4,
+            borderRadius: compact ? 3 : 4,
             backgroundColor: fillColor,
           }}
         />
         {marker ? (
-          <View style={[styles.macroMarker, { backgroundColor: marker }]} />
+          <View
+            style={[
+              compact ? styles.macroMarkerCompact : styles.macroMarker,
+              { backgroundColor: marker },
+            ]}
+          />
         ) : null}
       </View>
     </View>
+  );
+}
+
+type ButtonKind = 'solid' | 'outline' | 'dashed';
+
+/**
+ * The design's one button shape: a full-width 999-radius pill. `solid` is the
+ * steel-blue call to action (white label in both schemes), `outline` the
+ * hairline secondary, `dashed` the accent "add another" affordance.
+ */
+export function BriefButton({
+  label,
+  onPress,
+  kind = 'solid',
+  disabled,
+  size = 16,
+  fontSize,
+  style,
+  accessibilityLabel,
+}: {
+  label: string;
+  onPress: () => void;
+  kind?: ButtonKind;
+  disabled?: boolean;
+  /** Vertical padding; the design uses 16 for primary, 13 for inline adds. */
+  size?: number;
+  fontSize?: number;
+  style?: StyleProp<ViewStyle>;
+  accessibilityLabel?: string;
+}) {
+  const c = useTheme().colors;
+  const fill =
+    kind === 'solid'
+      ? { backgroundColor: c.accSolid }
+      : kind === 'outline'
+        ? { borderWidth: 1, borderColor: c.hair }
+        : {
+            borderWidth: 1,
+            borderColor: c.acc,
+            borderStyle: 'dashed' as const,
+          };
+  const color =
+    kind === 'solid' ? c.onAccent : kind === 'outline' ? c.ink : c.acc;
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
+      style={[
+        styles.button,
+        fill,
+        { paddingVertical: size, opacity: disabled ? 0.4 : 1 },
+        style,
+      ]}
+    >
+      <Text
+        style={M(700, fontSize ?? (kind === 'solid' ? 13 : 12), {
+          ls: 1,
+          color,
+        })}
+      >
+        {label}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -412,37 +559,40 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'baseline',
   },
+  groupLabel: { marginTop: 20, paddingHorizontal: 2 },
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     alignSelf: 'flex-start',
-    paddingVertical: 5,
-    paddingHorizontal: 10,
+    paddingVertical: 6,
+    paddingHorizontal: 11,
+    borderRadius: 999,
+  },
+  pillSmall: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    alignSelf: 'flex-start',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
     borderRadius: 999,
   },
   pillDot: { width: 7, height: 7, borderRadius: 4 },
-  bigRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 16,
-    marginTop: 6,
+  card: {
+    borderWidth: cardGeom.borderWidth,
+    borderRadius: cardGeom.radius,
+    paddingVertical: cardGeom.paddingVertical,
+    paddingHorizontal: cardGeom.paddingHorizontal,
   },
-  big: {},
-  bigRight: { paddingBottom: 6, flexShrink: 1 },
-  section: {
-    flexDirection: 'row',
-    gap: 14,
-    paddingVertical: 16,
-    marginTop: 4,
-  },
-  sectNum: { flexShrink: 0 },
-  sectBody: { flex: 1, minWidth: 0 },
-  sectTitleRow: {
+  cardFlush: { paddingVertical: 0, paddingHorizontal: 0, overflow: 'hidden' },
+  cardTitleRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'baseline',
   },
+  bigRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 16 },
+  bigRight: { paddingBottom: 6, flexShrink: 1 },
   quad: { flexDirection: 'row', marginTop: 12 },
   quadCell: { flex: 1, gap: 4 },
   macroCap: {
@@ -450,10 +600,21 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 8,
   },
+  macroCapCompact: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 7,
+  },
   macroTrack: {
     position: 'relative',
     height: 8,
     borderRadius: 4,
+    overflow: 'visible',
+  },
+  macroTrackCompact: {
+    position: 'relative',
+    height: 6,
+    borderRadius: 3,
     overflow: 'visible',
   },
   macroMarker: {
@@ -462,5 +623,17 @@ const styles = StyleSheet.create({
     top: -3,
     height: 14,
     width: 2,
+  },
+  macroMarkerCompact: {
+    position: 'absolute',
+    right: 0,
+    top: -3,
+    height: 12,
+    width: 2,
+  },
+  button: {
+    borderRadius: 999,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

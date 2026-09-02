@@ -5,7 +5,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
   BigStat,
   BriefHeader,
+  BRIEF_GUTTER,
   BRIEF_MAX_WIDTH,
+  Card,
+  cardTitleStyle,
   M,
 } from '../../components/brief';
 import {
@@ -17,37 +20,33 @@ import { useAppStore } from '../../state/useAppStore';
 import { useHealthStore } from '../../state/useHealthStore';
 import { useTheme } from '../../theme/theme';
 
-/** A faint numbered placeholder row for the pre-connection skeleton. */
-function SkeletonSection({
-  n,
+/** A faint placeholder card for the pre-connection skeleton — the same card
+ * shape the connected brief uses, with its content greyed to bars. */
+function SkeletonCard({
   title,
   lines,
   first,
 }: {
-  n: string;
   title: string;
   lines: number;
   first?: boolean;
 }) {
-  const t = useTheme();
-  const c = t.colors;
+  const c = useTheme().colors;
   return (
-    <View
-      style={[
-        styles.section,
-        first
-          ? { borderTopWidth: 2, borderTopColor: c.ink }
-          : { borderTopWidth: 1, borderTopColor: c.hair },
-      ]}
-    >
-      <Text style={M(800, 15, { color: c.fnt })}>{n}</Text>
-      <View style={styles.sectionBody}>
-        <Text style={M(800, 16, { color: c.fnt })}>{title}</Text>
+    <Card first={first}>
+      <View style={styles.skelBody}>
+        <Text style={cardTitleStyle(c.fnt)}>{title}</Text>
         {Array.from({ length: lines }).map((_, i) => (
-          <View key={i} style={[styles.skel, { backgroundColor: c.track }]} />
+          <View
+            key={i}
+            style={[
+              styles.skel,
+              { backgroundColor: c.track, height: lines > 2 ? 6 : 8 },
+            ]}
+          />
         ))}
       </View>
-    </View>
+    </Card>
   );
 }
 
@@ -96,13 +95,13 @@ export function WelcomeScreen() {
         <BigStat
           value="—"
           valueColor={c.sand}
-          pill={{ text: 'NOT CONNECTED', dot: c.fnt }}
+          pill={{ text: 'NOT CONNECTED', dot: c.fnt, bg: null }}
           caption="CONNECT A SOURCE TO START"
         />
 
-        <SkeletonSection n="01" title="Body" lines={2} first />
-        <SkeletonSection n="02" title="Fuel" lines={2} />
-        <SkeletonSection n="03" title="Week" lines={3} />
+        <SkeletonCard title="Body" lines={2} />
+        <SkeletonCard title="Fuel" lines={2} />
+        <SkeletonCard title="Week" lines={3} />
 
         <View style={styles.spacer} />
 
@@ -134,11 +133,10 @@ export function WelcomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, paddingHorizontal: 24, alignItems: 'center' },
+  root: { flex: 1, paddingHorizontal: BRIEF_GUTTER, alignItems: 'center' },
   column: { flex: 1, width: '100%', maxWidth: BRIEF_MAX_WIDTH },
-  section: { flexDirection: 'row', gap: 14, paddingVertical: 16, marginTop: 4 },
-  sectionBody: { flex: 1, gap: 11 },
-  skel: { height: 8, borderRadius: 4, marginTop: 3 },
+  skelBody: { gap: 11 },
+  skel: { borderRadius: 4 },
   spacer: { flex: 1, minHeight: 12 },
   cta: {
     borderRadius: 999,

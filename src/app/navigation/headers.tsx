@@ -155,12 +155,16 @@ export function WorkoutRunRight() {
 }
 
 // ── Trends ───────────────────────────────────────────────────────────────────
-export const TrendsTitle = () => <Eyebrow text="Last 30 days" />;
+export function TrendsTitle() {
+  const rangeDays = useTrendsStore(s => s.rangeDays);
+  return <Eyebrow text={`Last ${rangeDays} days`} />;
+}
 export function TrendsRight() {
   const c = useTheme().colors;
   const trends = useHealthStore(s => s.snapshot.trends);
   const activeKey = useTrendsStore(s => s.activeKey);
-  const metrics = buildMetrics(trends);
+  const rangeDays = useTrendsStore(s => s.rangeDays);
+  const metrics = buildMetrics(trends, rangeDays);
   const active = metrics.find(m => m.key === activeKey) ?? metrics[0];
   if (active.delta) return <Status text={active.delta} color={c.acc} />;
   return <Status text="—" color={c.fnt} />;

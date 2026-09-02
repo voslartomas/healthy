@@ -17,9 +17,13 @@ import {
   PillSpec,
   Quad,
   S,
-  Section,
+  Card,
 } from '../../components/brief';
-import { FoodEntryInput, healthSourceName, NutritionSummary } from '../../health';
+import {
+  FoodEntryInput,
+  healthSourceName,
+  NutritionSummary,
+} from '../../health';
 import {
   addCommonFood,
   editCommonFood,
@@ -104,16 +108,16 @@ export function NutritionScreen(_props: ScreenProps) {
 
   // Hero: kcal left toward the goal's daily allowance when possible.
   let heroValue = '—';
-  let heroPill: PillSpec = { text: 'NO FOOD YET', dot: c.fnt };
+  let heroPill: PillSpec = { text: 'NO FOOD YET', dot: c.fnt, bg: null };
   let heroCaption = 'LOG A MEAL TO START';
   if (activeGoal && eaten != null) {
     const left = Math.round(burned + activeGoal.targetNet - eaten);
     heroValue = signed(left).replace('+', '');
-    heroPill = { text: 'KCAL LEFT', bg: c.ink, textColor: c.inv };
+    heroPill = { text: 'KCAL LEFT' };
     heroCaption = `ON TRACK FOR ${signed(activeGoal.targetNet)}`;
   } else if (eaten != null) {
     heroValue = grp(eaten);
-    heroPill = { text: 'KCAL EATEN', bg: c.ink, textColor: c.inv };
+    heroPill = { text: 'KCAL EATEN' };
     heroCaption = hasNet ? `NET ${signed(net)}` : 'NO GOAL SET';
   }
 
@@ -337,14 +341,17 @@ export function NutritionScreen(_props: ScreenProps) {
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 11,
+    // The design fills fields with the page ground so they read as insets in
+    // the card rather than as another raised surface.
+    backgroundColor: c.bg,
   } as const;
 
   return (
     <BriefScreen>
       <BigStat value={heroValue} pill={heroPill} caption={heroCaption} />
 
-      {/* ── 01 Balance ───────────────────────────────────────────────── */}
-      <Section n="01" title="Energy" first>
+      {/* ── Balance ───────────────────────────────────────────────── */}
+      <Card title="Energy" first>
         <Quad
           items={[
             { value: eaten != null ? grp(eaten) : '——', label: 'EATEN' },
@@ -360,10 +367,10 @@ export function NutritionScreen(_props: ScreenProps) {
             },
           ]}
         />
-      </Section>
+      </Card>
 
-      {/* ── 02 Macros ────────────────────────────────────────────────── */}
-      <Section n="02" title="Macros">
+      {/* ── Macros ────────────────────────────────────────────────── */}
+      <Card title="Macros">
         {MACRO_PLAN.map(m => {
           const cur = snap.nutrition ? snap.nutrition[m.key] : null;
           const over = cur != null && m.kind === 'max' && cur > m.target;
@@ -392,13 +399,12 @@ export function NutritionScreen(_props: ScreenProps) {
             />
           );
         })}
-      </Section>
+      </Card>
 
-      {/* ── 03 Common foods ──────────────────────────────────────────── */}
-      <Section
-        n="03"
+      {/* ── Common foods ──────────────────────────────────────────── */}
+      <Card
         title="Common foods"
-        titleRight={
+        right={
           <Pressable
             onPress={openNewCommon}
             accessibilityRole="button"
@@ -441,10 +447,10 @@ export function NutritionScreen(_props: ScreenProps) {
                 }
                 style={[
                   styles.formBtn,
-                  { backgroundColor: c.ink, opacity: cfBusy ? 0.5 : 1 },
+                  { backgroundColor: c.accSolid, opacity: cfBusy ? 0.5 : 1 },
                 ]}
               >
-                <Text style={M(700, 16, { color: c.inv })}>
+                <Text style={M(700, 16, { color: c.onAccent })}>
                   {cfMode === 'new' ? '+' : '✓'}
                 </Text>
               </Pressable>
@@ -508,7 +514,10 @@ export function NutritionScreen(_props: ScreenProps) {
                     ]}
                   >
                     <Text
-                      style={M(700, 9.5, { ls: 0.5, color: on ? c.inv : c.mut })}
+                      style={M(700, 9.5, {
+                        ls: 0.5,
+                        color: on ? c.inv : c.mut,
+                      })}
                     >
                       {u.label}
                     </Text>
@@ -589,7 +598,7 @@ export function NutritionScreen(_props: ScreenProps) {
                   },
                 ]}
               >
-                <Text style={M(800, 12, { color: c.acc })}>+</Text>
+                <Text style={M(700, 12, { color: c.acc })}>+</Text>
                 <Text
                   numberOfLines={1}
                   style={[S(600, 12.5, { color: c.ink }), styles.chipName]}
@@ -605,13 +614,12 @@ export function NutritionScreen(_props: ScreenProps) {
             No saved foods yet. Add one to tap-log it later.
           </Text>
         )}
-      </Section>
+      </Card>
 
-      {/* ── 04 Log a meal ────────────────────────────────────────────── */}
-      <Section
-        n="04"
+      {/* ── Log a meal ────────────────────────────────────────────── */}
+      <Card
         title="Log a meal"
-        titleRight={
+        right={
           <Pressable
             onPress={() => setMealOpen(o => !o)}
             accessibilityRole="button"
@@ -631,13 +639,12 @@ export function NutritionScreen(_props: ScreenProps) {
             common foods or type them in.
           </Text>
         )}
-      </Section>
+      </Card>
 
-      {/* ── 05 Logged ────────────────────────────────────────────────── */}
-      <Section
-        n="05"
+      {/* ── Logged ────────────────────────────────────────────────── */}
+      <Card
         title="Logged"
-        titleRight={
+        right={
           <Pressable
             onPress={() => setAdding(a => !a)}
             accessibilityRole="button"
@@ -678,10 +685,10 @@ export function NutritionScreen(_props: ScreenProps) {
                 accessibilityLabel="Save food entry"
                 style={[
                   styles.formBtn,
-                  { backgroundColor: c.ink, opacity: busy ? 0.5 : 1 },
+                  { backgroundColor: c.accSolid, opacity: busy ? 0.5 : 1 },
                 ]}
               >
-                <Text style={M(700, 16, { color: c.inv })}>+</Text>
+                <Text style={M(700, 16, { color: c.onAccent })}>+</Text>
               </Pressable>
             </View>
             {/* Optional macros (grams) — protein / carbs / fat. */}
@@ -747,7 +754,7 @@ export function NutritionScreen(_props: ScreenProps) {
                 · {m.tag}
               </Text>
             </Text>
-            <Text style={[M(800, 12, { color: c.ink }), styles.mealKcal]}>
+            <Text style={[M(700, 12, { color: c.ink }), styles.mealKcal]}>
               {grp(m.kcal)}
             </Text>
             {m.id ? (
@@ -764,7 +771,7 @@ export function NutritionScreen(_props: ScreenProps) {
             ) : null}
           </View>
         ))}
-      </Section>
+      </Card>
     </BriefScreen>
   );
 }

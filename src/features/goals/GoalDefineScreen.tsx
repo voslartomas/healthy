@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 
 import { ScreenProps } from '../../app/navigation/types';
-import { BRIEF_MAX_WIDTH, M, S } from '../../components/brief';
+import { BRIEF_GUTTER, BRIEF_MAX_WIDTH, M, S } from '../../components/brief';
 import {
   ENERGY_METRICS,
   GOAL_SOURCES,
@@ -126,6 +126,9 @@ export function GoalDefineScreen({ navigation }: ScreenProps) {
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 12,
+    // The design fills fields with the page ground so they read as insets in
+    // the card rather than as another raised surface.
+    backgroundColor: c.bg,
   } as const;
 
   return (
@@ -277,9 +280,11 @@ export function GoalDefineScreen({ navigation }: ScreenProps) {
             onPress={save}
             accessibilityRole="button"
             accessibilityLabel="Add goal"
-            style={[styles.addBtn, { backgroundColor: c.ink }]}
+            style={[styles.addBtn, { backgroundColor: c.accSolid }]}
           >
-            <Text style={M(700, 12, { ls: 1, color: c.inv })}>ADD GOAL</Text>
+            <Text style={M(700, 12, { ls: 1, color: c.onAccent })}>
+              ADD GOAL
+            </Text>
           </Pressable>
         </View>
       </ScrollView>
@@ -290,7 +295,11 @@ export function GoalDefineScreen({ navigation }: ScreenProps) {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   scroll: { alignItems: 'center', paddingVertical: 20 },
-  column: { width: '100%', maxWidth: BRIEF_MAX_WIDTH, paddingHorizontal: 24 },
+  column: {
+    width: '100%',
+    maxWidth: BRIEF_MAX_WIDTH,
+    paddingHorizontal: BRIEF_GUTTER,
+  },
   sub: {},
   hint: { marginTop: 2, marginBottom: 4, lineHeight: 17 },
   pillRow: { gap: 8, paddingVertical: 16 },

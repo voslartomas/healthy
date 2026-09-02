@@ -169,6 +169,58 @@ export function isGoalComplete(
   return goalCurrent(goal, tracked, activities, energy) >= goal.target;
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * A goal's progress split by day of its week: seven fractions in [0, 1],
+ * Monday→Sunday, for the Today "Week" tile's per-day bars. Each day is scored
+ * against its fair share of the target, so a full bar means that day pulled its
+ * weight — not that the whole goal is done.
+ *
+ *   • source goals — the day's tracked total ÷ (target / 7);
+ *   • activity goals — 1 on any day holding a qualifying session, else 0
+ *     (they're counts, so a day either contributed or it didn't);
+ *   • deficit goals — the day's deficit (−net) ÷ the average-deficit target.
+ *
+ * Future days, days without data, and (for source goals) a week that predates
+ * `dailyTracked` all read as 0. Pure so the tile and any test share one answer.
+ */
+export function goalDailySeries(
+  goal: WeeklyGoal,
+  week: GoalWeekData,
+): number[] {
+  const weekStart = week.weekStart;
+  if (goal.metric === 'deficit') {
+    const byDay = new Map<number, DailyEnergy>();
+    for (const e of week.energy) byDay.set(e.dayStart, e);
+    return Array.from({ length: 7 }, (_, d) => {
+      const e = byDay.get(weekStart + d * DAY_MS);
+      if (!e || e.net == null || goal.target <= 0) return 0;
+      return Math.max(0, Math.min(1, -e.net / goal.target));
+    });
+  }
+  if (goal.match) {
+    const match = goal.match;
+    return Array.from({ length: 7 }, (_, d) => {
+      const from = weekStart + d * DAY_MS;
+      const day = week.activities.filter(
+        a => a.start >= from && a.start < from + DAY_MS,
+      );
+      return countMatchingSessions(day, match, goal.minDurationMin) > 0 ? 1 : 0;
+    });
+  }
+  if (goal.source) {
+    const src = goal.source;
+    const share = goal.target > 0 ? goal.target / 7 : 0;
+    return Array.from({ length: 7 }, (_, d) => {
+      if (share <= 0) return 0;
+      const v = week.dailyTracked?.[d]?.[src] ?? 0;
+      return Math.max(0, Math.min(1, v / share));
+    });
+  }
+  return [0, 0, 0, 0, 0, 0, 0];
+}
+
 /** One week's attainment for a goal. `covered` is false when no data source
  * reached this week for this goal's kind — render as "no data", never a miss. */
 export interface GoalWeek {

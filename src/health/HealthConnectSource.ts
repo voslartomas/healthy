@@ -1,9 +1,6 @@
 import { profileAge } from '../state/useProfileStore';
-import {
-  FoodEntryInput,
-  FoodLogResult,
-  RawFetchWindows,
-} from './fetchWindows';
+import { nightIndex, nightIndexToTime } from './derive';
+import { FoodEntryInput, FoodLogResult, RawFetchWindows } from './fetchWindows';
 import { HealthSource } from './HealthSource';
 import { computeHrZones, HeartRateSample, resolveMaxHr } from './hrZones';
 import {
@@ -71,7 +68,30 @@ interface HealthConnectModule {
       startTime: string;
       endTime: string;
     };
-  }): Promise<{ ENERGY_TOTAL?: { inKilocalories?: number } }>;
+  }): Promise<{
+    ENERGY_TOTAL?: { inKilocalories?: number };
+    /** Total sleep time for the window, in SECONDS (the native bridge sends
+     * `Duration.seconds`). Health Connect defines it as the sum of the sleep
+     * stages excluding awake — the same figure the Google Health UI shows. */
+    SLEEP_DURATION_TOTAL?: number;
+  }>;
+  /** Health Connect's grouped aggregate — one bucket per LOCAL calendar day.
+   * Used for the per-day burned totals behind the calorie-deficit goal. */
+  aggregateGroupByPeriod?(request: {
+    recordType: string;
+    timeRangeFilter: {
+      operator: 'between';
+      startTime: string;
+      endTime: string;
+    };
+    timeRangeSlicer: { period: 'DAYS'; length: number };
+  }): Promise<
+    {
+      startTime: string;
+      endTime: string;
+      result: { ENERGY_TOTAL?: { inKilocalories?: number } };
+    }[]
+  >;
   deleteRecordsByUuids?(
     recordType: string,
     uuids: string[],
@@ -136,7 +156,8 @@ function loadModule(): HealthConnectModule | null {
   if (moduleHandle !== undefined) return moduleHandle;
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    moduleHandle = require('react-native-health-connect') as HealthConnectModule;
+    const mod = require('react-native-health-connect');
+    moduleHandle = mod as HealthConnectModule;
   } catch {
     moduleHandle = null;
   }
@@ -167,7 +188,10 @@ const READ_TYPES = [
 const CORE_READ_TYPES = ['Steps', 'ExerciseSession', 'SleepSession'];
 
 const PERMISSIONS: Permission[] = [
-  ...READ_TYPES.map(recordType => ({ accessType: 'read' as const, recordType })),
+  ...READ_TYPES.map(recordType => ({
+    accessType: 'read' as const,
+    recordType,
+  })),
   { accessType: 'write', recordType: 'Nutrition' },
 ];
 
@@ -201,43 +225,108 @@ function grams(m: MassQuantity | undefined): number | null {
   return null;
 }
 
-/** Health Connect `SleepStageType` ints → our four buckets. 5=DEEP, 6=REM,
- * 4=LIGHT, 3=OUT_OF_BED-ish/AWAKE, 1=AWAKE, 2=SLEEPING(generic). */
-function accumulateStages(
+/** Stage ints that mean "not asleep": AWAKE and AWAKE_IN_BED. */
+const AWAKE_STAGES = new Set([1, 7]);
+
+/**
+ * Health Connect `SleepStageType` ints → our four buckets. 5=DEEP, 6=REM,
+ * 4=LIGHT, 2=SLEEPING(generic), 0=UNKNOWN, 1=AWAKE, 7=AWAKE_IN_BED,
+ * 3=OUT_OF_BED.
+ *
+ * Two rules here exist to match the figure the user's own app shows, both
+ * derived from real logged data (tag HEA-SLEEP):
+ *
+ * 1. EDGE vs INTERIOR wake. Awake segments at the very START or END of the
+ *    session — falling asleep, and lying awake before getting up — are not part
+ *    of the night and stay in `awakeMin`. Awake segments BETWEEN sleep stages
+ *    are brief arousals within the sleep period, and count as light sleep.
+ *    Counting all wake as awake is what made a night read ~33 minutes short of
+ *    Google Health, with light short by the same amount: on a real night, 8 of
+ *    41 wake minutes were at the edges and 33 were arousals.
+ *
+ *    Note this deliberately differs from Health Connect's own
+ *    SLEEP_DURATION_TOTAL aggregate, which subtracts ALL wake and therefore
+ *    reports the short number — it is the app's display that we are matching.
+ *
+ * 2. UNLABELLED time. Stage segments do not have to tile the session; anything
+ *    no segment claims is sleep the device could not classify, so it goes to
+ *    light. (On the logged nights the segments tile exactly and this is a no-op,
+ *    but sources vary.)
+ *
+ * OUT_OF_BED is neither: it is excluded from the session before the remainder is
+ * computed, so a trip to the kitchen is never counted as sleep. It is returned
+ * alongside the buckets because the reported duration has to exclude it too.
+ *
+ * Exported for unit tests — not part of the HealthSource surface.
+ */
+export function accumulateStages(
   stages: { startTime: string; endTime: string; stage: number }[] | undefined,
-): SleepStages | null {
+  sessionStart: number,
+  sessionEnd: number,
+): { stages: SleepStages; outOfBedMin: number } | null {
   if (!stages || stages.length === 0) return null;
+  const segs = stages
+    .map(x => ({
+      start: toMs(x.startTime),
+      end: toMs(x.endTime),
+      stage: x.stage,
+    }))
+    .filter(
+      (x): x is { start: number; end: number; stage: number } =>
+        x.start != null && x.end != null && x.end > x.start,
+    )
+    .sort((a, b) => a.start - b.start);
+  if (segs.length === 0) return null;
+
+  // The span of real sleep stages: everything outside it is edge wake.
+  const isAsleep = (stage: number) => !AWAKE_STAGES.has(stage) && stage !== 3;
+  const firstAsleep = segs.findIndex(x => isAsleep(x.stage));
+  const lastAsleep = segs.map(x => isAsleep(x.stage)).lastIndexOf(true);
+
   const acc: SleepStages = { deepMin: 0, remMin: 0, lightMin: 0, awakeMin: 0 };
-  let sawStage = false;
-  for (const s of stages) {
-    const start = toMs(s.startTime);
-    const end = toMs(s.endTime);
-    if (start == null || end == null || end <= start) continue;
-    const min = (end - start) / 60000;
-    switch (s.stage) {
+  // Every minute a segment claims, whichever bucket it lands in — what's left
+  // of the session after this is the unclassified remainder.
+  let claimedMin = 0;
+  let outOfBedMin = 0;
+  segs.forEach((x, i) => {
+    const min = (x.end - x.start) / 60000;
+    claimedMin += min;
+    switch (x.stage) {
       case 5: // DEEP
         acc.deepMin += min;
-        sawStage = true;
         break;
       case 6: // REM
         acc.remMin += min;
-        sawStage = true;
         break;
       case 4: // LIGHT
-      case 2: // SLEEPING (generic asleep) → count as light
+      case 2: // SLEEPING (generic asleep)
+      case 0: // UNKNOWN — inside the session, so asleep but unclassified
         acc.lightMin += min;
-        sawStage = true;
         break;
       case 1: // AWAKE
       case 7: // AWAKE_IN_BED
-        acc.awakeMin += min;
-        sawStage = true;
+        // Interior arousal → light; at the edges of the night → awake.
+        if (firstAsleep >= 0 && i > firstAsleep && i < lastAsleep) {
+          acc.lightMin += min;
+        } else {
+          acc.awakeMin += min;
+        }
+        break;
+      case 3: // OUT_OF_BED — claimed, but bucketed nowhere
+        outOfBedMin += min;
         break;
       default:
+        claimedMin -= min; // unknown int: leave it to the remainder rule
         break;
     }
-  }
-  return sawStage ? acc : null;
+  });
+
+  // Whatever the segments left unclaimed is unclassified sleep (see above).
+  // A minute of slack absorbs rounding on segment boundaries.
+  const sessionMin = (sessionEnd - sessionStart) / 60000;
+  const remainder = sessionMin - claimedMin;
+  if (remainder > 1) acc.lightMin += remainder;
+  return { stages: acc, outOfBedMin };
 }
 
 /** Health Connect MealType int → a stable string label (or null). */
@@ -398,7 +487,10 @@ export class HealthConnectSource implements HealthSource {
     const mod = await this.ensureInitialized();
     if (!mod) return null;
 
-    const sinceMetrics = new Date(now - windows.metricsDays * DAY_MS).toISOString();
+    const sinceMetrics = new Date(
+      now - windows.metricsDays * DAY_MS,
+    ).toISOString();
+    const sinceHrv = new Date(now - windows.hrvDays * DAY_MS).toISOString();
     const sinceExercise = new Date(
       now - windows.exerciseDays * DAY_MS,
     ).toISOString();
@@ -424,16 +516,16 @@ export class HealthConnectSource implements HealthSource {
       weightRecs,
       bodyFatRecs,
     ] = await Promise.all([
-      read('HeartRateVariabilityRmssd', sinceMetrics, 3),
-      read('RestingHeartRate', sinceMetrics, 2),
-      read('SleepSession', sinceMetrics, 2),
+      read('HeartRateVariabilityRmssd', sinceHrv, 12),
+      read('RestingHeartRate', sinceMetrics, 3),
+      read('SleepSession', sinceMetrics, 3),
       read('Steps', sinceSteps, 12),
       read('ExerciseSession', sinceExercise, 4),
       read('ActiveCaloriesBurned', sinceCalories, 12),
       read('TotalCaloriesBurned', sinceCalories, 12),
       read('Nutrition', sinceMetrics, 4),
-      read('Weight', sinceMetrics, 2),
-      read('BodyFat', sinceMetrics, 2),
+      read('Weight', sinceMetrics, 3),
+      read('BodyFat', sinceMetrics, 3),
     ]);
     // NOTE: HeartRate is NOT bulk-read here. Continuous HR over the exercise
     // window is enormous (tens of thousands of samples) and was the main cause
@@ -452,11 +544,19 @@ export class HealthConnectSource implements HealthSource {
       const time = toMs(r.time);
       if (time == null || typeof r.heartRateVariabilityMillis !== 'number')
         continue;
-      hrvRmssd.push({ value: r.heartRateVariabilityMillis, time, source: tag(r) });
+      hrvRmssd.push({
+        value: r.heartRateVariabilityMillis,
+        time,
+        source: tag(r),
+      });
     }
-    // DIAGNOSTIC (HRV parity): per-day mean vs median (last 6 days) so we can
-    // compare against the Google Health / Fitbit nightly figure and confirm the
-    // median tracks it. Tag: HEA-HRV. Remove once dialed in.
+    // DIAGNOSTIC (HRV parity): per-NIGHT mean vs median, next to the old
+    // per-UTC-day median, for the last 6 nights. Compare `median` against the
+    // nightly figure the Google Health / Fitbit app shows — that is the number
+    // the app now displays. `utcMedian` is what it used to show, and the gap
+    // between the two is the night-bucketing fix (see nightIndex in ./derive).
+    // If `median` still reads low and `mean` matches better, the nightly
+    // aggregate should move to the mean. Tag: HEA-HRV. Remove once dialed in.
     {
       const med = (a: number[]): number => {
         const s = [...a].sort((x, y) => x - y);
@@ -464,24 +564,33 @@ export class HealthConnectSource implements HealthSource {
         return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
       };
       const r1 = (x: number) => Math.round(x * 10) / 10;
-      const byDay = new Map<number, number[]>();
-      for (const s of hrvRmssd) {
-        const d = Math.floor(s.time / 86_400_000);
-        const arr = byDay.get(d);
-        if (arr) arr.push(s.value);
-        else byDay.set(d, [s.value]);
-      }
-      const rows = [...byDay.entries()]
+      const bucket = (key: (t: number) => number) => {
+        const by = new Map<number, number[]>();
+        for (const s of hrvRmssd) {
+          const k = key(s.time);
+          const arr = by.get(k);
+          if (arr) arr.push(s.value);
+          else by.set(k, [s.value]);
+        }
+        return by;
+      };
+      const byNight = bucket(nightIndex);
+      const byUtcDay = bucket(t => Math.floor(t / 86_400_000));
+      const rows = [...byNight.entries()]
         .sort((a, b) => b[0] - a[0])
         .slice(0, 6)
-        .map(([d, v]) => ({
-          day: new Date(d * 86_400_000).toISOString().slice(0, 10),
-          n: v.length,
-          mean: r1(v.reduce((s, x) => s + x, 0) / v.length),
-          median: r1(med(v)),
-          min: r1(Math.min(...v)),
-          max: r1(Math.max(...v)),
-        }));
+        .map(([night, v]) => {
+          const utc = byUtcDay.get(night);
+          return {
+            night: new Date(nightIndexToTime(night)).toISOString().slice(0, 10),
+            n: v.length,
+            mean: r1(v.reduce((s, x) => s + x, 0) / v.length),
+            median: r1(med(v)),
+            utcMedian: utc ? r1(med(utc)) : null,
+            min: r1(Math.min(...v)),
+            max: r1(Math.max(...v)),
+          };
+        });
       console.log('[HEA-HRV] ' + JSON.stringify(rows));
     }
 
@@ -497,21 +606,147 @@ export class HealthConnectSource implements HealthSource {
       const start = toMs(r.startTime);
       const end = toMs(r.endTime);
       if (start == null || end == null || end <= start) continue;
-      const stages = accumulateStages(r.stages);
-      // Total sleep time is time actually ASLEEP (deep+REM+light), NOT the whole
-      // in-bed session: awake minutes must LOWER sleep length/score, not pad it.
-      // Falls back to the full span only when no stages were reported (can't
-      // separate awake). Mirrors HealthKitSource's asleepMin semantics.
-      const asleepMin = stages
-        ? stages.deepMin + stages.remMin + stages.lightMin
+      const acc = accumulateStages(r.stages, start, end);
+      const spanMin = (end - start) / 60000;
+      // Sleep duration is time ASLEEP — the sum of the sleep stages, excluding
+      // awake. That is how Health Connect defines SLEEP_DURATION_TOTAL and what
+      // the Google Health UI shows, so it is what we report; the awake split
+      // stays visible in `stages`. When no stages were reported we cannot
+      // separate awake, so the session span (less out-of-bed) is the best we
+      // have.
+      const asleepMin = acc
+        ? acc.stages.deepMin + acc.stages.remMin + acc.stages.lightMin
         : 0;
       sleep.push({
         start,
         end,
-        durationMin: asleepMin > 0 ? asleepMin : (end - start) / 60000,
+        durationMin:
+          asleepMin > 0 ? asleepMin : spanMin - (acc?.outOfBedMin ?? 0),
         source: tag(r),
-        stages,
+        stages: acc ? acc.stages : null,
       });
+    }
+
+    // Sleep parity with Google Health: ask Health Connect for its OWN total per
+    // NIGHT, over the same noon→noon window the app buckets nights into.
+    //
+    // Per-SESSION aggregation is useless here — within one session Health
+    // Connect computes exactly what we do (span minus awake/out-of-bed), so it
+    // always agrees and reconciles nothing. The gap is at the NIGHT level: the
+    // platform counts sessions for the night that we do not end up showing
+    // (a block we drop, or one our merge does not join), which is why the total
+    // AND light sleep were short by the same ~33 minutes.
+    //
+    // Asking per night makes the figure immune to how we happen to split, merge
+    // or drop the underlying records: whatever Health Connect counts for that
+    // night is what we show.
+    let nightlySleepAgg: { night: number; minutes: number }[] | null = null;
+    if (mod.aggregateRecord) {
+      const nights: number[] = [];
+      for (let i = 0; i < 7; i++) nights.push(nightIndex(now) - i);
+      const results = await Promise.all(
+        nights.map(async night => {
+          // Night N runs from local noon of the previous day to local noon of
+          // the morning it ends on — the window nightIndex() defines.
+          const noon = nightIndexToTime(night) + 12 * 60 * 60 * 1000;
+          const from = new Date(noon - DAY_MS);
+          const to = new Date(Math.min(noon, now));
+          if (to.getTime() <= from.getTime()) return null;
+          try {
+            const agg = await mod.aggregateRecord!({
+              recordType: 'SleepSession',
+              timeRangeFilter: {
+                operator: 'between',
+                startTime: from.toISOString(),
+                endTime: to.toISOString(),
+              },
+            });
+            const seconds = agg?.SLEEP_DURATION_TOTAL;
+            if (typeof seconds !== 'number' || seconds <= 0) return null;
+            return { night, minutes: seconds / 60 };
+          } catch (err) {
+            console.warn('[HealthConnect] aggregate SleepSession failed', err);
+            return null;
+          }
+        }),
+      );
+      const rows = results.filter(
+        (r): r is { night: number; minutes: number } => r != null,
+      );
+      if (rows.length > 0) nightlySleepAgg = rows;
+    }
+
+    // DIAGNOSTIC (sleep parity). Everything needed to settle a mismatch against
+    // the Google Health figure in one line, for the last two nights:
+    //   platform  — Health Connect's own total for the night (what GH shows)
+    //   ourAsleep — the sum of the sessions we kept, before reconciliation
+    //   sessions  — every session, with its span and per-stage-type minutes
+    // If `platform` is null the aggregate is unavailable and we are showing our
+    // own sum; if it disagrees with `ourAsleep`, the `sessions` rows show which
+    // block or which stage type we are losing. Tag: HEA-SLEEP.
+    {
+      const r0 = (x: number) => Math.round(x);
+      const hm = (ms: number) => {
+        const d = new Date(ms);
+        return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+      };
+      const hhmm = (min: number) =>
+        `${Math.floor(min / 60)}:${String(r0(min % 60)).padStart(2, '0')}`;
+      // Per-stage-type minutes straight off the raw records, unmapped — so a
+      // stage int we bucket wrongly is visible as itself.
+      const rawStageMinutes = (r: RawRecord) => {
+        const out: Record<string, number> = {};
+        for (const st of r.stages ?? []) {
+          const a = toMs(st.startTime);
+          const b = toMs(st.endTime);
+          if (a == null || b == null || b <= a) continue;
+          const k = `stage${st.stage}`;
+          out[k] = (out[k] ?? 0) + r0((b - a) / 60000);
+        }
+        return out;
+      };
+      const byNight = new Map<number, typeof sleep>();
+      for (const x of sleep) {
+        const n = nightIndex(x.end);
+        const arr = byNight.get(n);
+        if (arr) arr.push(x);
+        else byNight.set(n, [x]);
+      }
+      const rows = [...byNight.entries()]
+        .sort((a, b) => b[0] - a[0])
+        .slice(0, 2)
+        .map(([night, xs]) => ({
+          night: new Date(nightIndexToTime(night)).toISOString().slice(0, 10),
+          platform:
+            nightlySleepAgg?.find(a => a.night === night)?.minutes != null
+              ? hhmm(nightlySleepAgg.find(a => a.night === night)!.minutes)
+              : null,
+          ourAsleep: hhmm(xs.reduce((t, x) => t + x.durationMin, 0)),
+          sessions: xs
+            .sort((a, b) => a.start - b.start)
+            .map(x => ({
+              from: hm(x.start),
+              to: hm(x.end),
+              span: r0((x.end - x.start) / 60000),
+              asleep: r0(x.durationMin),
+              src: x.source,
+              mapped: x.stages
+                ? {
+                    deep: r0(x.stages.deepMin),
+                    rem: r0(x.stages.remMin),
+                    light: r0(x.stages.lightMin),
+                    awake: r0(x.stages.awakeMin),
+                  }
+                : null,
+              raw: rawStageMinutes(
+                sleepRecs.find(
+                  r =>
+                    toMs(r.startTime) === x.start && toMs(r.endTime) === x.end,
+                ) ?? ({} as RawRecord),
+              ),
+            })),
+        }));
+      console.log('[HEA-SLEEP] ' + JSON.stringify(rows));
     }
 
     const steps: StepsRecord[] = [];
@@ -575,8 +810,12 @@ export class HealthConnectSource implements HealthSource {
           to: new Date(v.last).toISOString(),
         }));
       };
-      console.log('[HEA-CAL] today ACTIVE ' + JSON.stringify(summarize(activeEnergy)));
-      console.log('[HEA-CAL] today TOTAL ' + JSON.stringify(summarize(totalEnergy)));
+      console.log(
+        '[HEA-CAL] today ACTIVE ' + JSON.stringify(summarize(activeEnergy)),
+      );
+      console.log(
+        '[HEA-CAL] today TOTAL ' + JSON.stringify(summarize(totalEnergy)),
+      );
     }
 
     const exerciseNames = buildExerciseNames(mod);
@@ -734,7 +973,50 @@ export class HealthConnectSource implements HealthSource {
       }
     }
 
+    // Per-day burned calories, from Health Connect's OWN grouped aggregate.
+    //
+    // The calorie-deficit goal needs a burned figure PER DAY, and deriving it
+    // from raw records is not equivalent to the total the platform reports —
+    // which is exactly why `energyBurnedTodayAgg` exists for today. Without this
+    // the deficit goal silently showed nothing: a day needs BOTH eaten and
+    // burned to produce a net, and when the raw energy records are absent or
+    // unreadable (common — sources disagree on TDEE and some write only
+    // aggregates) every day's burned came back null.
+    //
+    // `aggregateGroupByPeriod` with a DAYS slicer buckets on LOCAL calendar
+    // days, which is the boundary the user's own app uses.
+    let dailyBurnedAgg: { dayStart: number; kcal: number }[] | null = null;
+    if (mod.aggregateGroupByPeriod) {
+      try {
+        const from = new Date(now - windows.caloriesDays * DAY_MS);
+        from.setHours(0, 0, 0, 0);
+        const groups = await mod.aggregateGroupByPeriod({
+          recordType: 'TotalCaloriesBurned',
+          timeRangeFilter: {
+            operator: 'between',
+            startTime: from.toISOString(),
+            endTime: new Date(now).toISOString(),
+          },
+          timeRangeSlicer: { period: 'DAYS', length: 1 },
+        });
+        const rows = (groups ?? [])
+          .map(g => ({
+            dayStart: toMs(g.startTime) ?? 0,
+            kcal: Math.round(g.result?.ENERGY_TOTAL?.inKilocalories ?? 0),
+          }))
+          .filter(g => g.dayStart > 0 && g.kcal > 0);
+        if (rows.length > 0) dailyBurnedAgg = rows;
+      } catch (err) {
+        console.warn(
+          '[HealthConnect] aggregateGroupByPeriod TotalCaloriesBurned failed',
+          err,
+        );
+      }
+    }
+
     return {
+      dailyBurnedAgg,
+      nightlySleepAgg,
       hrvRmssd,
       hrvAlgorithm: 'RMSSD',
       restingHr,

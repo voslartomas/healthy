@@ -46,6 +46,10 @@ export interface SleepStages {
 export interface SleepRecord {
   start: number;
   end: number;
+  /** Sleep duration: the session, less any out-of-bed span. Brief awakenings
+   * INSIDE the night count toward it — that is the figure Google Health and the
+   * wearable apps report, and deducting them is what made ours read short. The
+   * awake split is still available in {@link stages}. */
   durationMin: number;
   source: string;
   /** Stage breakdown; null when the source reported no stages. */
@@ -125,6 +129,21 @@ export interface RawHealthData {
   weight: InstantSample[];
   /** Body-fat samples (percentage 0–100); occasional, not daily. */
   bodyFat: InstantSample[];
+  /**
+   * Per-day burned-calorie totals from Health Connect's OWN grouped aggregate
+   * (local calendar days), when the platform provided them. Deduped across
+   * sources by the user's data-source priority, so these are the numbers the
+   * Google Health UI shows — the per-day counterpart of
+   * {@link energyBurnedTodayAgg}. Null on platforms/reads without it.
+   */
+  dailyBurnedAgg?: { dayStart: number; kcal: number }[] | null;
+  /**
+   * Health Connect's OWN total sleep per night (minutes), keyed by the night
+   * index the app buckets into. Authoritative: it counts every session the
+   * platform attributes to that night, so it is immune to how our own merge
+   * splits or drops the underlying records. Null on platforms/reads without it.
+   */
+  nightlySleepAgg?: { night: number; minutes: number }[] | null;
   /** Distinct source packages seen across all record types. */
   sources: string[];
   /**
@@ -163,10 +182,28 @@ export interface SleepMetric {
   stages: SleepStages | null;
 }
 
+/** One input to the readiness blend, kept so the Recovery screen can show the
+ * user WHY today's score came out where it did rather than just asserting it. */
+export interface ReadinessContribution {
+  key: 'hrv' | 'rhr' | 'sleep';
+  /** Reading as measured (ms / bpm / hours). */
+  value: number;
+  /** What it was scored against: the 30-day baseline, or the 8h sleep need. */
+  reference: number;
+  /** This input's own 0–100 sub-score. */
+  score: number;
+  /** Its share of the blend AFTER renormalising over the inputs that were
+   * actually available (0–1), so the shares always add up to 1. */
+  weight: number;
+}
+
 /** Our composite readiness ("recovery") score. Non-clinical; see ADR-004. */
 export interface ReadinessMetric {
   pct: number;
   state: 'Recovered' | 'Balanced' | 'Strained';
+  /** The inputs that produced `pct`, in blend order (HRV, RHR, sleep). Only the
+   * ones that had data are present. */
+  contributors: ReadinessContribution[];
 }
 
 /** One meal row for the nutrition screen (derived from a {@link NutritionEntry}). */
@@ -207,8 +244,9 @@ export interface TrendSeries {
    * Often flat when the source writes one resting-HR value per day. */
   rhrRange: { time: number; lo: number; hi: number }[];
   sleepHours: TrendPoint[];
-  /** Sleep quality (efficiency %) from the stage breakdown; distinct from
-   * length. Only nights with reported stages produce a point. */
+  /** Sleep quality 0–100 — a blend of length, deep and REM against a full
+   * night's worth of each (see derive.sleepQualityScore). Distinct from length
+   * alone. Only nights with reported stages produce a point. */
   sleepQuality: TrendPoint[];
   readiness: TrendPoint[];
   /** Body weight (kg), one point per measured day, oldest first. */
@@ -332,6 +370,14 @@ export interface GoalWeekData {
   complete: boolean;
   activities: ActivitySummary[];
   tracked: Partial<Record<GoalSourceKey, number>>;
+  /**
+   * Per-source auto-tracked totals split by day of the week — exactly seven
+   * entries, Monday→Sunday, so the Today "Week" tile can draw one bar per day
+   * for a goal. Days still in the future (or with no data) carry an empty/zero
+   * record. Optional: only the live snapshot's weeks populate it; persisted and
+   * test fixtures may omit it, and consumers treat a missing entry as all-zero.
+   */
+  dailyTracked?: Partial<Record<GoalSourceKey, number>>[];
   /** The week's per-day energy balance (for average-deficit goals). */
   energy: DailyEnergy[];
   coverage: WeekCoverage;

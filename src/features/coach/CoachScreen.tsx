@@ -231,7 +231,7 @@ export function CoachScreen({ navigation }: ScreenProps) {
                   m.from === 'me'
                     ? {
                         alignSelf: 'flex-end',
-                        backgroundColor: c.ink,
+                        backgroundColor: c.accSolid,
                         borderBottomRightRadius: 4,
                       }
                     : {
@@ -245,7 +245,10 @@ export function CoachScreen({ navigation }: ScreenProps) {
                 {m.from === 'ai' ? (
                   <CoachMarkdown text={m.text} />
                 ) : (
-                  <Text selectable style={S(400, 13, { lh: 19, color: c.inv })}>
+                  <Text
+                    selectable
+                    style={S(400, 13, { lh: 19, color: c.onAccent })}
+                  >
                     {m.text}
                   </Text>
                 )}
@@ -325,7 +328,7 @@ export function CoachScreen({ navigation }: ScreenProps) {
             style={[
               styles.send,
               {
-                backgroundColor: c.ink,
+                backgroundColor: c.accSolid,
                 opacity: !input.trim() || busy ? 0.45 : 1,
               },
             ]}
@@ -334,7 +337,7 @@ export function CoachScreen({ navigation }: ScreenProps) {
               <Path
                 d="M4 12l16-8-6 8 6 8z"
                 fill="none"
-                stroke={c.inv}
+                stroke={c.onAccent}
                 strokeWidth={2}
                 strokeLinecap="round"
                 strokeLinejoin="round"

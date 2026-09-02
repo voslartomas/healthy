@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ScreenProps } from '../../app/navigation/types';
-import { BriefScreen, M, S, Section } from '../../components/brief';
+import { BriefButton, BriefScreen, Card, M, S } from '../../components/brief';
 import { ExerciseDef, exerciseOrUnknown } from '../../data/exerciseCatalog';
 import { finishSession } from '../../state/strengthService';
 import {
@@ -17,14 +17,14 @@ import { RestTimer } from './components/RestTimer';
 import { formatKg, SetRow } from './components/SetRow';
 
 /**
- * The runner. Walks the active session set-by-set: show the exercise animation
- * and target, let the user tweak the actual weight/reps, then COMPLETE SET logs
- * it and either starts the rest timer or (on the final set) finishes into the
+ * The runner. Walks the active session set-by-set: a media card shows the
+ * exercise and its target, the user tweaks the actual weight/reps, then COMPLETE
+ * SET logs it and either drops into the rest card (media of what's up next, the
+ * countdown, and the next set's target) or — on the final set — finishes into the
  * summary. All progression lives in the strength store; this screen is the view.
  */
 export function WorkoutRunScreen({ navigation }: ScreenProps) {
-  const t = useTheme();
-  const c = t.colors;
+  const c = useTheme().colors;
   const session = useStrengthStore(s => s.session);
   const logCurrentSet = useStrengthStore(s => s.logCurrentSet);
   const endRest = useStrengthStore(s => s.endRest);
@@ -64,18 +64,17 @@ export function WorkoutRunScreen({ navigation }: ScreenProps) {
   if (!session || session.plan.length === 0) {
     return (
       <BriefScreen>
-        <Section n="01" title="No active workout" first>
-          <Text style={[S(600, 13, { color: c.mut }), styles.empty]}>
+        <Card first title="No active workout">
+          <Text style={[S(600, 13, { lh: 19, color: c.mut }), styles.empty]}>
             This workout has no exercises.
           </Text>
-          <Pressable
+          <BriefButton
+            label="GO BACK"
+            accessibilityLabel="Go back"
             onPress={() => navigation.goBack()}
-            accessibilityRole="button"
-            style={[styles.primary, { backgroundColor: c.ink }]}
-          >
-            <Text style={M(700, 12, { ls: 1, color: c.inv })}>GO BACK</Text>
-          </Pressable>
-        </Section>
+            style={styles.primary}
+          />
+        </Card>
       </BriefScreen>
     );
   }
@@ -86,6 +85,13 @@ export function WorkoutRunScreen({ navigation }: ScreenProps) {
   const isLast =
     nextCursor(session.plan, session.exerciseIndex, session.setIndex) === null;
   const totalSetsDone = session.completed.length;
+  const weighted = entry.targetWeightKg != null;
+
+  const targetText = `TARGET · ${target.reps} REPS${
+    target.weightKg != null
+      ? ` · ${formatKg(target.weightKg)} KG`
+      : ' · BODYWEIGHT'
+  }`;
 
   async function finishAndSummarize() {
     finishingRef.current = true;
@@ -104,7 +110,7 @@ export function WorkoutRunScreen({ navigation }: ScreenProps) {
         <View style={styles.headerRow}>
           <View>
             <Text style={M(700, 9, { ls: 1, color: c.fnt })}>TOTAL TIME</Text>
-            <Text style={M(800, 22, { ls: -0.5, color: c.ink })}>
+            <Text style={[M(700, 22, { color: c.ink }), styles.headerClock]}>
               {formatDuration(elapsed)}
             </Text>
           </View>
@@ -118,78 +124,152 @@ export function WorkoutRunScreen({ navigation }: ScreenProps) {
           </Pressable>
         </View>
         <Text style={M(700, 10.5, { ls: 0.6, color: c.fnt })}>
-          {session.exerciseIndex + 1}/{session.plan.length} · {totalSetsDone} DONE ·{' '}
-          {remainingSets(session.plan, session.exerciseIndex, session.setIndex)} LEFT
+          {session.exerciseIndex + 1}/{session.plan.length} · {totalSetsDone}{' '}
+          DONE ·{' '}
+          {remainingSets(session.plan, session.exerciseIndex, session.setIndex)}{' '}
+          LEFT
         </Text>
       </View>
+
       {session.resting ? (
-        <Section n="··" title="Rest" first>
-          <Text style={[M(700, 10.5, { ls: 0.6, color: c.fnt }), styles.next]}>
-            NEXT · {def.name.toUpperCase()} · SET {session.setIndex + 1}/
-            {entry.targetSets}
-          </Text>
-          <RestTimer
-            key={`${session.exerciseIndex}-${session.setIndex}`}
-            seconds={entry.restSec}
-            onDone={endRest}
-          />
-        </Section>
-      ) : (
-        <>
-          <Section
-            n={String(session.exerciseIndex + 1).padStart(2, '0')}
-            title={def.name}
-            first
-            titleRight={
-              <Text style={M(700, 10.5, { color: c.acc })}>
-                SET {session.setIndex + 1}/{entry.targetSets}
+        /* ── Resting: what's up next ───────────────────────────────── */
+        <Card flush style={styles.runCard}>
+          <View>
+            <ExerciseMedia
+              exerciseId={entry.exerciseId}
+              variant="hero"
+              height={250}
+              playing={false}
+              sub="UP NEXT · LOOP"
+            />
+            <View style={[styles.upNext, { backgroundColor: c.accSolid }]}>
+              <Text style={M(700, 9, { ls: 1.4, color: c.onAccent })}>
+                UP NEXT
               </Text>
-            }
-          >
-            <ExerciseMedia exerciseId={entry.exerciseId} playing={!session.resting} />
-            <Text style={[M(600, 11, { ls: 0.4, color: c.mut }), styles.target]}>
-              TARGET · {target.reps} REPS
-              {target.weightKg != null
-                ? ` · ${formatKg(target.weightKg)} KG`
-                : ' · BODYWEIGHT'}
+            </View>
+          </View>
+          <View style={styles.runBody}>
+            <Text style={S(800, 22, { lh: 24, ls: -0.44, color: c.ink })}>
+              {def.name}
+            </Text>
+            <Text style={[M(700, 9.5, { ls: 1.2, color: c.acc }), styles.gap8]}>
+              SET {session.setIndex + 1}/{entry.targetSets}
             </Text>
 
-            <SetRow
-              weightKg={entry.targetWeightKg != null ? session.weightKg : null}
-              reps={session.reps}
-              onAdjustWeight={adjustWeight}
-              onAdjustReps={adjustReps}
+            <RestTimer
+              key={`${session.exerciseIndex}-${session.setIndex}`}
+              seconds={entry.restSec}
+              onDone={endRest}
             />
 
-            <Pressable
-              onPress={completeSet}
-              accessibilityRole="button"
-              accessibilityLabel={isLast ? 'Finish workout' : 'Complete set'}
-              style={[styles.primary, { backgroundColor: c.ink }]}
-            >
-              <Text style={M(700, 13, { ls: 1, color: c.inv })}>
-                {isLast ? 'FINISH WORKOUT' : 'COMPLETE SET'}
-              </Text>
-            </Pressable>
-          </Section>
+            <View style={[styles.targetBox, { borderColor: c.hair }]}>
+              <View>
+                <Text style={M(700, 8.5, { ls: 1.4, color: c.fnt })}>
+                  NEXT SET TARGET
+                </Text>
+                <Text style={[M(700, 18, { color: c.ink }), styles.gap8]}>
+                  {session.reps} REPS
+                  {weighted ? ` · ${formatKg(session.weightKg ?? 0)} KG` : ''}
+                </Text>
+              </View>
+              {weighted ? (
+                <View style={styles.targetSteppers}>
+                  <Pressable
+                    onPress={() => adjustWeight(-0.5)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Decrease next set weight"
+                    style={[styles.smallPm, { borderColor: c.hair }]}
+                  >
+                    <Text style={M(700, 14, { color: c.ink })}>−</Text>
+                  </Pressable>
+                  <Pressable
+                    onPress={() => adjustWeight(0.5)}
+                    accessibilityRole="button"
+                    accessibilityLabel="Increase next set weight"
+                    style={[styles.smallPm, { borderColor: c.hair }]}
+                  >
+                    <Text style={M(700, 14, { color: c.ink })}>＋</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+            </View>
 
-          <Section n="··" title="Plan">
-            {session.plan.map((p, i) => (
-              <PlanRow
-                key={p.id}
-                index={i}
-                def={exerciseOrUnknown(p.exerciseId)}
-                planned={p}
-                status={
-                  i < session.exerciseIndex
-                    ? 'done'
-                    : i === session.exerciseIndex
-                      ? 'now'
-                      : 'next'
-                }
+            <BriefButton
+              label="START NEXT SET"
+              accessibilityLabel="Start next set"
+              onPress={endRest}
+              fontSize={12}
+              style={styles.gap14}
+            />
+          </View>
+        </Card>
+      ) : (
+        <>
+          {/* ── The set in progress ─────────────────────────────────── */}
+          <Card flush style={styles.runCard}>
+            <ExerciseMedia
+              exerciseId={entry.exerciseId}
+              variant="hero"
+              height={236}
+              sub="LOOP · FORM"
+            />
+            <View style={styles.runBody}>
+              <View style={styles.runTitleRow}>
+                <Text
+                  style={[
+                    S(800, 22, { lh: 24, ls: -0.44, color: c.ink }),
+                    styles.runTitle,
+                  ]}
+                  numberOfLines={1}
+                >
+                  {def.name}
+                </Text>
+                <Text style={M(700, 10.5, { color: c.acc })}>
+                  SET {session.setIndex + 1}/{entry.targetSets}
+                </Text>
+              </View>
+              <Text
+                style={[M(700, 9.5, { ls: 1.2, color: c.fnt }), styles.gap8]}
+              >
+                {targetText}
+              </Text>
+
+              <SetRow
+                weightKg={weighted ? session.weightKg : null}
+                reps={session.reps}
+                onAdjustWeight={adjustWeight}
+                onAdjustReps={adjustReps}
               />
-            ))}
-          </Section>
+
+              <BriefButton
+                label={isLast ? 'FINISH WORKOUT' : 'COMPLETE SET'}
+                accessibilityLabel={isLast ? 'Finish workout' : 'Complete set'}
+                onPress={completeSet}
+                style={styles.primary}
+              />
+            </View>
+          </Card>
+
+          {/* ── Plan overview ───────────────────────────────────────── */}
+          <Card title="Plan">
+            <View style={styles.planList}>
+              {session.plan.map((p, i) => (
+                <PlanRow
+                  key={p.id}
+                  index={i}
+                  def={exerciseOrUnknown(p.exerciseId)}
+                  planned={p}
+                  status={
+                    i < session.exerciseIndex
+                      ? 'done'
+                      : i === session.exerciseIndex
+                        ? 'now'
+                        : 'next'
+                  }
+                />
+              ))}
+            </View>
+          </Card>
         </>
       )}
     </BriefScreen>
@@ -230,7 +310,10 @@ function PlanRow({
         {mark}
       </Text>
       <Text
-        style={[S(600, 13.5, { color: status === 'done' ? c.mut : c.ink }), styles.planName]}
+        style={[
+          S(600, 13.5, { color: status === 'done' ? c.mut : c.ink }),
+          styles.planName,
+        ]}
         numberOfLines={1}
       >
         {def.name}
@@ -251,7 +334,8 @@ function remainingSets(
 ): number {
   let n = 0;
   for (let i = exerciseIndex; i < plan.length; i++) {
-    n += i === exerciseIndex ? plan[i].targetSets - setIndex : plan[i].targetSets;
+    n +=
+      i === exerciseIndex ? plan[i].targetSets - setIndex : plan[i].targetSets;
   }
   return n;
 }
@@ -279,12 +363,13 @@ function formatDuration(total: number): string {
 }
 
 const styles = StyleSheet.create({
-  header: { marginBottom: 14, gap: 8 },
+  header: { marginTop: 6, gap: 8 },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
   },
+  headerClock: { marginTop: 5 },
   endIcon: {
     borderWidth: 1,
     borderRadius: 999,
@@ -293,16 +378,53 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  empty: { marginTop: 12, lineHeight: 19 },
-  next: { marginTop: 12, textAlign: 'center' },
-  target: { marginTop: 14 },
-  primary: {
-    borderRadius: 999,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: 22,
+  empty: { marginTop: 12 },
+  runCard: { marginTop: 16 },
+  runBody: { padding: 18 },
+  runTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: 10,
   },
-  planRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 8 },
+  runTitle: { flex: 1, minWidth: 0 },
+  gap8: { marginTop: 8 },
+  gap14: { marginTop: 14 },
+  upNext: {
+    position: 'absolute',
+    top: 14,
+    left: 14,
+    paddingVertical: 7,
+    paddingHorizontal: 11,
+    borderRadius: 999,
+  },
+  targetBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 15,
+    marginTop: 18,
+  },
+  targetSteppers: { flexDirection: 'row', gap: 8 },
+  smallPm: {
+    width: 34,
+    height: 34,
+    borderRadius: 999,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  primary: { marginTop: 22 },
+  planList: { marginTop: 6 },
+  planRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 9,
+  },
   planMark: { width: 20 },
   planName: { flex: 1, minWidth: 0 },
 });

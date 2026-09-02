@@ -1,15 +1,30 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { ScreenProps } from '../../app/navigation/types';
-import { BriefScreen, M, S, Section } from '../../components/brief';
-import { exerciseOrUnknown } from '../../data/exerciseCatalog';
+import {
+  BriefButton,
+  BriefScreen,
+  Card,
+  inputStyle,
+  M,
+  S,
+} from '../../components/brief';
+import {
+  EQUIPMENT_LABELS,
+  exerciseOrUnknown,
+  MUSCLE_LABELS,
+} from '../../data/exerciseCatalog';
 import { saveDraft, startDraftSession } from '../../state/strengthService';
-import { PlannedExercise, useStrengthStore } from '../../state/useStrengthStore';
+import {
+  PlannedExercise,
+  useStrengthStore,
+} from '../../state/useStrengthStore';
 import { useTheme } from '../../theme/theme';
 import { ExerciseMedia } from './components/ExerciseMedia';
+import { formatKg } from './components/SetRow';
 
-/** A compact -/value/+ control for one builder field. */
+/** A compact −/value/+ control for one builder field. */
 function Adjust({
   label,
   value,
@@ -39,7 +54,7 @@ function Adjust({
         >
           <Text style={M(700, 15, { color: c.ink })}>−</Text>
         </Pressable>
-        <Text style={[M(800, 15, { color: c.ink }), styles.adjustVal]}>
+        <Text style={[M(700, 15, { color: c.ink }), styles.adjustVal]}>
           {value}
           {suffix ? (
             <Text style={M(700, 9, { color: c.fnt })}>{suffix}</Text>
@@ -59,7 +74,17 @@ function Adjust({
   );
 }
 
-/** One exercise entry in the builder, with its editable targets + reorder. */
+/** "3 × 10 · 22.5 KG · 90S REST" — the accent summary line for one entry. */
+function entrySummary(entry: PlannedExercise): string {
+  const parts = [`${entry.targetSets} × ${entry.targetReps}`];
+  if (entry.setTargets) parts[0] = `${entry.targetSets} SETS · PER-SET`;
+  if (entry.targetWeightKg != null)
+    parts.push(`${formatKg(entry.targetWeightKg)} KG`);
+  parts.push(`${entry.restSec}S REST`);
+  return parts.join(' · ');
+}
+
+/** One exercise entry in the builder: its media, targets and reorder controls. */
 function BuilderRow({
   entry,
   index,
@@ -78,60 +103,45 @@ function BuilderRow({
   const updateSet = useStrengthStore(s => s.updateDraftSetTarget);
   const perSet = !!entry.setTargets;
   const weighted = entry.targetWeightKg != null;
-  const [preview, setPreview] = useState(false);
 
   const roundKg = (n: number) => Math.max(0, Math.round(n * 10) / 10);
 
   return (
-    <View style={[styles.row, { borderColor: c.hair }]}>
+    <View
+      style={[styles.row, { backgroundColor: c.card, borderColor: c.hair }]}
+    >
       <View style={styles.rowHead}>
-        <Text style={S(700, 14.5, { color: c.ink })} numberOfLines={1}>
-          {def.name}
-        </Text>
-        <View style={styles.rowHeadActions}>
-          <Pressable
-            onPress={() => setPreview(p => !p)}
-            accessibilityRole="button"
-            accessibilityLabel={`${preview ? 'Hide' : 'Preview'} ${def.name}`}
-            hitSlop={6}
-          >
-            <Text style={M(700, 10, { ls: 1, color: preview ? c.acc : c.mut })}>
-              {preview ? 'HIDE' : 'PREVIEW'}
+        <ExerciseMedia
+          exerciseId={entry.exerciseId}
+          variant="thumb"
+          height={76}
+        />
+        <View style={styles.rowMain}>
+          <View style={styles.rowTitle}>
+            <Text
+              style={[S(700, 14.5, { lh: 18, color: c.ink }), styles.rowName]}
+              numberOfLines={1}
+            >
+              {def.name}
             </Text>
-          </Pressable>
-          {index > 0 ? (
             <Pressable
-              onPress={() => move(entry.id, -1)}
+              onPress={() => remove(entry.id)}
               accessibilityRole="button"
-              accessibilityLabel={`Move ${def.name} up`}
+              accessibilityLabel={`Remove ${def.name}`}
               hitSlop={6}
             >
-              <Text style={M(700, 13, { color: c.mut })}>↑</Text>
+              <Text style={M(700, 10, { ls: 1, color: c.red })}>REMOVE</Text>
             </Pressable>
-          ) : null}
-          {index < count - 1 ? (
-            <Pressable
-              onPress={() => move(entry.id, 1)}
-              accessibilityRole="button"
-              accessibilityLabel={`Move ${def.name} down`}
-              hitSlop={6}
-            >
-              <Text style={M(700, 13, { color: c.mut })}>↓</Text>
-            </Pressable>
-          ) : null}
-          <Pressable
-            onPress={() => remove(entry.id)}
-            accessibilityRole="button"
-            accessibilityLabel={`Remove ${def.name}`}
-            hitSlop={6}
-          >
-            <Text style={M(700, 10, { ls: 1, color: c.red })}>REMOVE</Text>
-          </Pressable>
+          </View>
+          <Text style={[M(600, 9, { ls: 0.6, color: c.fnt }), styles.rowMeta]}>
+            {MUSCLE_LABELS[def.muscleGroup].toUpperCase()} ·{' '}
+            {EQUIPMENT_LABELS[def.equipment].toUpperCase()}
+          </Text>
+          <Text style={[M(700, 9, { ls: 1, color: c.acc }), styles.rowSummary]}>
+            {entrySummary(entry)}
+          </Text>
         </View>
       </View>
-      {preview ? (
-        <ExerciseMedia exerciseId={entry.exerciseId} height={150} />
-      ) : null}
 
       <View style={styles.adjustGrid}>
         <Adjust
@@ -139,9 +149,7 @@ function BuilderRow({
           value={String(entry.targetSets)}
           step={1}
           onDelta={d =>
-            update(entry.id, {
-              targetSets: Math.max(1, entry.targetSets + d),
-            })
+            update(entry.id, { targetSets: Math.max(1, entry.targetSets + d) })
           }
           accessibilityPrefix={`${def.name} sets`}
         />
@@ -186,25 +194,46 @@ function BuilderRow({
         />
       </View>
 
-      <Pressable
-        onPress={() => togglePerSet(entry.id, !perSet)}
-        accessibilityRole="switch"
-        accessibilityState={{ checked: perSet }}
-        accessibilityLabel={`Per-set targets for ${def.name}`}
-        hitSlop={6}
-        style={styles.perSetToggle}
-      >
-        <Text
-          style={M(700, 9.5, { ls: 1, color: perSet ? c.acc : c.mut })}
+      <View style={styles.rowFooter}>
+        <Pressable
+          onPress={() => togglePerSet(entry.id, !perSet)}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: perSet }}
+          accessibilityLabel={`Per-set targets for ${def.name}`}
+          hitSlop={6}
         >
-          {perSet ? '● ' : '○ '}PER-SET TARGETS
-        </Text>
-      </Pressable>
+          <Text style={M(700, 9.5, { ls: 1, color: perSet ? c.acc : c.mut })}>
+            {perSet ? '● ' : '○ '}PER-SET TARGETS
+          </Text>
+        </Pressable>
+        <View style={styles.moveRow}>
+          {index > 0 ? (
+            <Pressable
+              onPress={() => move(entry.id, -1)}
+              accessibilityRole="button"
+              accessibilityLabel={`Move ${def.name} up`}
+              hitSlop={6}
+            >
+              <Text style={M(700, 13, { color: c.mut })}>↑</Text>
+            </Pressable>
+          ) : null}
+          {index < count - 1 ? (
+            <Pressable
+              onPress={() => move(entry.id, 1)}
+              accessibilityRole="button"
+              accessibilityLabel={`Move ${def.name} down`}
+              hitSlop={6}
+            >
+              <Text style={M(700, 13, { color: c.mut })}>↓</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      </View>
 
       {perSet && entry.setTargets ? (
         <View style={styles.setList}>
           {entry.setTargets.map((st, i) => (
-            <View key={i} style={[styles.setRow, { borderColor: c.hair }]}>
+            <View key={i} style={[styles.setRow, { borderTopColor: c.hair }]}>
               <Text
                 style={[M(700, 10, { ls: 0.5, color: c.fnt }), styles.setNum]}
               >
@@ -247,8 +276,7 @@ function BuilderRow({
  * strength store, so the picker modal can append to it without route params.
  */
 export function WorkoutBuilderScreen({ navigation }: ScreenProps) {
-  const t = useTheme();
-  const c = t.colors;
+  const c = useTheme().colors;
   const draft = useStrengthStore(s => s.draft);
   const setName = useStrengthStore(s => s.setDraftName);
 
@@ -266,7 +294,7 @@ export function WorkoutBuilderScreen({ navigation }: ScreenProps) {
 
   return (
     <BriefScreen>
-      <Section n="01" title="Workout name" first>
+      <Card first title="Workout name">
         <TextInput
           value={draft?.name ?? ''}
           onChangeText={setName}
@@ -274,23 +302,20 @@ export function WorkoutBuilderScreen({ navigation }: ScreenProps) {
           placeholderTextColor={c.fnt}
           style={[
             S(600, 15, { color: c.ink }),
+            inputStyle(c),
             styles.nameInput,
-            { borderColor: c.hair },
           ]}
         />
-      </Section>
+      </Card>
 
-      <Section
-        n="02"
+      <Card
         title="Exercises"
-        titleRight={
-          <Text style={M(700, 10.5, { color: c.fnt })}>
-            {exercises.length}
-          </Text>
+        right={
+          <Text style={M(700, 10.5, { color: c.fnt })}>{exercises.length}</Text>
         }
       >
         {exercises.length === 0 ? (
-          <Text style={[S(600, 13, { color: c.mut }), styles.empty]}>
+          <Text style={[S(600, 13, { lh: 19, color: c.mut }), styles.empty]}>
             No exercises yet. Add movements from the catalog below.
           </Text>
         ) : (
@@ -304,74 +329,68 @@ export function WorkoutBuilderScreen({ navigation }: ScreenProps) {
           ))
         )}
 
-        <Pressable
+        <BriefButton
+          label="＋ ADD EXERCISE"
+          kind="dashed"
+          size={13}
           onPress={() => navigation.navigate('ExercisePicker')}
-          accessibilityRole="button"
-          accessibilityLabel="Add exercise"
-          style={[styles.addExercise, { borderColor: c.ink }]}
-        >
-          <Text style={M(700, 12, { ls: 0.5, color: c.ink })}>
-            ＋ ADD EXERCISE
-          </Text>
-        </Pressable>
-      </Section>
+          style={styles.addExercise}
+        />
+      </Card>
 
       <View style={styles.footer}>
-        <Pressable
+        <BriefButton
+          label="SAVE"
+          kind="outline"
+          size={15}
+          disabled={!canRun}
           onPress={onSave}
-          disabled={!canRun}
-          accessibilityRole="button"
+          style={styles.footerBtn}
           accessibilityLabel="Save workout"
-          style={[
-            styles.footerBtn,
-            { borderColor: c.hair, opacity: canRun ? 1 : 0.4 },
-          ]}
-        >
-          <Text style={M(700, 12, { ls: 1, color: c.ink })}>SAVE</Text>
-        </Pressable>
-        <Pressable
-          onPress={onStart}
+        />
+        <BriefButton
+          label="START"
+          size={15}
+          fontSize={12}
           disabled={!canRun}
-          accessibilityRole="button"
+          onPress={onStart}
+          style={styles.footerBtn}
           accessibilityLabel="Start workout"
-          style={[
-            styles.footerBtn,
-            styles.footerFill,
-            { backgroundColor: c.ink, opacity: canRun ? 1 : 0.4 },
-          ]}
-        >
-          <Text style={M(700, 12, { ls: 1, color: c.inv })}>START</Text>
-        </Pressable>
+        />
       </View>
     </BriefScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  nameInput: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginTop: 12,
-  },
-  empty: { marginTop: 12, lineHeight: 19 },
+  nameInput: { marginTop: 12 },
+  empty: { marginTop: 12 },
   row: {
     borderWidth: 1,
-    borderRadius: 16,
+    borderRadius: 10,
     padding: 14,
     marginTop: 12,
-    gap: 12,
+    gap: 14,
   },
-  rowHead: {
+  rowHead: { flexDirection: 'row', gap: 13, alignItems: 'flex-start' },
+  rowMain: { flex: 1, minWidth: 0 },
+  rowTitle: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: 10,
   },
-  rowHeadActions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  rowName: { flex: 1, minWidth: 0 },
+  rowMeta: { marginTop: 5 },
+  rowSummary: { marginTop: 8 },
   adjustGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
-  perSetToggle: { alignSelf: 'flex-start', paddingVertical: 2 },
+  rowFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  moveRow: { flexDirection: 'row', gap: 14 },
   setList: { gap: 10 },
   setRow: {
     flexDirection: 'row',
@@ -381,7 +400,7 @@ const styles = StyleSheet.create({
     paddingTop: 10,
   },
   setNum: { width: 44, flexShrink: 0 },
-  adjust: { gap: 6, minWidth: 96, flexGrow: 1 },
+  adjust: { gap: 6, minWidth: 84, flexGrow: 1, flexBasis: 84 },
   adjustRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   adjustVal: { flex: 1, textAlign: 'center' },
   pm: {
@@ -392,21 +411,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  addExercise: {
-    borderWidth: 1,
-    borderStyle: 'dashed',
-    borderRadius: 999,
-    paddingVertical: 13,
-    alignItems: 'center',
-    marginTop: 14,
-  },
+  addExercise: { marginTop: 14 },
   footer: { flexDirection: 'row', gap: 12, marginTop: 22 },
-  footerBtn: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingVertical: 15,
-    alignItems: 'center',
-  },
-  footerFill: { borderWidth: 0 },
+  footerBtn: { flex: 1 },
 });

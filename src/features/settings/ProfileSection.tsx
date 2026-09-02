@@ -9,7 +9,7 @@ import {
   View,
 } from 'react-native';
 
-import { M, S, Section } from '../../components/brief';
+import { M, S, Card } from '../../components/brief';
 import { updateProfile } from '../../state/profileService';
 import { ageFromDob, Sex, useProfileStore } from '../../state/useProfileStore';
 import { useTheme } from '../../theme/theme';
@@ -31,7 +31,11 @@ function parseDob(s: string): number | null {
   const mo = +m[2];
   const d = +m[3];
   const dt = new Date(y, mo - 1, d);
-  if (dt.getFullYear() !== y || dt.getMonth() !== mo - 1 || dt.getDate() !== d) {
+  if (
+    dt.getFullYear() !== y ||
+    dt.getMonth() !== mo - 1 ||
+    dt.getDate() !== d
+  ) {
     return null;
   }
   dt.setHours(0, 0, 0, 0);
@@ -57,7 +61,7 @@ const SEXES: Sex[] = ['male', 'female', 'other'];
  * effect — the value is read straight off the end-editing event. Sex reads the
  * store directly.
  */
-export function ProfileSection({ n = '02' }: { n?: string }) {
+export function ProfileSection() {
   const t = useTheme();
   const c = t.colors;
   const profile = useProfileStore(s => s.profile);
@@ -88,16 +92,21 @@ export function ProfileSection({ n = '02' }: { n?: string }) {
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 11,
+    // The design fills fields with the page ground so they read as insets in
+    // the card rather than as another raised surface.
+    backgroundColor: c.bg,
   } as const;
 
   return (
-    <Section n={n} title="Profile">
+    <Card title="Profile">
       <Text style={[M(600, 10.5, { color: c.fnt }), styles.note]}>
-        USED TO TURN WORKOUT HEART-RATE INTO TRAINING ZONES. ALL OPTIONAL · STAYS
-        ON YOUR PHONE.
+        USED TO TURN WORKOUT HEART-RATE INTO TRAINING ZONES. ALL OPTIONAL ·
+        STAYS ON YOUR PHONE.
       </Text>
 
-      <Field label={age != null ? `DATE OF BIRTH · AGE ${age}` : 'DATE OF BIRTH'}>
+      <Field
+        label={age != null ? `DATE OF BIRTH · AGE ${age}` : 'DATE OF BIRTH'}
+      >
         <TextInput
           key={`dob:${seed}`}
           defaultValue={dobToInput(profile.dateOfBirth)}
@@ -114,7 +123,9 @@ export function ProfileSection({ n = '02' }: { n?: string }) {
         <Field label="HEIGHT (CM)" style={styles.half}>
           <TextInput
             key={`h:${seed}`}
-            defaultValue={profile.heightCm != null ? String(profile.heightCm) : ''}
+            defaultValue={
+              profile.heightCm != null ? String(profile.heightCm) : ''
+            }
             onEndEditing={onHeight}
             placeholder="cm"
             placeholderTextColor={c.fnt}
@@ -126,7 +137,9 @@ export function ProfileSection({ n = '02' }: { n?: string }) {
         <Field label="WEIGHT (KG)" style={styles.half}>
           <TextInput
             key={`w:${seed}`}
-            defaultValue={profile.weightKg != null ? String(profile.weightKg) : ''}
+            defaultValue={
+              profile.weightKg != null ? String(profile.weightKg) : ''
+            }
             onEndEditing={onWeight}
             placeholder="kg"
             placeholderTextColor={c.fnt}
@@ -155,7 +168,9 @@ export function ProfileSection({ n = '02' }: { n?: string }) {
                   },
                 ]}
               >
-                <Text style={M(700, 11, { ls: 0.5, color: on ? c.inv : c.mut })}>
+                <Text
+                  style={M(700, 11, { ls: 0.5, color: on ? c.inv : c.mut })}
+                >
                   {s.toUpperCase()}
                 </Text>
               </Pressable>
@@ -163,7 +178,7 @@ export function ProfileSection({ n = '02' }: { n?: string }) {
           })}
         </View>
       </Field>
-    </Section>
+    </Card>
   );
 }
 

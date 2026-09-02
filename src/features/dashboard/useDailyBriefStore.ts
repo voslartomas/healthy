@@ -16,6 +16,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { useAppStore } from '../../state/useAppStore';
+import { whenHealthFresh } from '../../state/useHealthStore';
 import { CoachError, runCoach } from '../coach/aiClient';
 import { buildDataContext } from '../coach/dataContext';
 import { languageDirective } from '../coach/languages';
@@ -39,7 +40,9 @@ const hydrated = new Promise<void>(resolve => {
   markHydrated = resolve;
 });
 
-export type BriefStatus = 'idle' | 'loading' | 'ready' | 'error';
+/** `syncing` = waiting on today's health read before we can write anything
+ * truthful; `loading` = the model is actually generating. */
+export type BriefStatus = 'idle' | 'syncing' | 'loading' | 'ready' | 'error';
 
 /** Local date key (YYYY-M-D) used to generate the brief at most once per day. */
 function todayKey(): string {
@@ -58,6 +61,7 @@ function canGenerate(): boolean {
 
 /** Ask the coach model for one short paragraph, grounded in the live data. */
 async function generateBrief(): Promise<string> {
+  const startedAt = Date.now();
   const { apiKey, model, aiProvider } = useAppStore.getState();
   const system = [
     "You are the user's health coach writing today's one-line dashboard note.",
@@ -78,6 +82,10 @@ async function generateBrief(): Promise<string> {
       exec: async () => '',
     },
   );
+  // The on-device model dominates this call (the data context is built from the
+  // in-memory snapshot). Logged so a slow brief can be attributed to inference
+  // rather than to the health read. Tag: HEA-BRIEF.
+  console.log(`[HEA-BRIEF] generated in ${Date.now() - startedAt}ms`);
   return reply.trim();
 }
 
@@ -97,7 +105,7 @@ export const useDailyBriefStore = create<DailyBriefState>()(
   persist(
     (set, get) => {
       const run = async () => {
-        if (get().status === 'loading') return;
+        if (get().status === 'loading' || get().status === 'syncing') return;
         // For the on-device provider, sync model status from disk first so the
         // brief generates on a fresh launch even before Settings initialised it.
         if (useAppStore.getState().aiProvider === 'ondevice') {
@@ -135,6 +143,25 @@ export const useDailyBriefStore = create<DailyBriefState>()(
             if (get().status !== 'ready') set({ status: 'ready' });
             return;
           }
+          // Sync the on-device model's status from disk before deciding — on a
+          // cold launch the store hasn't checked yet and would read "not ready"
+          // for a model that is in fact downloaded. (`run` repeats this; it is
+          // idempotent and cheap.)
+          if (useAppStore.getState().aiProvider === 'ondevice') {
+            await useModelStore.getState().check();
+          }
+          if (!canGenerate()) {
+            set({ status: 'idle' });
+            return;
+          }
+          // First open of the day: the snapshot on screen is still the SQLite
+          // cache — yesterday's sleep, yesterday's HRV. Generating now would
+          // write a brief about the wrong day and then cache it until midnight.
+          // Wait for a live read (bounded, so offline still degrades cleanly).
+          set({ status: 'syncing', error: null });
+          await whenHealthFresh();
+          // Hand back to `run`, whose in-flight guard rejects 'syncing'.
+          set({ status: 'idle' });
           await run();
         },
         regenerate: async () => {

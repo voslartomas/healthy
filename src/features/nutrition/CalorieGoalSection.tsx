@@ -8,7 +8,7 @@ import {
   View,
 } from 'react-native';
 
-import { M, S, Section } from '../../components/brief';
+import { M, S, Card } from '../../components/brief';
 import {
   createCalorieGoal,
   removeCalorieGoal,
@@ -85,7 +85,7 @@ function signed(n: number): string {
  * with configuration rather than the daily Fuel screen (which still shows the
  * active target in its hero + quad).
  */
-export function CalorieGoalSection({ n = '03' }: { n?: string }) {
+export function CalorieGoalSection() {
   const t = useTheme();
   const c = t.colors;
   const snap = useHealthStore(s => s.snapshot);
@@ -143,13 +143,15 @@ export function CalorieGoalSection({ n = '03' }: { n?: string }) {
     borderRadius: 12,
     paddingHorizontal: 14,
     paddingVertical: 11,
+    // The design fills fields with the page ground so they read as insets in
+    // the card rather than as another raised surface.
+    backgroundColor: c.bg,
   } as const;
 
   return (
-    <Section
-      n={n}
+    <Card
       title="Calorie goal"
-      titleRight={
+      right={
         <Pressable
           onPress={() => setEditing(e => !e)}
           accessibilityRole="button"
@@ -163,7 +165,7 @@ export function CalorieGoalSection({ n = '03' }: { n?: string }) {
     >
       {activeGoal ? (
         <View style={styles.goalHead}>
-          <Text style={M(800, 22, { ls: -0.5, color: c.ink })}>
+          <Text style={M(700, 22, { ls: -0.5, color: c.ink })}>
             {signed(activeGoal.targetNet)}
             <Text style={M(700, 12, { color: c.fnt })}> KCAL/DAY</Text>
           </Text>
@@ -242,10 +244,10 @@ export function CalorieGoalSection({ n = '03' }: { n?: string }) {
               accessibilityLabel="Save calorie goal"
               style={[
                 styles.formBtn,
-                { backgroundColor: c.ink, opacity: busy ? 0.5 : 1 },
+                { backgroundColor: c.accSolid, opacity: busy ? 0.5 : 1 },
               ]}
             >
-              <Text style={M(700, 16, { color: c.inv })}>+</Text>
+              <Text style={M(700, 16, { color: c.onAccent })}>+</Text>
             </Pressable>
           </View>
         </View>
@@ -276,7 +278,7 @@ export function CalorieGoalSection({ n = '03' }: { n?: string }) {
           ))}
         </View>
       ) : null}
-    </Section>
+    </Card>
   );
 }
 

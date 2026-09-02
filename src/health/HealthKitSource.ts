@@ -1,9 +1,5 @@
 import { ageFromDob, profileAge } from '../state/useProfileStore';
-import {
-  FoodEntryInput,
-  FoodLogResult,
-  RawFetchWindows,
-} from './fetchWindows';
+import { FoodEntryInput, FoodLogResult, RawFetchWindows } from './fetchWindows';
 import { HealthSource } from './HealthSource';
 import { computeHrZones, HeartRateSample, resolveMaxHr } from './hrZones';
 import {
@@ -337,6 +333,7 @@ export class HealthKitSource implements HealthSource {
     }
 
     const metricsFrom = new Date(now - windows.metricsDays * DAY_MS);
+    const hrvFrom = new Date(now - windows.hrvDays * DAY_MS);
     const exerciseFrom = new Date(now - windows.exerciseDays * DAY_MS);
     const stepsFrom = new Date(now - windows.stepsDays * DAY_MS);
     const caloriesFrom = new Date(now - windows.caloriesDays * DAY_MS);
@@ -356,7 +353,7 @@ export class HealthKitSource implements HealthSource {
       dietCarbsS,
       dietFatS,
     ] = await Promise.all([
-      this.qs(mod, ID.hrvSdnn, metricsFrom, to),
+      this.qs(mod, ID.hrvSdnn, hrvFrom, to),
       this.qs(mod, ID.restingHr, metricsFrom, to),
       this.qs(mod, ID.steps, stepsFrom, to),
       this.qs(mod, ID.activeEnergy, caloriesFrom, to),
@@ -406,7 +403,13 @@ export class HealthKitSource implements HealthSource {
     const totalEnergy = this.buildTotalEnergy(activeS, basalS, sources);
 
     // Workouts + per-session HR zones.
-    const exercise = await this.buildExercise(mod, exerciseFrom, to, now, sources);
+    const exercise = await this.buildExercise(
+      mod,
+      exerciseFrom,
+      to,
+      now,
+      sources,
+    );
 
     // Sleep sessions from category samples.
     const sleep = await this.buildSleep(mod, metricsFrom, to, sources);
@@ -452,7 +455,10 @@ export class HealthKitSource implements HealthSource {
       const source = sourceOf(s);
       sources.add(source);
       const cur = byDay.get(day);
-      byDay.set(day, { kcal: (cur?.kcal ?? 0) + value, source: 'Apple Health' });
+      byDay.set(day, {
+        kcal: (cur?.kcal ?? 0) + value,
+        source: 'Apple Health',
+      });
     };
     for (const s of activeS) add(s);
     for (const s of basalS) add(s);
@@ -488,7 +494,8 @@ export class HealthKitSource implements HealthSource {
     // workout — one query instead of N, and a shared observed HRmax.
     const hrSamples: HeartRateSample[] = [];
     try {
-      const hr = (await mod.queryQuantitySamples?.(ID.heartRate, { from, to })) ?? [];
+      const hr =
+        (await mod.queryQuantitySamples?.(ID.heartRate, { from, to })) ?? [];
       for (const s of hr) {
         const time = toMs(s.startDate);
         const bpm = quantityOf(s);
@@ -509,7 +516,7 @@ export class HealthKitSource implements HealthSource {
       const energy =
         typeof w.totalEnergyBurned === 'number'
           ? w.totalEnergyBurned
-          : w.totalEnergyBurned?.quantity ?? null;
+          : (w.totalEnergyBurned?.quantity ?? null);
       const inSession = hrSamples.filter(s => s.time >= start && s.time <= end);
       const hrZones: CardioZones | null = computeHrZones(inSession, hrMax);
       out.push({
@@ -518,7 +525,8 @@ export class HealthKitSource implements HealthSource {
         displayName: null,
         start,
         end,
-        durationMin: w.duration != null ? w.duration / 60 : (end - start) / 60000,
+        durationMin:
+          w.duration != null ? w.duration / 60 : (end - start) / 60000,
         energyKcal: energy,
         hrZones,
         source,
@@ -535,7 +543,8 @@ export class HealthKitSource implements HealthSource {
   ): Promise<SleepRecord[]> {
     let samples: CategorySample[] = [];
     try {
-      samples = (await mod.queryCategorySamples?.(ID.sleep, { from, to })) ?? [];
+      samples =
+        (await mod.queryCategorySamples?.(ID.sleep, { from, to })) ?? [];
     } catch (err) {
       console.warn('[HealthKit] query sleep failed', err);
       return [];
@@ -554,7 +563,9 @@ export class HealthKitSource implements HealthSource {
         source: sourceOf(s),
       }))
       .filter(
-        (s): s is { start: number; end: number; value: number; source: string } =>
+        (
+          s,
+        ): s is { start: number; end: number; value: number; source: string } =>
           s.start != null && s.end != null && s.end > s.start && s.value !== 0,
       )
       .sort((a, b) => a.start - b.start);
@@ -605,17 +616,24 @@ export class HealthKitSource implements HealthSource {
       }
       const source = group[0].source;
       sources.add(source);
+      // Asleep + awake, i.e. the whole grouped session — matching the Health
+      // Connect path, where sleep duration counts brief awakenings inside the
+      // night rather than deducting them (see accumulateStages there).
+      const sessionMin = asleepMin + stages.awakeMin;
       sessions.push({
         start,
         end,
-        durationMin: asleepMin > 0 ? asleepMin : (end - start) / 60000,
+        durationMin: sessionMin > 0 ? sessionMin : (end - start) / 60000,
         source,
         stages: staged ? stages : null,
       });
       group = [];
     };
     for (const s of segs) {
-      if (group.length && s.start - group[group.length - 1].end > SLEEP_GAP_MS) {
+      if (
+        group.length &&
+        s.start - group[group.length - 1].end > SLEEP_GAP_MS
+      ) {
         flush();
       }
       group.push(s);
@@ -704,20 +722,29 @@ export class HealthKitSource implements HealthSource {
             unit: 'g',
             quantity: input.fatG,
           });
-        const res = await mod.saveCorrelationSample('HKCorrelationTypeIdentifierFood', samples, {
-          start,
-          end,
-          metadata: { HKFoodType: input.name },
-        });
+        const res = await mod.saveCorrelationSample(
+          'HKCorrelationTypeIdentifierFood',
+          samples,
+          {
+            start,
+            end,
+            metadata: { HKFoodType: input.name },
+          },
+        );
         return { ok: true, name: typeof res === 'string' ? res : undefined };
       }
       // Fallback: save the energy quantity alone.
       if (mod?.saveQuantitySample) {
-        const res = await mod.saveQuantitySample(ID.dietaryEnergy, 'kcal', input.kcal, {
-          start,
-          end,
-          metadata: { HKFoodType: input.name },
-        });
+        const res = await mod.saveQuantitySample(
+          ID.dietaryEnergy,
+          'kcal',
+          input.kcal,
+          {
+            start,
+            end,
+            metadata: { HKFoodType: input.name },
+          },
+        );
         return { ok: true, name: typeof res === 'string' ? res : undefined };
       }
       return { ok: false, error: 'not-connected' };

@@ -75,7 +75,10 @@ function Slider({
         style={[styles.track, { backgroundColor: track }]}
       >
         <View
-          style={[styles.trackFill, { width: `${ratio * 100}%`, backgroundColor: fill }]}
+          style={[
+            styles.trackFill,
+            { width: `${ratio * 100}%`, backgroundColor: fill },
+          ]}
         />
       </View>
       <View
@@ -144,10 +147,12 @@ export function PortionSheet({
       </View>
 
       <View style={styles.amountRow}>
-        <Text style={M(800, 30, { color: c.ink })}>
+        <Text style={M(700, 30, { color: c.ink })}>
           {portionLabel(cfg, amount)}
         </Text>
-        <Text style={M(700, 12, { color: c.acc })}>{`${scaled.kcal} KCAL`}</Text>
+        <Text
+          style={M(700, 12, { color: c.acc })}
+        >{`${scaled.kcal} KCAL`}</Text>
       </View>
 
       <Slider
@@ -169,9 +174,9 @@ export function PortionSheet({
         onPress={() => onConfirm(scaled)}
         accessibilityRole="button"
         accessibilityLabel={`${actionLabel} ${scaled.name}`}
-        style={[styles.confirm, { backgroundColor: c.ink }]}
+        style={[styles.confirm, { backgroundColor: c.accSolid }]}
       >
-        <Text style={M(700, 12, { ls: 0.6, color: c.inv })}>
+        <Text style={M(700, 12, { ls: 0.6, color: c.onAccent })}>
           {`${actionLabel}  ·  ${scaled.kcal} KCAL`}
         </Text>
       </Pressable>

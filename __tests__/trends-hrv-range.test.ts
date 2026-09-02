@@ -1,4 +1,8 @@
-import { buildTrendSeries, dailyStats, rollingRange } from '../src/health/derive';
+import {
+  buildTrendSeries,
+  dailyStats,
+  rollingRange,
+} from '../src/health/derive';
 import { RawHealthData } from '../src/health/types';
 import { buildMetrics } from '../src/features/trends/metrics';
 
@@ -24,8 +28,8 @@ function rawWithHrv(samples: { value: number; time: number }[]): RawHealthData {
   };
 }
 
-// Two nights: day A (older) values 40/50/90 → median 50, min 40, max 90;
-// day B (newer) values 30/32/34 → median 32, min 30, max 34.
+// Two nights: night A (older) values 40/50/90 → mean 60, min 40, max 90;
+// night B (newer) values 30/32/34 → mean 32, min 30, max 34.
 const dayA = Math.floor((NOW - DAY) / DAY) * DAY;
 const dayB = Math.floor(NOW / DAY) * DAY;
 const raw = rawWithHrv([
@@ -47,21 +51,23 @@ describe('dailyStats', () => {
   });
 });
 
-describe('buildTrendSeries HRV median + rolling range', () => {
-  it('hrv line is the nightly median; hrvRange is a rolling min/max band', () => {
+describe('buildTrendSeries HRV average + rolling range', () => {
+  it('hrv line is the nightly average; hrvRange is a rolling min/max band', () => {
     const t = buildTrendSeries(raw);
-    expect(t.hrv.map(p => p.value)).toEqual([50, 32]);
-    // Rolling band (±3 days): with only two days in range, each day's band spans
-    // both medians (min 32, max 50) — NOT the wide intraday nightly spread.
+    expect(t.hrv.map(p => p.value)).toEqual([60, 32]);
+    // Rolling band (±3 days): with only two nights in range, each night's band
+    // spans both values (min 32, max 60) — NOT the wide intra-night spread.
     expect(t.hrvRange).toEqual([
-      { time: t.hrv[0].time, lo: 32, hi: 50 },
-      { time: t.hrv[1].time, lo: 32, hi: 50 },
+      { time: t.hrv[0].time, lo: 32, hi: 60 },
+      { time: t.hrv[1].time, lo: 32, hi: 60 },
     ]);
   });
 
-  it('a restless night (spike) does not inflate the median', () => {
-    // day A has a 90 spike but median stays 50 — the fix for "should be 32".
-    expect(buildTrendSeries(raw).hrv[0].value).toBe(50);
+  it('still aggregates the night rather than taking one sample', () => {
+    // The original bug this guards was the line showing an arbitrary single
+    // reading (32, the last sample of the night). It shows the night's figure.
+    expect(buildTrendSeries(raw).hrv[0].value).not.toBe(50);
+    expect(buildTrendSeries(raw).hrv[0].value).toBe(60);
   });
 });
 
@@ -105,11 +111,11 @@ describe('rollingRange', () => {
 describe('buildMetrics HRV band + times', () => {
   it('exposes a band aligned to points, plus per-point times', () => {
     const hrv = buildMetrics(buildTrendSeries(raw)).find(m => m.key === 'hrv')!;
-    expect(hrv.points).toEqual([50, 32]);
+    expect(hrv.points).toEqual([60, 32]);
     expect(hrv.times).toHaveLength(2);
     expect(hrv.band).toEqual([
-      { lo: 32, hi: 50 },
-      { lo: 32, hi: 50 },
+      { lo: 32, hi: 60 },
+      { lo: 32, hi: 60 },
     ]);
   });
 

@@ -86,7 +86,7 @@ function BriefTabBar({ state, navigation }: BottomTabBarProps) {
               accessibilityLabel={meta.label}
               style={styles.tab}
             >
-              <Text style={M(800, 14, { color })}>{meta.num}</Text>
+              <Text style={M(700, 14, { color })}>{meta.num}</Text>
               <Text style={M(700, 8.5, { ls: 1.4, color })}>{meta.label}</Text>
             </Pressable>
           );

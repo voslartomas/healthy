@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { M } from '../../../components/brief';
-import { Ring } from '../../../components/Ring';
 import { useStrengthStore } from '../../../state/useStrengthStore';
 import {
   cancelRestOverNotification,
@@ -12,9 +11,10 @@ import { useTheme } from '../../../theme/theme';
 import { playRestBeep } from '../restBeep';
 
 /**
- * Between-sets rest countdown. Drives a {@link Ring} from full to empty over
- * `seconds`, beeps once when it reaches zero, and calls `onDone`. The user can
- * add 15s or skip straight to the next set. The countdown is computed from a
+ * Between-sets rest countdown: the design's centred REST block — eyebrow, an
+ * oversized mono countdown and a thin linear bar that drains as the rest runs
+ * out. Beeps once at zero and calls `onDone`. "+15S" extends; the runner owns
+ * the "START NEXT SET" button that skips ahead. The countdown is computed from a
  * target end-time (set in an effect, not during render) so it stays accurate
  * across a dropped frame or a brief background.
  *
@@ -28,8 +28,7 @@ export function RestTimer({
   seconds: number;
   onDone: () => void;
 }) {
-  const t = useTheme();
-  const c = t.colors;
+  const c = useTheme().colors;
   const extendRest = useStrengthStore(s => s.extendRest);
   const [total, setTotal] = useState(seconds);
   const [remaining, setRemaining] = useState(seconds);
@@ -83,59 +82,58 @@ export function RestTimer({
     setRemaining(Math.max(0, Math.ceil((endRef.current - Date.now()) / 1000)));
   }
 
-  function skip() {
-    if (doneRef.current) return;
-    doneRef.current = true;
-    onDone();
-  }
-
-  const progress = total > 0 ? remaining / total : 0;
+  // The bar fills as the rest elapses, matching the design's left-to-right run.
+  const elapsed = total > 0 ? 1 - remaining / total : 1;
   const mm = Math.floor(remaining / 60);
   const ss = remaining % 60;
   const label = mm > 0 ? `${mm}:${String(ss).padStart(2, '0')}` : String(ss);
 
   return (
     <View style={styles.wrap}>
-      <Ring
-        progress={progress}
-        color={c.acc}
-        size={168}
-        strokeWidth={12}
-        value={label}
-        label="REST"
-        valueFontSize={44}
-      />
-      <View style={styles.row}>
+      <View style={styles.head}>
+        <Text style={M(700, 9, { ls: 1.6, color: c.fnt })}>REST</Text>
         <Pressable
           onPress={addTime}
           accessibilityRole="button"
           accessibilityLabel="Add 15 seconds"
-          style={[styles.btn, { borderColor: c.hair }]}
+          hitSlop={10}
+          style={styles.add}
         >
-          <Text style={M(700, 12, { ls: 0.5, color: c.ink })}>+15s</Text>
+          <Text style={M(700, 9, { ls: 1.6, color: c.acc })}>+15S</Text>
         </Pressable>
-        <Pressable
-          onPress={skip}
-          accessibilityRole="button"
-          accessibilityLabel="Skip rest"
-          style={[styles.btn, styles.btnFill, { backgroundColor: c.ink }]}
-        >
-          <Text style={M(700, 12, { ls: 1, color: c.inv })}>SKIP REST</Text>
-        </Pressable>
+      </View>
+      <Text
+        style={[M(700, 72, { lh: 76, ls: -1.2, color: c.ink }), styles.big]}
+      >
+        {label}
+      </Text>
+      <View style={[styles.track, { backgroundColor: c.track }]}>
+        <View
+          style={{
+            width: `${Math.max(0, Math.min(1, elapsed)) * 100}%`,
+            height: '100%',
+            backgroundColor: c.accSolid,
+          }}
+        />
       </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: { alignItems: 'center', gap: 20, paddingVertical: 8 },
-  row: { flexDirection: 'row', gap: 12, alignSelf: 'stretch' },
-  btn: {
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingVertical: 14,
+  wrap: { marginTop: 20 },
+  head: {
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
   },
-  btnFill: { borderWidth: 0 },
+  add: { position: 'absolute', right: 0 },
+  big: { textAlign: 'center', marginTop: 10 },
+  track: {
+    height: 4,
+    borderRadius: 2,
+    overflow: 'hidden',
+    marginTop: 14,
+  },
 });

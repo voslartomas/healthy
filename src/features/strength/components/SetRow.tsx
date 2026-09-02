@@ -41,7 +41,7 @@ export function Stepper({
           <Text style={M(700, 20, { color: c.ink })}>−</Text>
         </Pressable>
         <View style={styles.readout}>
-          <Text style={M(800, 26, { ls: -1, color: c.ink })}>
+          <Text style={M(700, 26, { ls: -0.2, color: c.ink })}>
             {value}
             {unit ? (
               <Text style={M(700, 13, { color: c.fnt })}> {unit}</Text>
@@ -107,7 +107,7 @@ export function formatKg(kg: number): string {
 }
 
 const styles = StyleSheet.create({
-  row: { flexDirection: 'row', gap: 14, marginTop: 4 },
+  row: { flexDirection: 'row', gap: 14, marginTop: 16 },
   field: { flex: 1, minWidth: 0 },
   label: { marginBottom: 8, textAlign: 'center' },
   stepper: { flexDirection: 'row', alignItems: 'center', gap: 8 },

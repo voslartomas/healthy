@@ -8,7 +8,7 @@ import {
   M,
   PillSpec,
   S,
-  Section,
+  Card,
 } from '../../components/brief';
 import { useHealthStore } from '../../state/useHealthStore';
 import { useTheme } from '../../theme/theme';
@@ -43,8 +43,8 @@ export function CardioScreen(_props: ScreenProps) {
     : 0;
 
   const pill: PillSpec = hasLoad
-    ? { text: `WEEK LOAD ${cardio.weekLoad}`, bg: c.ink, textColor: c.inv }
-    : { text: 'NO CARDIO DATA', dot: c.fnt };
+    ? { text: `WEEK LOAD ${cardio.weekLoad}` }
+    : { text: 'NO CARDIO DATA', dot: c.fnt, bg: null };
 
   return (
     <BriefScreen>
@@ -54,7 +54,7 @@ export function CardioScreen(_props: ScreenProps) {
         caption="CARDIO LOAD · TODAY"
       />
 
-      <Section n="01" title="HR zones · 7 days" first>
+      <Card title="HR zones · 7 days" first>
         {!hasZones ? (
           <Text style={[S(600, 13, { color: c.mut }), styles.empty]}>
             {hasLoad
@@ -85,12 +85,11 @@ export function CardioScreen(_props: ScreenProps) {
             </View>
           );
         })}
-      </Section>
+      </Card>
 
-      <Section
-        n="02"
+      <Card
         title="Activities"
-        titleRight={
+        right={
           hasLoad ? (
             <Text style={M(700, 10.5, { color: c.fnt })}>
               {avgDaily} AVG/DAY
@@ -122,7 +121,7 @@ export function CardioScreen(_props: ScreenProps) {
             </View>
           ))
         )}
-      </Section>
+      </Card>
     </BriefScreen>
   );
 }

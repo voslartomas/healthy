@@ -11,8 +11,8 @@ import {
 import { HealthSnapshot, RawHealthData } from './types';
 
 export * from './types';
-export { deriveSnapshot, mergeRaw } from './derive';
-export { FULL_WINDOWS, LIGHT_WINDOWS } from './fetchWindows';
+export { deriveSnapshot, mergeRaw, pruneRaw } from './derive';
+export { FULL_METRICS_DAYS, FULL_WINDOWS, LIGHT_WINDOWS } from './fetchWindows';
 export type {
   FoodEntryInput,
   FoodLogResult,

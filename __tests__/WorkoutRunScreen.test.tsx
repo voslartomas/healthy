@@ -8,7 +8,10 @@ import { mockNav, renderWithProviders } from '../jest/renderWithProviders';
 import * as repo from '../src/db/strengthRepository';
 import { WorkoutRunScreen } from '../src/features/strength/WorkoutRunScreen';
 import { buildSession } from '../src/state/strengthService';
-import { PlannedExercise, useStrengthStore } from '../src/state/useStrengthStore';
+import {
+  PlannedExercise,
+  useStrengthStore,
+} from '../src/state/useStrengthStore';
 
 function reset() {
   useStrengthStore.setState({
@@ -59,7 +62,8 @@ it('enters rest after completing a non-final set', async () => {
     );
   await renderWithProviders(<WorkoutRunScreen navigation={mockNav()} />);
   fireEvent.press(screen.getByLabelText('Complete set'));
-  expect(await screen.findByLabelText('Skip rest')).toBeOnTheScreen();
+  // The rest card's primary action doubles as "skip ahead".
+  expect(await screen.findByLabelText('Start next set')).toBeOnTheScreen();
   expect(useStrengthStore.getState().session!.resting).toBe(true);
 });
 
@@ -78,12 +82,7 @@ it('adjusts weight in 0.5 kg steps', async () => {
   useStrengthStore
     .getState()
     .startSession(
-      buildSession(
-        'wk1',
-        'Push',
-        [entry({ id: 'a', targetWeightKg: 20 })],
-        0,
-      ),
+      buildSession('wk1', 'Push', [entry({ id: 'a', targetWeightKg: 20 })], 0),
     );
   await renderWithProviders(<WorkoutRunScreen navigation={mockNav()} />);
   fireEvent.press(screen.getByLabelText('Increase weight'));
@@ -109,9 +108,7 @@ it('shows a total-time clock counting from the session start', async () => {
   const startedAt = Date.now() - 3_661_000; // 1h 1m 1s ago
   useStrengthStore
     .getState()
-    .startSession(
-      buildSession('wk1', 'Push', [entry({ id: 'a' })], startedAt),
-    );
+    .startSession(buildSession('wk1', 'Push', [entry({ id: 'a' })], startedAt));
   await renderWithProviders(<WorkoutRunScreen navigation={mockNav()} />);
   expect(screen.getByText('TOTAL TIME')).toBeOnTheScreen();
   expect(screen.getByText('1:01:01')).toBeOnTheScreen();
@@ -119,9 +116,7 @@ it('shows a total-time clock counting from the session start', async () => {
 
 it('blocks back navigation while a workout is running', async () => {
   const nav = mockNav();
-  let onBeforeRemove:
-    | ((e: { preventDefault: () => void }) => void)
-    | undefined;
+  let onBeforeRemove: ((e: { preventDefault: () => void }) => void) | undefined;
   (nav.addListener as jest.Mock).mockImplementation(
     (type: string, cb: (e: { preventDefault: () => void }) => void) => {
       if (type === 'beforeRemove') onBeforeRemove = cb;

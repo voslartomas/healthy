@@ -35,7 +35,14 @@ export type IconName =
   | 'ondevice'
   | 'googleHealth'
   | 'appleHealth'
-  | 'heart';
+  | 'heart'
+  | 'moon'
+  | 'pulse'
+  | 'heartLine'
+  | 'boltLine'
+  | 'bars'
+  | 'droplet'
+  | 'flame';
 
 interface IconProps {
   name: IconName;
@@ -246,6 +253,30 @@ function renderIcon(
             {...s}
           />
         </>
+      );
+    case 'moon':
+      return <Path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" {...s} />;
+    case 'pulse':
+      return <Path d="M22 12h-4l-3 8-4-16-3 8H2" {...s} />;
+    case 'heartLine':
+      return (
+        <Path
+          d="M20.8 4.6a5.5 5.5 0 0 0-7.8 0L12 5.7l-1-1a5.5 5.5 0 0 0-7.8 7.8l8.8 8.9 8.8-8.9a5.5 5.5 0 0 0 0-7.8z"
+          {...s}
+        />
+      );
+    case 'boltLine':
+      return <Path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" {...s} />;
+    case 'bars':
+      return <Path d="M4 20h16M7 20V10M12 20V4M17 20v-7" {...s} />;
+    case 'droplet':
+      return <Path d="M12 2.7 6.3 9a7 7 0 1 0 11.4 0z" {...s} />;
+    case 'flame':
+      return (
+        <Path
+          d="M12 22c4.4 0 7-2.8 7-6.5 0-4.5-3.5-6.2-3.5-9.5C15.5 3.5 13.5 2 12 2c.8 3.2-1.5 4.6-2.9 6.4A8.6 8.6 0 0 0 5 15.5C5 19.2 7.6 22 12 22z"
+          {...s}
+        />
       );
     case 'googleHealth':
       return <Path d="M3 12h4l2 5 4-12 2 7h6" {...s} />;

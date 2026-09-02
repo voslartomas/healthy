@@ -1,6 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
-  Animated,
   FlatList,
   Pressable,
   ScrollView,
@@ -11,18 +10,23 @@ import {
 } from 'react-native';
 
 import { ScreenProps } from '../../app/navigation/types';
-import { BRIEF_MAX_WIDTH, M, S } from '../../components/brief';
+import {
+  BRIEF_GUTTER,
+  BRIEF_MAX_WIDTH,
+  inputStyle,
+  M,
+  S,
+} from '../../components/brief';
 import {
   EQUIPMENT_LABELS,
   EXERCISE_CATALOG,
   Equipment,
-  ExerciseDef,
   MUSCLE_LABELS,
   MuscleGroup,
 } from '../../data/exerciseCatalog';
 import { useStrengthStore } from '../../state/useStrengthStore';
 import { useTheme } from '../../theme/theme';
-import { FRAMES } from './components/ExerciseMedia';
+import { ExerciseMedia } from './components/ExerciseMedia';
 
 const EQUIPMENT_FILTERS: (Equipment | 'all')[] = [
   'all',
@@ -44,9 +48,23 @@ const MUSCLE_FILTERS: (MuscleGroup | 'all')[] = [
 
 /** Preferred display order for the specific-muscle sub-filter. */
 const MUSCLE_ORDER = [
-  'chest', 'shoulders', 'traps', 'neck', 'biceps', 'triceps', 'forearms',
-  'lats', 'middle back', 'lower back', 'abdominals',
-  'glutes', 'quadriceps', 'hamstrings', 'calves', 'adductors', 'abductors',
+  'chest',
+  'shoulders',
+  'traps',
+  'neck',
+  'biceps',
+  'triceps',
+  'forearms',
+  'lats',
+  'middle back',
+  'lower back',
+  'abdominals',
+  'glutes',
+  'quadriceps',
+  'hamstrings',
+  'calves',
+  'adductors',
+  'abductors',
 ];
 
 /**
@@ -56,7 +74,12 @@ const MUSCLE_ORDER = [
  */
 const MUSCLES_BY_GROUP: Record<MuscleGroup, string[]> = (() => {
   const acc = {
-    chest: [], back: [], shoulders: [], arms: [], legs: [], core: [],
+    chest: [],
+    back: [],
+    shoulders: [],
+    arms: [],
+    legs: [],
+    core: [],
   } as Record<MuscleGroup, string[]>;
   for (const e of EXERCISE_CATALOG) {
     const m = e.primaryMuscles[0];
@@ -100,7 +123,8 @@ export function ExercisePickerScreen({ navigation }: ScreenProps) {
     return EXERCISE_CATALOG.filter(e => {
       if (equip !== 'all' && e.equipment !== equip) return false;
       if (muscle !== 'all' && e.muscleGroup !== muscle) return false;
-      if (submuscle !== 'all' && !e.primaryMuscles.includes(submuscle)) return false;
+      if (submuscle !== 'all' && !e.primaryMuscles.includes(submuscle))
+        return false;
       if (q && !e.name.toLowerCase().includes(q)) return false;
       return true;
     });
@@ -122,11 +146,7 @@ export function ExercisePickerScreen({ navigation }: ScreenProps) {
           placeholder="Search exercises"
           placeholderTextColor={c.fnt}
           autoCorrect={false}
-          style={[
-            S(600, 15, { color: c.ink }),
-            styles.search,
-            { borderColor: c.hair },
-          ]}
+          style={[S(600, 15, { color: c.ink }), inputStyle(c), styles.search]}
         />
         <ScrollView
           horizontal
@@ -143,10 +163,15 @@ export function ExercisePickerScreen({ navigation }: ScreenProps) {
                 accessibilityState={{ selected: on }}
                 style={[
                   styles.pill,
-                  { borderColor: on ? c.ink : c.hair, backgroundColor: on ? c.ink : 'transparent' },
+                  {
+                    borderColor: on ? c.ink : c.hair,
+                    backgroundColor: on ? c.ink : 'transparent',
+                  },
                 ]}
               >
-                <Text style={M(700, 10, { ls: 0.6, color: on ? c.inv : c.mut })}>
+                <Text
+                  style={M(700, 10.5, { ls: 0.6, color: on ? c.inv : c.mut })}
+                >
                   {(f === 'all' ? 'All' : EQUIPMENT_LABELS[f]).toUpperCase()}
                 </Text>
               </Pressable>
@@ -171,10 +196,15 @@ export function ExercisePickerScreen({ navigation }: ScreenProps) {
                 accessibilityState={{ selected: on }}
                 style={[
                   styles.pill,
-                  { borderColor: on ? c.ink : c.hair, backgroundColor: on ? c.ink : 'transparent' },
+                  {
+                    borderColor: on ? c.ink : c.hair,
+                    backgroundColor: on ? c.ink : 'transparent',
+                  },
                 ]}
               >
-                <Text style={M(700, 10, { ls: 0.6, color: on ? c.inv : c.mut })}>
+                <Text
+                  style={M(700, 10.5, { ls: 0.6, color: on ? c.inv : c.mut })}
+                >
                   {(m === 'all' ? 'All' : MUSCLE_LABELS[m]).toUpperCase()}
                 </Text>
               </Pressable>
@@ -198,10 +228,18 @@ export function ExercisePickerScreen({ navigation }: ScreenProps) {
                   style={[
                     styles.pill,
                     styles.subPill,
-                    { borderColor: on ? c.acc : c.hair, backgroundColor: on ? c.acc : 'transparent' },
+                    {
+                      borderColor: on ? c.acc : c.hair,
+                      backgroundColor: on ? c.acc : 'transparent',
+                    },
                   ]}
                 >
-                  <Text style={M(700, 10, { ls: 0.6, color: on ? c.inv : c.mut })}>
+                  <Text
+                    style={M(700, 10.5, {
+                      ls: 0.6,
+                      color: on ? c.onAccent : c.mut,
+                    })}
+                  >
                     {(m === 'all'
                       ? `All ${MUSCLE_LABELS[muscle as MuscleGroup]}`
                       : muscleLabel(m)
@@ -235,7 +273,7 @@ export function ExercisePickerScreen({ navigation }: ScreenProps) {
             accessibilityLabel={`Add ${e.name}`}
             style={[styles.item, { borderBottomColor: c.hair }]}
           >
-            <ExerciseThumb ex={e} />
+            <ExerciseMedia exerciseId={e.id} variant="thumb" height={64} />
             <View style={styles.itemMain}>
               <Text style={S(600, 14.5, { color: c.ink })} numberOfLines={1}>
                 {e.name}
@@ -256,93 +294,33 @@ export function ExercisePickerScreen({ navigation }: ScreenProps) {
   );
 }
 
-/**
- * Row preview: the exercise's start/end photos crossfaded on a loop (same media
- * as the workout runner, shrunk to a thumbnail), or a muted muscle-initial tile
- * when no photo is bundled. Rendered inside a FlatList so off-screen rows
- * unmount and their loops stop — only the visible handful animate at once.
- */
-function ExerciseThumb({ ex }: { ex: ExerciseDef }) {
-  const c = useTheme().colors;
-  const frames = FRAMES[ex.mediaKey ?? ex.id];
-  const [anim] = useState(() => new Animated.Value(0));
-
-  useEffect(() => {
-    if (!frames) return;
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(anim, { toValue: 1, duration: 900, delay: 300, useNativeDriver: true }),
-        Animated.timing(anim, { toValue: 0, duration: 900, delay: 300, useNativeDriver: true }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [anim, frames]);
-
-  if (!frames) {
-    return (
-      <View
-        style={[
-          styles.thumb,
-          styles.thumbEmpty,
-          { backgroundColor: c.track, borderColor: c.hair },
-        ]}
-      >
-        <Text style={M(700, 13, { color: c.fnt })}>
-          {MUSCLE_LABELS[ex.muscleGroup][0]}
-        </Text>
-      </View>
-    );
-  }
-  return (
-    <View style={[styles.thumb, { backgroundColor: c.track, borderColor: c.hair }]}>
-      <Animated.Image
-        source={frames[0]}
-        resizeMode="cover"
-        accessibilityIgnoresInvertColors
-        style={[styles.thumbImg, { opacity: anim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }) }]}
-      />
-      <Animated.Image
-        source={frames[1]}
-        resizeMode="cover"
-        accessibilityIgnoresInvertColors
-        style={[styles.thumbImg, { opacity: anim }]}
-      />
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  column: { width: '100%', maxWidth: BRIEF_MAX_WIDTH, alignSelf: 'center', paddingHorizontal: 24 },
-  search: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginTop: 16,
+  column: {
+    width: '100%',
+    maxWidth: BRIEF_MAX_WIDTH,
+    alignSelf: 'center',
+    paddingHorizontal: BRIEF_GUTTER,
   },
+  search: { marginTop: 16 },
   filterRow: { gap: 8, paddingTop: 14, paddingBottom: 8 },
   muscleRow: { gap: 8, paddingBottom: 8 },
   subRow: { gap: 8, paddingBottom: 14 },
   pill: {
-    paddingVertical: 9,
+    paddingVertical: 10,
     paddingHorizontal: 14,
     borderRadius: 999,
     borderWidth: 1,
   },
-  subPill: { paddingVertical: 7 },
+  subPill: { paddingVertical: 8 },
   listContent: { paddingBottom: 40 },
   empty: { marginTop: 20 },
   item: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingVertical: 14,
+    paddingVertical: 13,
     borderBottomWidth: 1,
   },
-  itemMain: { flex: 1, minWidth: 0, gap: 4 },
-  thumb: { width: 48, height: 48, borderRadius: 10, borderWidth: 1, overflow: 'hidden' },
-  thumbEmpty: { alignItems: 'center', justifyContent: 'center' },
-  thumbImg: { position: 'absolute', width: '100%', height: '100%' },
+  itemMain: { flex: 1, minWidth: 0, gap: 3 },
 });

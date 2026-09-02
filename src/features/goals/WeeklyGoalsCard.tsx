@@ -2,13 +2,13 @@ import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { AppNav } from '../../app/navigation/types';
-import { M, Section } from '../../components/brief';
+import { M, Card } from '../../components/brief';
 import { ENERGY_METRICS, GOAL_SOURCES } from '../../data/goalSources';
 import { removeGoal } from '../../state/goalsService';
 import { useHealthStore } from '../../state/useHealthStore';
 import {
   goalCurrent,
-  goalProgress,
+  goalDailySeries,
   isAverageGoal,
   isGoalComplete,
   useGoalsStore,
@@ -24,17 +24,50 @@ function kfmt(n: number): string {
   return r.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
+/** Weekday index Mon=0 … Sun=6, for both the countdown and the today marker. */
+function todayIndex(): number {
+  return (new Date().getDay() + 6) % 7;
+}
+
 /** "This week · N days left" — week runs Monday–Sunday. */
 function daysLeftLabel(): string {
-  const dayIdx = (new Date().getDay() + 6) % 7; // Mon=0 … Sun=6
-  const left = 6 - dayIdx;
+  const left = 6 - todayIndex();
   return `${left} DAY${left === 1 ? '' : 'S'} LEFT`;
 }
 
-/** The Today screen's "03 Week" section: auto-tracked weekly goals with inline
- * edit + a native modal screen to define new ones. Kept as its own component
- * because it owns the editing state and subscribes to the goals + snapshot
- * stores; the host passes `navigation` so it can push the DefineGoal modal. */
+const DAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'] as const;
+
+/** The Mon→Sun letter strip under the header; today's letter reads in `ink`,
+ * the rest in `fnt`, so the per-goal bars below have a column to line up to. */
+function WeekStrip() {
+  const c = useTheme().colors;
+  const today = todayIndex();
+  return (
+    <View style={styles.strip}>
+      {DAY_LETTERS.map((l, i) => (
+        <Text
+          key={i}
+          style={[
+            M(700, 8.5, {
+              ls: 0.8,
+              align: 'center',
+              color: i === today ? c.ink : c.fnt,
+            }),
+            styles.stripDay,
+          ]}
+        >
+          {l}
+        </Text>
+      ))}
+    </View>
+  );
+}
+
+/** The Today screen's "Week" section: auto-tracked weekly goals, each drawn as a
+ * seven-day bar row in its own colour, with inline edit + a native modal screen
+ * to define new ones. Kept as its own component because it owns the editing
+ * state and subscribes to the goals + snapshot stores; the host passes
+ * `navigation` so it can push the DefineGoal modal. */
 export function WeeklyGoalsCard({ navigation }: { navigation: AppNav }) {
   const t = useTheme();
   const c = t.colors;
@@ -42,10 +75,9 @@ export function WeeklyGoalsCard({ navigation }: { navigation: AppNav }) {
   const [editing, setEditing] = useState(false);
 
   return (
-    <Section
-      n="03"
+    <Card
       title="Week"
-      titleRight={
+      right={
         <View style={styles.titleRight}>
           <Text style={M(700, 10.5, { color: c.fnt })}>{daysLeftLabel()}</Text>
           <Pressable
@@ -60,9 +92,10 @@ export function WeeklyGoalsCard({ navigation }: { navigation: AppNav }) {
         </View>
       }
     >
+      <WeekStrip />
       <View style={styles.list}>
-        {goals.map(g => (
-          <GoalRow key={g.id} goal={g} editing={editing} />
+        {goals.map((g, i) => (
+          <GoalRow key={g.id} goal={g} index={i} editing={editing} />
         ))}
         <Pressable
           onPress={() => navigation.navigate('DefineGoal')}
@@ -75,11 +108,19 @@ export function WeeklyGoalsCard({ navigation }: { navigation: AppNav }) {
           </Text>
         </Pressable>
       </View>
-    </Section>
+    </Card>
   );
 }
 
-function GoalRow({ goal, editing }: { goal: WeeklyGoal; editing: boolean }) {
+function GoalRow({
+  goal,
+  index,
+  editing,
+}: {
+  goal: WeeklyGoal;
+  index: number;
+  editing: boolean;
+}) {
   const t = useTheme();
   const c = t.colors;
   // Progress must reflect the *calendar* week (Mon–Sun) the header counts down,
@@ -93,7 +134,6 @@ function GoalRow({ goal, editing }: { goal: WeeklyGoal; editing: boolean }) {
   const tracked = week?.tracked ?? {};
   const activities = week?.activities ?? [];
   const energy = week?.energy ?? [];
-  const p = goalProgress(goal, tracked, activities, energy);
   const cur = goalCurrent(goal, tracked, activities, energy);
   const unit = goal.source
     ? GOAL_SOURCES[goal.source].unit
@@ -109,8 +149,14 @@ function GoalRow({ goal, editing }: { goal: WeeklyGoal; editing: boolean }) {
   const done = !avg && isGoalComplete(goal, tracked, activities, energy);
   const loggedDays = avg ? energy.filter(d => d.net != null).length : 0;
 
-  const barColor = done ? c.grn : p >= 4 / 7 ? c.ink : c.acc;
-  const valColor = done ? c.grn : p >= 4 / 7 ? c.ink : c.acc;
+  // Each goal owns a colour from the series, cycled by position. A binary goal
+  // (a small count with no unit — "3 strength workouts") shows a fixed tick on
+  // the days it happened; everything else scales the bar by that day's share.
+  const color = c.goalSeries[index % c.goalSeries.length];
+  const binary = !avg && !unit && goal.target <= 7;
+  const days = week ? goalDailySeries(goal, week) : [0, 0, 0, 0, 0, 0, 0];
+  const today = todayIndex();
+
   const valText = avg
     ? `${kfmt(cur)}/${kfmt(goal.target)}${unit} · ${loggedDays}d`
     : done
@@ -125,8 +171,7 @@ function GoalRow({ goal, editing }: { goal: WeeklyGoal; editing: boolean }) {
             M(700, 10, {
               lh: 14,
               ls: 0.6,
-              upper: true,
-              color: done ? c.grn : c.mut,
+              color: done ? color : c.mut,
             }),
             styles.label,
           ]}
@@ -134,7 +179,7 @@ function GoalRow({ goal, editing }: { goal: WeeklyGoal; editing: boolean }) {
           {goal.name}
           {done ? ' ✓' : ''}
         </Text>
-        <Text style={[M(700, 10, { lh: 14, color: valColor }), styles.val]}>
+        <Text style={[M(700, 10, { lh: 14, color }), styles.val]}>
           {valText}
         </Text>
         {editing ? (
@@ -149,15 +194,38 @@ function GoalRow({ goal, editing }: { goal: WeeklyGoal; editing: boolean }) {
           </Pressable>
         ) : null}
       </View>
-      <View style={[styles.track, { backgroundColor: c.track }]}>
-        <View
-          style={{
-            width: `${p * 100}%`,
-            height: '100%',
-            borderRadius: 3,
-            backgroundColor: barColor,
-          }}
-        />
+      <View style={styles.bars}>
+        {days.map((v, d) => {
+          if (v > 0) {
+            return (
+              <View
+                key={d}
+                style={{
+                  flex: 1,
+                  borderRadius: 2,
+                  height: binary ? 8 : `${Math.max(38, v * 100)}%`,
+                  backgroundColor: color,
+                }}
+              />
+            );
+          }
+          // An empty day: a low track stub, ringed in the goal colour when it is
+          // today so the "you are here" column is legible even before any data.
+          return (
+            <View
+              key={d}
+              style={{
+                flex: 1,
+                height: 8,
+                borderRadius: 2,
+                backgroundColor: c.track,
+                ...(d === today
+                  ? { borderWidth: 1, borderColor: color }
+                  : null),
+              }}
+            />
+          );
+        })}
       </View>
     </View>
   );
@@ -165,12 +233,14 @@ function GoalRow({ goal, editing }: { goal: WeeklyGoal; editing: boolean }) {
 
 const styles = StyleSheet.create({
   titleRight: { flexDirection: 'row', alignItems: 'baseline', gap: 12 },
-  list: { marginTop: 14, gap: 13 },
+  strip: { flexDirection: 'row', gap: 4, marginTop: 14 },
+  stripDay: { flex: 1 },
+  list: { marginTop: 12, gap: 14 },
   goal: { gap: 7 },
   goalTop: { flexDirection: 'row', alignItems: 'baseline', gap: 10 },
   label: { flex: 1, minWidth: 0 },
-  track: { height: 6, borderRadius: 3, overflow: 'hidden' },
   val: { flexShrink: 0, textAlign: 'right' },
+  bars: { flexDirection: 'row', gap: 4, alignItems: 'flex-end', height: 22 },
   remove: {
     width: 18,
     height: 18,

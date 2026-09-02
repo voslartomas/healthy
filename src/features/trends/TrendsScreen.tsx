@@ -11,11 +11,15 @@ import {
 import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
 
 import { ScreenProps } from '../../app/navigation/types';
-import { BriefScreen, M, S } from '../../components/brief';
+import { BriefScreen, Card, M, S } from '../../components/brief';
 import { useGoalHistoryStore } from '../../state/useGoalHistoryStore';
 import { goalWeekly, useGoalsStore } from '../../state/useGoalsStore';
 import { useHealthStore } from '../../state/useHealthStore';
-import { useTrendsStore } from '../../state/useTrendsStore';
+import {
+  TREND_RANGES,
+  TrendRange,
+  useTrendsStore,
+} from '../../state/useTrendsStore';
 import { useTheme } from '../../theme/theme';
 import { buildMetrics, fmt, METRIC_CONFIG } from './metrics';
 
@@ -74,12 +78,16 @@ function TrendChart({
   decimals,
   unit,
   band,
+  smoothDays,
 }: {
   points: number[];
   times: number[];
   decimals: number;
   unit: string;
   band?: { lo: number; hi: number }[];
+  /** Window of the dashed reference curve, widened with the span so it keeps
+   * reading as a trend instead of shadowing the line. */
+  smoothDays: number;
 }) {
   const c = useTheme().colors;
   const W = 386,
@@ -108,7 +116,8 @@ function TrendChart({
   const y = (v: number) => H - PAD - ((v - mn) / (mx - mn)) * (H - 2 * PAD);
 
   const line =
-    'M' + points.map((p, i) => `${x(i).toFixed(1)},${y(p).toFixed(1)}`).join(' L');
+    'M' +
+    points.map((p, i) => `${x(i).toFixed(1)},${y(p).toFixed(1)}`).join(' L');
 
   // Band area: top edge (hi) left→right, then bottom edge (lo) right→left.
   let bandPath = '';
@@ -127,7 +136,7 @@ function TrendChart({
   const labelled = [...new Set([minIdx, maxIdx, lastIdx])];
   const family = M(700, 10).fontFamily;
 
-  const rolling = movingAverage(points, 7);
+  const rolling = movingAverage(points, smoothDays);
   const rollPath =
     'M' +
     rolling.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' L');
@@ -157,7 +166,7 @@ function TrendChart({
             <Text style={M(700, 10, { ls: 1, color: c.fnt })}>
               {times[sel] != null ? shortDate(times[sel]).toUpperCase() : '—'}
             </Text>
-            <Text style={M(800, 13, { color: c.ink })}>
+            <Text style={M(700, 13, { color: c.ink })}>
               {fmt(points[sel], decimals)}
               <Text style={M(700, 10, { color: c.fnt })}> {unit}</Text>
               {selBand ? (
@@ -457,28 +466,24 @@ function GoalsHistorySection() {
 
   if (goals.length === 0) {
     return (
-      <View style={[styles.section, { borderTopColor: c.hair }]}>
-        <Text style={S(800, 16, { ls: -0.16, color: c.ink })}>
-          Weekly goals
-        </Text>
+      <Card title="Weekly goals" style={styles.section}>
         <Text style={[S(600, 13, { color: c.mut }), styles.emptyGoals]}>
           Define goals on Today to track weekly hit-rate here.
         </Text>
-      </View>
+      </Card>
     );
   }
 
   return (
-    <View style={[styles.section, { borderTopColor: c.hair }]}>
-      <View style={styles.rowBetween}>
-        <Text style={S(800, 16, { ls: -0.16, color: c.ink })}>
-          Weekly goals · 12 weeks
-        </Text>
+    <Card
+      title="Weekly goals · 12 weeks"
+      style={styles.section}
+      right={
         <Text style={M(700, 10.5, { color: c.grn })}>
           {totalHit} OF {totalDone} HIT
         </Text>
-      </View>
-
+      }
+    >
       <View style={styles.histList}>
         {rows.map(r => (
           <View key={r.id}>
@@ -543,7 +548,7 @@ function GoalsHistorySection() {
         <Legend dashed label="NOW" />
         <Legend empty label="NO DATA" />
       </View>
-    </View>
+    </Card>
   );
 }
 
@@ -552,9 +557,11 @@ function GoalsHistorySection() {
 export function TrendsScreen(_props: ScreenProps) {
   const c = useTheme().colors;
   const series = useHealthStore(s => s.snapshot.trends);
-  const metrics = buildMetrics(series);
   const activeKey = useTrendsStore(s => s.activeKey);
   const setActiveKey = useTrendsStore(s => s.setActiveKey);
+  const rangeDays = useTrendsStore(s => s.rangeDays);
+  const setRangeDays = useTrendsStore(s => s.setRangeDays);
+  const metrics = buildMetrics(series, rangeDays);
   const active = metrics.find(m => m.key === activeKey) ?? metrics[0];
   const decimals = METRIC_CONFIG.find(m => m.key === active.key)?.decimals ?? 0;
 
@@ -562,24 +569,53 @@ export function TrendsScreen(_props: ScreenProps) {
     <BriefScreen>
       {/* Hero value */}
       <View style={styles.heroRow}>
-        <Text style={[M(800, 70, { ls: -4, color: c.ink }), styles.hero]}>
+        <Text style={[M(700, 70, { ls: -1, color: c.ink }), styles.hero]}>
           {active.value}
           {active.value !== '—' ? (
-            <Text style={M(800, 26, { ls: -1, color: c.fnt })}>
+            <Text style={M(700, 26, { ls: -0.2, color: c.fnt })}>
               {' '}
               {active.unit}
             </Text>
           ) : null}
         </Text>
       </View>
-      <Text
-        style={[
-          M(700, 10, { ls: 1, upper: true, color: c.fnt }),
-          styles.avgLine,
-        ]}
-      >
-        AVG {active.avg} · RANGE {active.range}
-      </Text>
+      <View style={styles.avgRow}>
+        <Text
+          style={[
+            M(700, 10, { ls: 1, upper: true, color: c.fnt }),
+            styles.avgLine,
+          ]}
+        >
+          AVG {active.avg} · RANGE {active.range}
+        </Text>
+        <View style={styles.rangeSwitch}>
+          {TREND_RANGES.map(d => {
+            const on = d === rangeDays;
+            return (
+              <Pressable
+                key={d}
+                onPress={() => setRangeDays(d as TrendRange)}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: on }}
+                accessibilityLabel={`Show ${d} days`}
+                style={[
+                  styles.rangeBtn,
+                  {
+                    borderColor: on ? c.ink : c.hair,
+                    backgroundColor: on ? c.ink : 'transparent',
+                  },
+                ]}
+              >
+                <Text
+                  style={M(700, 9.5, { ls: 0.6, color: on ? c.inv : c.mut })}
+                >
+                  {d}D
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
 
       {/* Segment picker */}
       <ScrollView
@@ -588,7 +624,7 @@ export function TrendsScreen(_props: ScreenProps) {
         contentContainerStyle={styles.segRow}
         style={[
           styles.segScroll,
-          { borderTopColor: c.ink, borderBottomColor: c.hair },
+          { borderTopColor: c.hair, borderBottomColor: c.hair },
         ]}
       >
         {metrics.map(m => {
@@ -615,12 +651,13 @@ export function TrendsScreen(_props: ScreenProps) {
       {/* Chart */}
       {active.points.length > 1 ? (
         <TrendChart
-          key={active.key}
+          key={`${active.key}-${rangeDays}`}
           points={active.points}
           times={active.times}
           decimals={decimals}
           unit={active.unit}
           band={active.band}
+          smoothDays={rangeDays >= 180 ? 21 : rangeDays >= 90 ? 14 : 7}
         />
       ) : (
         <Text
@@ -633,7 +670,14 @@ export function TrendsScreen(_props: ScreenProps) {
         </Text>
       )}
       <View style={styles.axis}>
-        <Text style={M(600, 9.5, { color: c.fnt })}>30 DAYS AGO</Text>
+        {/* The oldest point actually plotted, not the nominal span: HRV history
+            only reaches back as far as the cache has accumulated (see
+            FULL_HRV_DAYS), so a 180D selection can legitimately show less. */}
+        <Text style={M(600, 9.5, { color: c.fnt })}>
+          {active.times.length
+            ? shortDate(active.times[0]).toUpperCase()
+            : `${rangeDays} DAYS AGO`}
+        </Text>
         <Text style={M(600, 9.5, { color: c.fnt })}>NOW</Text>
       </View>
 
@@ -645,11 +689,25 @@ export function TrendsScreen(_props: ScreenProps) {
 
 const styles = StyleSheet.create({
   heroRow: { flexDirection: 'row', alignItems: 'flex-end', marginTop: 6 },
-  hero: { lineHeight: 77 }, // >= the 70px fontSize so iOS doesn't clip digit tops
-  avgLine: { marginTop: 6, lineHeight: 16 },
+  hero: { lineHeight: 74 }, // >= the 70px fontSize so iOS doesn't clip digit tops
+  avgRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginTop: 6,
+  },
+  avgLine: { flex: 1, minWidth: 0, lineHeight: 16 },
+  rangeSwitch: { flexDirection: 'row', gap: 6 },
+  rangeBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
   segScroll: {
     marginTop: 20,
-    borderTopWidth: 2,
+    borderTopWidth: 1,
     borderBottomWidth: 1,
     flexGrow: 0,
   },
@@ -665,7 +723,7 @@ const styles = StyleSheet.create({
   chart: { marginTop: 6 },
   emptyChart: { paddingVertical: 50 },
   axis: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
-  section: { marginTop: 20, paddingVertical: 16, borderTopWidth: 1 },
+  section: { marginTop: 12 },
   rowBetween: {
     flexDirection: 'row',
     justifyContent: 'space-between',

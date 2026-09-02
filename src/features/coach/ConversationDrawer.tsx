@@ -103,7 +103,7 @@ export function ConversationDrawer({ onClose }: { onClose: () => void }) {
           accessibilityRole="button"
           style={[styles.newBtn, { borderColor: c.hair }]}
         >
-          <Text style={M(800, 15, { color: c.acc })}>＋</Text>
+          <Text style={M(700, 15, { color: c.acc })}>＋</Text>
           <Text style={S(600, 13.5, { color: c.ink })}>New chat</Text>
         </Pressable>
 

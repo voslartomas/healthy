@@ -3,6 +3,7 @@ import { DailyEnergy, GoalWeekData } from '../src/health/types';
 import {
   countMatchingSessions,
   goalCurrent,
+  goalDailySeries,
   goalProgress,
   goalWeekly,
   isAverageGoal,
@@ -365,5 +366,92 @@ describe('goalWeekly (per-week attainment)', () => {
       covered: true,
     });
     expect(weeks[1].covered).toBe(false); // no steps coverage that week
+  });
+});
+
+describe('goalDailySeries (Today "Week" per-day bars)', () => {
+  const DAY = 24 * 60 * 60 * 1000;
+  const base = (over: Partial<GoalWeekData>): GoalWeekData => ({
+    weekStart: 0,
+    complete: false,
+    activities: [],
+    tracked: {},
+    energy: [],
+    coverage: { steps: true, calories: true, activity: true, energy: true },
+    ...over,
+  });
+
+  it('scores a source goal against each day’s share of the weekly target', () => {
+    // Weekly target 56000 → daily share 8000. Mon full, Tue half, Wed over
+    // (clamped to 1), rest of the week empty.
+    const week = base({
+      dailyTracked: [
+        { steps: 8000 },
+        { steps: 4000 },
+        { steps: 12000 },
+        {},
+        {},
+        {},
+        {},
+      ],
+    });
+    const goal: WeeklyGoal = {
+      id: 's',
+      name: 'Steps',
+      target: 56000,
+      source: 'steps',
+    };
+    expect(goalDailySeries(goal, week)).toEqual([1, 0.5, 1, 0, 0, 0, 0]);
+  });
+
+  it('marks the days an activity goal actually happened (binary)', () => {
+    const sess = (start: number) => ({
+      name: 'Lift',
+      type: 'STRENGTH_TRAINING',
+      displayName: 'Lift',
+      durationMin: 45,
+      energyKcal: null,
+      start,
+    });
+    // A session on Mon and two on Wed → those two days score 1, the rest 0.
+    const week = base({ activities: [sess(0), sess(2 * DAY), sess(2 * DAY)] });
+    const goal: WeeklyGoal = {
+      id: 'a',
+      name: 'Lifts',
+      target: 3,
+      match: { field: 'type', value: 'STRENGTH_TRAINING' },
+    };
+    expect(goalDailySeries(goal, week)).toEqual([1, 0, 1, 0, 0, 0, 0]);
+  });
+
+  it('scores a deficit goal by each day’s deficit vs the target', () => {
+    const day = (dayStart: number, net: number | null): DailyEnergy => ({
+      dayStart,
+      eaten: null,
+      burned: null,
+      net,
+    });
+    // Target 500/day. Mon deficit 500 (net −500) → 1; Tue 250 → 0.5; Wed
+    // surplus (+200) → 0; days without data → 0.
+    const week = base({
+      energy: [day(0, -500), day(DAY, -250), day(2 * DAY, 200)],
+    });
+    const goal: WeeklyGoal = {
+      id: 'd',
+      name: 'Deficit',
+      target: 500,
+      metric: 'deficit',
+    };
+    expect(goalDailySeries(goal, week)).toEqual([1, 0.5, 0, 0, 0, 0, 0]);
+  });
+
+  it('reads all-zero when the week predates per-day tracking', () => {
+    const goal: WeeklyGoal = {
+      id: 's',
+      name: 'Steps',
+      target: 56000,
+      source: 'steps',
+    };
+    expect(goalDailySeries(goal, base({}))).toEqual([0, 0, 0, 0, 0, 0, 0]);
   });
 });

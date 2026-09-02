@@ -261,14 +261,15 @@ describe('trend series', () => {
     expect(s[0].value).toBe(7);
   });
 
-  it('computes sleep quality (efficiency %) only for nights with stages', () => {
+  it('scores sleep quality from length, deep and REM, only for staged nights', () => {
     const sleep = [
       {
         start: dayStart - 8 * 3_600_000,
         end: dayStart - 3_600_000,
         durationMin: 420,
         source: FITBIT,
-        // 6h30 asleep (deep+rem+light) of 7h total → 92.9% → 93%.
+        // 7h of 8h need = 87.5 (×0.5); deep 90/96 = 93.75 (×0.25);
+        // REM 120/105 clamps to 100 (×0.25) → 44 + 23 + 25 = 92.
         stages: { deepMin: 90, remMin: 120, lightMin: 180, awakeMin: 30 },
       },
       {
@@ -281,7 +282,7 @@ describe('trend series', () => {
     ];
     const q = sleepQualitySeries(sleep);
     expect(q).toHaveLength(1);
-    expect(q[0].value).toBe(93);
+    expect(q[0].value).toBe(92);
   });
 });
 
@@ -501,6 +502,20 @@ describe('weeklyGoalHistory', () => {
     expect(current.coverage.steps).toBe(true);
     expect(current.coverage.activity).toBe(true);
     expect(prev.coverage.steps).toBe(false); // no steps records that week
+
+    // Per-day split: seven entries, and the one active day (index 2) carries the
+    // whole week's numbers — so summing the days reproduces the weekly total.
+    expect(current.dailyTracked).toHaveLength(7);
+    expect(current.dailyTracked?.[2]).toMatchObject({
+      strength: 1,
+      steps: 5000,
+      calories: 300,
+    });
+    const stepsByDay = (current.dailyTracked ?? []).reduce(
+      (n, d) => n + (d.steps ?? 0),
+      0,
+    );
+    expect(stepsByDay).toBe(current.tracked.steps);
   });
 
   it('marks only weeks the exercise data reaches as activity-covered', () => {
@@ -588,7 +603,7 @@ describe('mergeRaw (cached history + recent slice)', () => {
     const cutoff = NOW - 14 * DAY;
     const history: RawHealthData = {
       ...emptyRaw(),
-      hrvRmssd: [{ value: 40, time: NOW - 20 * DAY, source: FITBIT }], // stale
+      hrvRmssd: [{ value: 40, time: NOW - 20 * DAY, source: FITBIT }], // older history
       exercise: [ex(NOW - 30 * DAY), ex(NOW - 2 * DAY)], // old kept; recent one dup
       totalEnergy: [kcal(NOW - 30 * DAY, 2000), kcal(NOW - 2 * DAY, 9999)],
       sources: ['A'],
@@ -601,10 +616,14 @@ describe('mergeRaw (cached history + recent slice)', () => {
       sources: ['B'],
     };
 
-    const merged = mergeRaw(history, recent, cutoff);
+    // The metrics slice is read over a shorter span than the heavy arrays, so it
+    // splices at its own, nearer cutoff.
+    const metricsCutoff = NOW - 7 * DAY;
+    const merged = mergeRaw(history, recent, cutoff, metricsCutoff);
 
-    // Cheap metrics come wholly from `recent`.
-    expect(merged.hrvRmssd).toEqual(recent.hrvRmssd);
+    // Daily metrics splice too: the fresh sample plus the older history one, so
+    // a short routine read never truncates the long trend series.
+    expect(merged.hrvRmssd.map(h => h.value).sort()).toEqual([40, 55]);
     // Exercise: old (−30d) + the shared −2d ONCE + newest (−1d) = 3, no dup.
     const starts = merged.exercise.map(e => e.start).sort((a, b) => a - b);
     expect(starts).toEqual([NOW - 30 * DAY, NOW - 2 * DAY, NOW - DAY]);
@@ -613,6 +632,21 @@ describe('mergeRaw (cached history + recent slice)', () => {
     expect(overlap?.kcal).toBe(2400);
     // Source labels are unioned across both reads.
     expect(new Set(merged.sources)).toEqual(new Set(['A', 'B']));
+  });
+
+  it('lets the recent read own the metrics window it covers', () => {
+    const metricsCutoff = NOW - 7 * DAY;
+    const history: RawHealthData = {
+      ...emptyRaw(),
+      // Inside the window the recent read just covered → recent wins, dropped.
+      hrvRmssd: [{ value: 40, time: NOW - 3 * DAY, source: FITBIT }],
+    };
+    const recent: RawHealthData = {
+      ...emptyRaw(),
+      hrvRmssd: [{ value: 55, time: NOW - DAY, source: FITBIT }],
+    };
+    const merged = mergeRaw(history, recent, NOW - 14 * DAY, metricsCutoff);
+    expect(merged.hrvRmssd.map(h => h.value)).toEqual([55]);
   });
 
   it('drops history at/after the cutoff (recent owns that window)', () => {
