@@ -404,6 +404,34 @@ describe('goalDailySeries (Today "Week" per-day bars)', () => {
     expect(goalDailySeries(goal, week)).toEqual([1, 0.5, 1, 0, 0, 0, 0]);
   });
 
+  it('draws per-day bars for a zone-2 goal from dailyTracked (like deficit)', () => {
+    // Weekly target 90 min → daily share ~12.86. Mon 13 (full), Tue 6 (~0.47),
+    // Wed 26 (over → clamped), rest empty. Same code path deficit uses, so the
+    // Week tile renders zone-2 as per-day bars, not a single track.
+    const week = base({
+      dailyTracked: [
+        { zone2: 13 },
+        { zone2: 6 },
+        { zone2: 26 },
+        {},
+        {},
+        {},
+        {},
+      ],
+    });
+    const goal: WeeklyGoal = {
+      id: 'z',
+      name: 'Zone 2',
+      target: 90,
+      source: 'zone2',
+    };
+    const series = goalDailySeries(goal, week);
+    expect(series[0]).toBe(1);
+    expect(series[1]).toBeCloseTo(6 / (90 / 7));
+    expect(series[2]).toBe(1);
+    expect(series.slice(3)).toEqual([0, 0, 0, 0]);
+  });
+
   it('marks the days an activity goal actually happened (binary)', () => {
     const sess = (start: number) => ({
       name: 'Lift',

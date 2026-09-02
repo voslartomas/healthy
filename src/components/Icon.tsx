@@ -42,7 +42,8 @@ export type IconName =
   | 'boltLine'
   | 'bars'
   | 'droplet'
-  | 'flame';
+  | 'flame'
+  | 'sparkles';
 
 interface IconProps {
   name: IconName;
@@ -277,6 +278,19 @@ function renderIcon(
           d="M12 22c4.4 0 7-2.8 7-6.5 0-4.5-3.5-6.2-3.5-9.5C15.5 3.5 13.5 2 12 2c.8 3.2-1.5 4.6-2.9 6.4A8.6 8.6 0 0 0 5 15.5C5 19.2 7.6 22 12 22z"
           {...s}
         />
+      );
+    case 'sparkles':
+      return (
+        <>
+          <Path
+            d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.14-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.14a.5.5 0 0 1 .96 0L14.06 8.5A2 2 0 0 0 15.5 9.94l6.14 1.58a.5.5 0 0 1 0 .96L15.5 14.06a2 2 0 0 0-1.44 1.44l-1.58 6.14a.5.5 0 0 1-.96 0z"
+            {...s}
+          />
+          <Path d="M20 3v4" {...s} />
+          <Path d="M22 5h-4" {...s} />
+          <Path d="M4 17v2" {...s} />
+          <Path d="M6 18H4" {...s} />
+        </>
       );
     case 'googleHealth':
       return <Path d="M3 12h4l2 5 4-12 2 7h6" {...s} />;

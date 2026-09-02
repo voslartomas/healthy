@@ -4,8 +4,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { navigate, navigationRef } from '../../app/navigation/navigationRef';
 import { BRIEF_MAX_WIDTH } from '../../components/brief';
+import { Icon } from '../../components/Icon';
 import { useTheme } from '../../theme/theme';
-import { Sparkle } from './CoachScreen';
 
 /** Routes that fully cover the brief — the FAB must not float over them. */
 const HIDDEN_ON = new Set(['Coach', 'DefineGoal']);
@@ -61,7 +61,7 @@ export function CoachOverlay() {
         },
       ]}
     >
-      <Sparkle color={c.onAccent} size={24} />
+      <Icon name="sparkles" color={c.onAccent} size={24} strokeWidth={1.9} />
     </Pressable>
   );
 }

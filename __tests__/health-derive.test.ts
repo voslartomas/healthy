@@ -131,7 +131,7 @@ describe('readiness (non-clinical heuristic)', () => {
 });
 
 describe('trackedFromExercise', () => {
-  it('counts strength sessions and cardio minutes for the week', () => {
+  it('counts strength sessions and HR zone-2+ minutes for the week', () => {
     const wk = NOW - 2 * DAY;
     const tracked = trackedFromExercise(
       [
@@ -142,6 +142,7 @@ describe('trackedFromExercise', () => {
           end: wk + 60,
           durationMin: 45,
           energyKcal: null,
+          hrZones: null, // no HR → no zone-2 minutes
           source: FITBIT,
         }, // strength
         {
@@ -151,8 +152,11 @@ describe('trackedFromExercise', () => {
           end: wk + 60,
           durationMin: 30,
           energyKcal: null,
+          // 20 moderate + 4 vigorous + 1 peak = 25 min in zone 2+; the 5 light
+          // (zone 1) minutes do not count.
+          hrZones: { lightMin: 5, moderateMin: 20, vigorousMin: 4, peakMin: 1 },
           source: FITBIT,
-        }, // running → zone2
+        }, // running → 25 zone-2+ minutes
         {
           exerciseType: 79,
           typeName: 'WALKING',
@@ -160,15 +164,16 @@ describe('trackedFromExercise', () => {
           end: wk + 60,
           durationMin: 20,
           energyKcal: null,
+          hrZones: null, // easy walk, no HR zones → contributes nothing
           source: FITBIT,
-        }, // walking → excluded from zone2
+        },
       ],
       [{ count: 41200, start: NOW - 6 * DAY, end: NOW, source: FITBIT }],
       [{ kcal: 2380, start: NOW - 6 * DAY, end: NOW, source: FITBIT }],
       NOW,
     );
     expect(tracked.strength).toBe(1);
-    expect(tracked.zone2).toBe(30);
+    expect(tracked.zone2).toBe(25);
     expect(tracked.steps).toBe(41200);
     expect(tracked.calories).toBe(2380);
   });

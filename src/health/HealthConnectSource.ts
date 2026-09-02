@@ -75,16 +75,25 @@ interface HealthConnectModule {
      * stages excluding awake — the same figure the Google Health UI shows. */
     SLEEP_DURATION_TOTAL?: number;
   }>;
-  /** Health Connect's grouped aggregate — one bucket per LOCAL calendar day.
-   * Used for the per-day burned totals behind the calorie-deficit goal. */
-  aggregateGroupByPeriod?(request: {
+  /** Health Connect's grouped aggregate — one bucket per fixed 24h window from
+   * the start instant. Used for the per-day burned totals behind the
+   * calorie-deficit goal.
+   *
+   * We use the DURATION slicer, not the PERIOD one: react-native-health-connect
+   * builds `AggregateGroupByPeriodRequest` with an Instant-based TimeRangeFilter
+   * (`getTimeRangeFilter`, not `…Local`), which Health Connect rejects with
+   * "Either use TimeRangeFilter with LocalDateTime or AggregateGroupByDuration".
+   * The duration request takes the Instant filter we already send, and with the
+   * window starting at local midnight its 24h buckets line up with calendar days
+   * (bar the rare DST-shift day — acceptable for a burned-calorie rollup). */
+  aggregateGroupByDuration?(request: {
     recordType: string;
     timeRangeFilter: {
       operator: 'between';
       startTime: string;
       endTime: string;
     };
-    timeRangeSlicer: { period: 'DAYS'; length: number };
+    timeRangeSlicer: { duration: 'DAYS'; length: number };
   }): Promise<
     {
       startTime: string;
@@ -842,19 +851,20 @@ export class HealthConnectSource implements HealthSource {
         end,
         durationMin: (end - start) / 60000,
         energyKcal,
-        hrZones: null, // filled below for recent sessions only
+        hrZones: null, // filled below, per session, from that session's HR
         source: tag(r),
       });
     }
 
-    // HR zones only for RECENT sessions (the cardio-load screen shows the last 7
-    // days). Read heart-rate PER SESSION (small, bounded) rather than a huge
-    // multi-week bulk HeartRate pull — that bulk read was the main load-time
-    // cost. Older sessions keep hrZones=null (the screen never shows them).
-    const ZONE_WINDOW_MS = 8 * DAY_MS;
-    const zoneSessions = exercise.filter(e => e.end >= now - ZONE_WINDOW_MS);
+    // HR zones for EVERY fetched session. The "Zone 2 minutes" goal means time
+    // in HR zone 2 and above, so its 12-week history needs zones on the old
+    // sessions too — not just the cardio-load screen's recent ones. Read
+    // heart-rate PER SESSION (small, bounded) rather than a huge multi-week bulk
+    // HeartRate pull; this is more reads than the old 8-day window, the accepted
+    // cost of an HR-based (rather than session-length) zone-2 figure (ADR-006).
+    const zoneSessions = exercise;
     const sessionHr = new Map<ExerciseRecord, HeartRateSample[]>();
-    const recentHr: HeartRateSample[] = [];
+    const allHr: HeartRateSample[] = [];
     for (const s of zoneSessions) {
       const recs = await this.readAll(
         mod,
@@ -873,9 +883,9 @@ export class HealthConnectSource implements HealthSource {
         }
       }
       sessionHr.set(s, samples);
-      recentHr.push(...samples);
+      allHr.push(...samples);
     }
-    const hrMax = resolveMaxHr(profileAge(now), recentHr);
+    const hrMax = resolveMaxHr(profileAge(now), allHr);
     for (const s of zoneSessions) {
       s.hrZones = computeHrZones(sessionHr.get(s) ?? [], hrMax);
     }
@@ -983,21 +993,22 @@ export class HealthConnectSource implements HealthSource {
     // unreadable (common — sources disagree on TDEE and some write only
     // aggregates) every day's burned came back null.
     //
-    // `aggregateGroupByPeriod` with a DAYS slicer buckets on LOCAL calendar
-    // days, which is the boundary the user's own app uses.
+    // A 24h DURATION slicer from local midnight buckets on local calendar days,
+    // the boundary the user's own app uses (see the interface note on why this
+    // is the duration request, not the period one).
     let dailyBurnedAgg: { dayStart: number; kcal: number }[] | null = null;
-    if (mod.aggregateGroupByPeriod) {
+    if (mod.aggregateGroupByDuration) {
       try {
         const from = new Date(now - windows.caloriesDays * DAY_MS);
         from.setHours(0, 0, 0, 0);
-        const groups = await mod.aggregateGroupByPeriod({
+        const groups = await mod.aggregateGroupByDuration({
           recordType: 'TotalCaloriesBurned',
           timeRangeFilter: {
             operator: 'between',
             startTime: from.toISOString(),
             endTime: new Date(now).toISOString(),
           },
-          timeRangeSlicer: { period: 'DAYS', length: 1 },
+          timeRangeSlicer: { duration: 'DAYS', length: 1 },
         });
         const rows = (groups ?? [])
           .map(g => ({
@@ -1008,7 +1019,7 @@ export class HealthConnectSource implements HealthSource {
         if (rows.length > 0) dailyBurnedAgg = rows;
       } catch (err) {
         console.warn(
-          '[HealthConnect] aggregateGroupByPeriod TotalCaloriesBurned failed',
+          '[HealthConnect] aggregateGroupByDuration TotalCaloriesBurned failed',
           err,
         );
       }

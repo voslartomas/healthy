@@ -1,11 +1,23 @@
 import { trackedFromExercise } from '../src/health/derive';
-import { ExerciseRecord } from '../src/health/types';
+import { CardioZones, ExerciseRecord } from '../src/health/types';
 
 const NOW = 1_754_000_000_000;
 const HOUR = 60 * 60 * 1000;
 const SRC = 'com.huami.watch.hmwatchmanager';
 
-function session(exerciseType: number, offsetHours: number): ExerciseRecord {
+// 30 min at an aerobic-or-harder heart rate → 30 zone-2+ minutes.
+const Z2: CardioZones = {
+  lightMin: 0,
+  moderateMin: 24,
+  vigorousMin: 5,
+  peakMin: 1,
+};
+
+function session(
+  exerciseType: number,
+  offsetHours: number,
+  hrZones: CardioZones | null = null,
+): ExerciseRecord {
   const start = NOW - offsetHours * HOUR;
   return {
     exerciseType,
@@ -15,7 +27,7 @@ function session(exerciseType: number, offsetHours: number): ExerciseRecord {
     end: start + 30 * 60 * 1000, // 30 min
     durationMin: 30,
     energyKcal: null,
-    hrZones: null,
+    hrZones,
     source: SRC,
   };
 }
@@ -29,18 +41,18 @@ describe('exercise-type categorization (authoritative HC ints)', () => {
       NOW,
     );
     expect(tracked.strength).toBe(2);
-    // Neither is cardio (both in NON_CARDIO), so zone2 stays 0.
+    // Strength type, and no HR zones supplied → no zone-2 minutes.
     expect(tracked.zone2).toBe(0);
   });
 
-  it('does NOT count SOFTBALL (65) as strength — it is cardio/zone-2', () => {
-    const tracked = trackedFromExercise([session(65, 1)], [], [], NOW);
+  it('does NOT count SOFTBALL (65) as strength; its zone-2+ minutes count', () => {
+    const tracked = trackedFromExercise([session(65, 1, Z2)], [], [], NOW);
     expect(tracked.strength).toBe(0);
     expect(tracked.zone2).toBe(30);
   });
 
-  it('counts a type-0 OTHER_WORKOUT (e.g. floorball) as zone-2 cardio', () => {
-    const tracked = trackedFromExercise([session(0, 1)], [], [], NOW);
+  it('counts a type-0 OTHER_WORKOUT (e.g. floorball) zone-2+ minutes', () => {
+    const tracked = trackedFromExercise([session(0, 1, Z2)], [], [], NOW);
     expect(tracked.strength).toBe(0);
     expect(tracked.core).toBe(0);
     expect(tracked.zone2).toBe(30);

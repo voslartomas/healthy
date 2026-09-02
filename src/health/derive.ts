@@ -481,16 +481,28 @@ function burnEnergyRecords(raw: RawHealthData): EnergyRecord[] {
 // PILATES=48, YOGA=83, WALKING=79.
 const STRENGTH_TYPES = new Set([70, 81]); // STRENGTH_TRAINING, WEIGHTLIFTING
 const CORE_TYPES = new Set([48, 83]); // PILATES, YOGA (closest core proxies)
-const NON_CARDIO_TYPES = new Set([70, 81, 48, 83, 79]); // + WALKING(79) excluded from zone-2
+const NON_CARDIO_TYPES = new Set([70, 81, 48, 83, 79]); // strength/pilates/yoga/walking
+
+/**
+ * Minutes a session spent in HR zone 2 or above — moderate (≥60 %HRmax),
+ * vigorous and peak, i.e. everything but the light warm-up band. This is what
+ * the "Zone 2 minutes" goal counts: real time at an aerobic-or-harder heart
+ * rate, not raw session length. A session whose HR zones could not be computed
+ * (no in-session HR, or no usable HRmax) contributes nothing — see ADR-006.
+ */
+function zone2PlusMinutes(s: ExerciseRecord): number {
+  const z = s.hrZones;
+  if (!z) return 0;
+  return z.moderateMin + z.vigorousMin + z.peakMin;
+}
 
 /**
  * Auto-tracked weekly totals per goal source from real activity.
  *
- * Known simplification (documented, not silent): `zone2` minutes is the sum of
- * *cardio session minutes*, not a true heart-rate-zone computation — Health
- * Connect exposes sessions, and per-zone time needs the HR series binned to the
- * user's zones, which is follow-up work. `core` uses pilates/yoga as the
- * closest available session types. Both are called out in the ADR.
+ * `zone2` is minutes in HR zone 2 and above ({@link zone2PlusMinutes}); the
+ * source adapters compute per-session HR zones for every fetched session so the
+ * figure is HR-based, not session length. `core` uses pilates/yoga as the
+ * closest available session types (called out in the ADR).
  */
 export function trackedFromExercise(
   exercise: ExerciseRecord[],
@@ -510,7 +522,7 @@ export function trackedFromExercise(
   for (const s of sessions) {
     if (STRENGTH_TYPES.has(s.exerciseType)) strength += 1;
     if (CORE_TYPES.has(s.exerciseType)) core += 1;
-    if (!NON_CARDIO_TYPES.has(s.exerciseType)) zone2 += s.durationMin;
+    zone2 += zone2PlusMinutes(s);
   }
 
   return {
@@ -556,7 +568,7 @@ export function trackedForWindow(
   for (const s of sessions) {
     if (STRENGTH_TYPES.has(s.exerciseType)) strength += 1;
     if (CORE_TYPES.has(s.exerciseType)) core += 1;
-    if (!NON_CARDIO_TYPES.has(s.exerciseType)) zone2 += s.durationMin;
+    zone2 += zone2PlusMinutes(s);
   }
   return {
     steps: stepsInWindow(steps, from, to),
