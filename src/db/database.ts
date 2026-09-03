@@ -108,6 +108,7 @@ async function ensureSchema(db: SQLite.SQLiteDatabase): Promise<void> {
     CREATE TABLE IF NOT EXISTS strength_workouts (
       id         TEXT PRIMARY KEY NOT NULL,
       name       TEXT NOT NULL,
+      kind       TEXT NOT NULL DEFAULT 'strength',
       sort_order INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
@@ -127,10 +128,12 @@ async function ensureSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       id              TEXT PRIMARY KEY NOT NULL,
       workout_id      TEXT,
       name            TEXT NOT NULL,
+      kind            TEXT NOT NULL DEFAULT 'strength',
       started_at      INTEGER NOT NULL,
       ended_at        INTEGER,
       total_volume_kg REAL NOT NULL DEFAULT 0,
       sets_completed  INTEGER NOT NULL DEFAULT 0,
+      health_id       TEXT,
       created_at      INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS strength_session_sets (
@@ -246,13 +249,37 @@ async function ensureCommonFoodColumns(
  * IF NOT EXISTS`). New installs already have it from the DDL above.
  */
 async function ensureStrengthColumns(db: SQLite.SQLiteDatabase): Promise<void> {
-  const cols = await db.getAllAsync<{ name: string }>(
+  const exCols = await db.getAllAsync<{ name: string }>(
     'PRAGMA table_info(strength_workout_exercises);',
   );
-  const have = new Set(cols.map(c => c.name));
-  if (!have.has('set_targets')) {
+  if (!new Set(exCols.map(c => c.name)).has('set_targets')) {
     await db.execAsync(
       'ALTER TABLE strength_workout_exercises ADD COLUMN set_targets TEXT;',
+    );
+  }
+  // Session type (strength/core) + the mirrored Health Connect record id, added
+  // after the initial strength schema. Guarded — SQLite has no ADD COLUMN IF NOT
+  // EXISTS — so DBs from earlier builds pick them up idempotently.
+  const wCols = await db.getAllAsync<{ name: string }>(
+    'PRAGMA table_info(strength_workouts);',
+  );
+  if (!new Set(wCols.map(c => c.name)).has('kind')) {
+    await db.execAsync(
+      "ALTER TABLE strength_workouts ADD COLUMN kind TEXT NOT NULL DEFAULT 'strength';",
+    );
+  }
+  const sCols = await db.getAllAsync<{ name: string }>(
+    'PRAGMA table_info(strength_sessions);',
+  );
+  const haveSession = new Set(sCols.map(c => c.name));
+  if (!haveSession.has('kind')) {
+    await db.execAsync(
+      "ALTER TABLE strength_sessions ADD COLUMN kind TEXT NOT NULL DEFAULT 'strength';",
+    );
+  }
+  if (!haveSession.has('health_id')) {
+    await db.execAsync(
+      'ALTER TABLE strength_sessions ADD COLUMN health_id TEXT;',
     );
   }
 }

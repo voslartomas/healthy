@@ -1,4 +1,10 @@
-import { FoodEntryInput, FoodLogResult, RawFetchWindows } from './fetchWindows';
+import {
+  ExerciseLogResult,
+  ExerciseSessionInput,
+  FoodEntryInput,
+  FoodLogResult,
+  RawFetchWindows,
+} from './fetchWindows';
 import { RawHealthData } from './types';
 
 /**
@@ -49,4 +55,14 @@ export interface HealthSource {
 
   /** Delete a previously written food entry by the id from {@link createFoodEntry}. */
   deleteFoodEntry(id: string): Promise<boolean>;
+
+  /** Write one completed strength/lift session to the OS exercise store,
+   * returning the created record's id when available. Implemented on Health
+   * Connect (Android); a no-op on HealthKit until a workout-write binding
+   * exists. Heart rate from a wearable is correlated by time, not written here. */
+  createExerciseSession(input: ExerciseSessionInput): Promise<ExerciseLogResult>;
+
+  /** Delete a previously written exercise session by the id from
+   * {@link createExerciseSession}. Returns false when unsupported/not connected. */
+  deleteExerciseSession(id: string): Promise<boolean>;
 }

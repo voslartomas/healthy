@@ -35,7 +35,10 @@ const READ_PERMISSIONS = [
   'BODY_FAT',
 ].map(t => `android.permission.health.READ_${t}`);
 
-const WRITE_PERMISSIONS = ['android.permission.health.WRITE_NUTRITION'];
+const WRITE_PERMISSIONS = [
+  'android.permission.health.WRITE_NUTRITION',
+  'android.permission.health.WRITE_EXERCISE',
+];
 
 const ALL_PERMISSIONS = [...READ_PERMISSIONS, ...WRITE_PERMISSIONS];
 

@@ -279,6 +279,8 @@ export function WorkoutBuilderScreen({ navigation }: ScreenProps) {
   const c = useTheme().colors;
   const draft = useStrengthStore(s => s.draft);
   const setName = useStrengthStore(s => s.setDraftName);
+  const setKind = useStrengthStore(s => s.setDraftKind);
+  const kind = draft?.kind ?? 'strength';
 
   const exercises = draft?.exercises ?? [];
   const canRun = exercises.length > 0;
@@ -306,6 +308,38 @@ export function WorkoutBuilderScreen({ navigation }: ScreenProps) {
             styles.nameInput,
           ]}
         />
+        <View style={styles.typeRow}>
+          {(['strength', 'core'] as const).map(k => {
+            const on = kind === k;
+            return (
+              <Pressable
+                key={k}
+                onPress={() => setKind(k)}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: on }}
+                accessibilityLabel={
+                  k === 'strength' ? 'Strength session' : 'Core session'
+                }
+                style={[
+                  styles.typeBtn,
+                  {
+                    borderColor: on ? c.ink : c.hair,
+                    backgroundColor: on ? c.ink : 'transparent',
+                  },
+                ]}
+              >
+                <Text style={M(700, 10.5, { ls: 1, color: on ? c.inv : c.mut })}>
+                  {k === 'strength' ? 'STRENGTH' : 'CORE'}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+        <Text style={[M(600, 9.5, { ls: 0.4, color: c.fnt }), styles.typeHint]}>
+          {kind === 'core'
+            ? 'SAVED TO HEALTH CONNECT AS EXERCISE CLASS'
+            : 'SAVED TO HEALTH CONNECT AS STRENGTH TRAINING'}
+        </Text>
       </Card>
 
       <Card
@@ -364,6 +398,15 @@ export function WorkoutBuilderScreen({ navigation }: ScreenProps) {
 
 const styles = StyleSheet.create({
   nameInput: { marginTop: 12 },
+  typeRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  typeBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  typeHint: { marginTop: 10, lineHeight: 14 },
   empty: { marginTop: 12 },
   row: {
     borderWidth: 1,

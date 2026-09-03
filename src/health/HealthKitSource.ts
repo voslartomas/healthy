@@ -1,5 +1,11 @@
 import { ageFromDob, profileAge } from '../state/useProfileStore';
-import { FoodEntryInput, FoodLogResult, RawFetchWindows } from './fetchWindows';
+import {
+  ExerciseLogResult,
+  ExerciseSessionInput,
+  FoodEntryInput,
+  FoodLogResult,
+  RawFetchWindows,
+} from './fetchWindows';
 import { HealthSource } from './HealthSource';
 import { computeHrZones, HeartRateSample, resolveMaxHr } from './hrZones';
 import {
@@ -763,5 +769,20 @@ export class HealthKitSource implements HealthSource {
       console.warn('[HealthKit] food delete failed', err);
       return false;
     }
+  }
+
+  async createExerciseSession(
+    _input: ExerciseSessionInput,
+  ): Promise<ExerciseLogResult> {
+    // Writing an HKWorkout needs an HKWorkoutBuilder binding the current native
+    // module does not expose, so this is a deliberate no-op on iOS. Callers must
+    // treat a failure here as "not written", exactly like an unconfigured store.
+    return { ok: false, error: 'unsupported' };
+  }
+
+  async deleteExerciseSession(_id: string): Promise<boolean> {
+    // Nothing is written on iOS (see createExerciseSession), so there is never
+    // anything to delete.
+    return false;
   }
 }

@@ -3,6 +3,8 @@ import { Platform } from 'react-native';
 import { activeHealthSource } from './deviceHealth';
 import { deriveSnapshot } from './derive';
 import {
+  ExerciseLogResult,
+  ExerciseSessionInput,
   FoodEntryInput,
   FoodLogResult,
   FULL_WINDOWS,
@@ -14,6 +16,8 @@ export * from './types';
 export { deriveSnapshot, mergeRaw, pruneRaw } from './derive';
 export { FULL_METRICS_DAYS, FULL_WINDOWS, LIGHT_WINDOWS } from './fetchWindows';
 export type {
+  ExerciseLogResult,
+  ExerciseSessionInput,
   FoodEntryInput,
   FoodLogResult,
   RawFetchWindows,
@@ -165,4 +169,28 @@ export async function removeFoodEntry(name: string): Promise<boolean> {
   const source = activeHealthSource();
   if (!source.isConfigured()) return false;
   return source.deleteFoodEntry(name);
+}
+
+/**
+ * Write a completed strength/lift session to the OS exercise store. Succeeds on
+ * Android (Health Connect); a no-op on iOS until a workout-write binding exists,
+ * and whenever the store is unavailable. Best-effort: the local session is the
+ * source of truth, so callers fire-and-forget and never block on this.
+ */
+export async function logExerciseSession(
+  input: ExerciseSessionInput,
+): Promise<ExerciseLogResult> {
+  const source = activeHealthSource();
+  if (!source.isConfigured()) return { ok: false, error: 'not-configured' };
+  return source.createExerciseSession(input);
+}
+
+/**
+ * Delete a previously written exercise session by its native id. Returns false
+ * when not connected, unsupported (iOS), or the delete failed.
+ */
+export async function removeExerciseSession(id: string): Promise<boolean> {
+  const source = activeHealthSource();
+  if (!source.isConfigured()) return false;
+  return source.deleteExerciseSession(id);
 }

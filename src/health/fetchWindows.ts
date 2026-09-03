@@ -92,3 +92,31 @@ export interface FoodLogResult {
   /** Failure reason for diagnostics + user messaging (unset on success). */
   error?: string;
 }
+
+/** A completed strength/lift session to write to the OS exercise store. The
+ * session records its own time window; heart rate recorded during it by a
+ * wearable (e.g. Fitbit → Health Connect) is a separate time series the OS
+ * correlates by overlap, so nothing about HR is written here. */
+export interface ExerciseSessionInput {
+  /** Session start (epoch ms). */
+  startMs: number;
+  /** Session end (epoch ms). */
+  endMs: number;
+  /** Title shown in Health Connect / Google Health, e.g. the workout name. */
+  title: string;
+  /** Which exercise type to record it as: 'strength' → STRENGTH_TRAINING,
+   * 'core' → EXERCISE_CLASS (Google Health's label for core sessions). Defaults
+   * to 'strength'. */
+  kind?: 'strength' | 'core';
+  /** Optional summary (sets · reps · volume) written to the record's notes. */
+  notes?: string;
+}
+
+/** Result of an exercise-session write. */
+export interface ExerciseLogResult {
+  ok: boolean;
+  /** Native record id/uuid for the created session, when available. */
+  id?: string | null;
+  /** Failure reason for diagnostics (unset on success). */
+  error?: string;
+}

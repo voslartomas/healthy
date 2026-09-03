@@ -69,10 +69,19 @@ export function normalizeSetTargets(entry: PlannedExercise): PlannedExercise {
   return { ...entry, setTargets: next };
 }
 
+/**
+ * The kind of session, which decides the Health Connect exercise type written
+ * on finish: `strength` → STRENGTH_TRAINING, `core` → EXERCISE_CLASS (what
+ * Google Health / Fitbit label core-training sessions). Defaults to `strength`
+ * for any workout saved before this field existed. */
+export type WorkoutKind = 'strength' | 'core';
+
 /** A saved, reusable workout. */
 export interface SavedWorkout {
   id: string;
   name: string;
+  /** Session type; absent on workouts saved before this — treat as 'strength'. */
+  kind?: WorkoutKind;
   exercises: PlannedExercise[];
 }
 
@@ -81,6 +90,7 @@ export interface WorkoutDraft {
   /** null → creating a new workout; set → editing this saved workout's id. */
   editingId: string | null;
   name: string;
+  kind: WorkoutKind;
   exercises: PlannedExercise[];
 }
 
@@ -102,6 +112,8 @@ export interface ActiveSession {
   /** The saved workout this run came from, or null for a pure ad-hoc run. */
   workoutId: string | null;
   name: string;
+  /** Session type; absent → treated as 'strength'. */
+  kind?: WorkoutKind;
   startedAt: number;
   /** Immutable snapshot of the plan being run. */
   plan: PlannedExercise[];
@@ -125,6 +137,8 @@ export interface SessionSummary {
   id: string;
   workoutId: string | null;
   name: string;
+  /** Session type; absent → treated as 'strength'. */
+  kind?: WorkoutKind;
   startedAt: number;
   endedAt: number;
   durationSec: number;
@@ -132,6 +146,10 @@ export interface SessionSummary {
   setsCompleted: number;
   totalReps: number;
   sets: LoggedSet[];
+  /** The Health Connect record id once mirrored there, or null when it was
+   * never written (unsupported platform / not connected) or removed by the
+   * user. Drives the "synced" indicator and the remove/re-add action. */
+  healthId?: string | null;
 }
 
 /** The next {exercise, set} after the given cursor, or null when the plan is
@@ -202,10 +220,13 @@ interface StrengthState {
   setSessions: (sessions: SessionSummary[]) => void;
   addSessionLocal: (summary: SessionSummary) => void;
   removeSessionLocal: (id: string) => void;
+  /** Record (or clear) a session's mirrored Health Connect record id. */
+  setSessionHealthId: (id: string, healthId: string | null) => void;
 
   // ── builder draft ──────────────────────────────────────────────────────────
   startDraft: (editing?: SavedWorkout) => void;
   setDraftName: (name: string) => void;
+  setDraftKind: (kind: WorkoutKind) => void;
   addDraftExercise: (exerciseId: string) => void;
   updateDraftExercise: (
     entryId: string,
@@ -276,6 +297,16 @@ export const useStrengthStore = create<StrengthState>((set, get) => ({
     set(state => ({ sessions: [summary, ...state.sessions] })),
   removeSessionLocal: id =>
     set(state => ({ sessions: state.sessions.filter(s => s.id !== id) })),
+  setSessionHealthId: (id, healthId) =>
+    set(state => ({
+      sessions: state.sessions.map(s =>
+        s.id === id ? { ...s, healthId } : s,
+      ),
+      lastSummary:
+        state.lastSummary?.id === id
+          ? { ...state.lastSummary, healthId }
+          : state.lastSummary,
+    })),
 
   startDraft: editing =>
     set({
@@ -283,6 +314,7 @@ export const useStrengthStore = create<StrengthState>((set, get) => ({
         ? {
             editingId: editing.id,
             name: editing.name,
+            kind: editing.kind ?? 'strength',
             // Clone entries with fresh ids so builder edits never mutate the
             // saved workout in the list until Save writes through.
             exercises: editing.exercises.map(e => ({
@@ -290,10 +322,12 @@ export const useStrengthStore = create<StrengthState>((set, get) => ({
               id: newStrengthId('pe'),
             })),
           }
-        : { editingId: null, name: '', exercises: [] },
+        : { editingId: null, name: '', kind: 'strength', exercises: [] },
     }),
   setDraftName: name =>
     set(state => (state.draft ? { draft: { ...state.draft, name } } : {})),
+  setDraftKind: kind =>
+    set(state => (state.draft ? { draft: { ...state.draft, kind } } : {})),
   addDraftExercise: exerciseId =>
     set(state =>
       state.draft

@@ -4,8 +4,14 @@ import {
   SavedWorkout,
   SessionSummary,
   SetTarget,
+  WorkoutKind,
 } from '../state/useStrengthStore';
 import { getDb } from './database';
+
+/** Coerce a persisted kind string to the union, defaulting to 'strength'. */
+function toKind(raw: string | null | undefined): WorkoutKind {
+  return raw === 'core' ? 'core' : 'strength';
+}
 
 /**
  * Persistence for the strength feature: saved workouts (with their ordered
@@ -21,6 +27,7 @@ import { getDb } from './database';
 interface WorkoutRow {
   id: string;
   name: string;
+  kind: string | null;
 }
 
 interface WorkoutExerciseRow {
@@ -70,7 +77,7 @@ function rowToPlanned(row: WorkoutExerciseRow): PlannedExercise {
 export async function loadWorkouts(): Promise<SavedWorkout[]> {
   const db = await getDb();
   const workouts = await db.getAllAsync<WorkoutRow>(
-    'SELECT id, name FROM strength_workouts ORDER BY sort_order DESC, created_at DESC;',
+    'SELECT id, name, kind FROM strength_workouts ORDER BY sort_order DESC, created_at DESC;',
   );
   const exercises = await db.getAllAsync<WorkoutExerciseRow>(
     'SELECT id, workout_id, exercise_id, position, target_sets, target_reps, target_weight_kg, rest_sec, set_targets FROM strength_workout_exercises ORDER BY position ASC;',
@@ -84,6 +91,7 @@ export async function loadWorkouts(): Promise<SavedWorkout[]> {
   return workouts.map(w => ({
     id: w.id,
     name: w.name,
+    kind: toKind(w.kind),
     exercises: byWorkout.get(w.id) ?? [],
   }));
 }
@@ -121,10 +129,11 @@ export async function insertWorkout(workout: SavedWorkout): Promise<void> {
     'SELECT COALESCE(MAX(sort_order) + 1, 0) AS next FROM strength_workouts;',
   );
   await db.runAsync(
-    `INSERT INTO strength_workouts (id, name, sort_order, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?);`,
+    `INSERT INTO strength_workouts (id, name, kind, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?);`,
     workout.id,
     workout.name,
+    workout.kind ?? 'strength',
     order?.next ?? 0,
     now,
     now,
@@ -136,8 +145,9 @@ export async function insertWorkout(workout: SavedWorkout): Promise<void> {
 export async function updateWorkout(workout: SavedWorkout): Promise<void> {
   const db = await getDb();
   await db.runAsync(
-    'UPDATE strength_workouts SET name = ?, updated_at = ? WHERE id = ?;',
+    'UPDATE strength_workouts SET name = ?, kind = ?, updated_at = ? WHERE id = ?;',
     workout.name,
+    workout.kind ?? 'strength',
     Date.now(),
     workout.id,
   );
@@ -160,15 +170,17 @@ export async function insertSession(summary: SessionSummary): Promise<void> {
   const db = await getDb();
   await db.runAsync(
     `INSERT INTO strength_sessions
-       (id, workout_id, name, started_at, ended_at, total_volume_kg, sets_completed, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?);`,
+       (id, workout_id, name, kind, started_at, ended_at, total_volume_kg, sets_completed, health_id, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
     summary.id,
     summary.workoutId ?? null,
     summary.name,
+    summary.kind ?? 'strength',
     summary.startedAt,
     summary.endedAt,
     summary.totalVolumeKg,
     summary.setsCompleted,
+    summary.healthId ?? null,
     Date.now(),
   );
   for (const s of summary.sets) {
@@ -195,14 +207,30 @@ export async function deleteSession(id: string): Promise<void> {
   await db.runAsync('DELETE FROM strength_sessions WHERE id = ?;', id);
 }
 
+/** Record (or clear, with null) the Health Connect record id mirrored for a
+ * session, so the "synced" state survives a relaunch. */
+export async function updateSessionHealthId(
+  id: string,
+  healthId: string | null,
+): Promise<void> {
+  const db = await getDb();
+  await db.runAsync(
+    'UPDATE strength_sessions SET health_id = ? WHERE id = ?;',
+    healthId,
+    id,
+  );
+}
+
 interface SessionRow {
   id: string;
   workout_id: string | null;
   name: string;
+  kind: string | null;
   started_at: number;
   ended_at: number | null;
   total_volume_kg: number;
   sets_completed: number;
+  health_id: string | null;
 }
 
 interface SessionSetRow {
@@ -221,7 +249,7 @@ export async function loadRecentSessions(
 ): Promise<SessionSummary[]> {
   const db = await getDb();
   const sessions = await db.getAllAsync<SessionRow>(
-    'SELECT id, workout_id, name, started_at, ended_at, total_volume_kg, sets_completed FROM strength_sessions ORDER BY started_at DESC LIMIT ?;',
+    'SELECT id, workout_id, name, kind, started_at, ended_at, total_volume_kg, sets_completed, health_id FROM strength_sessions ORDER BY started_at DESC LIMIT ?;',
     limit,
   );
   if (sessions.length === 0) return [];
@@ -248,6 +276,7 @@ export async function loadRecentSessions(
       id: s.id,
       workoutId: s.workout_id,
       name: s.name,
+      kind: toKind(s.kind),
       startedAt: s.started_at,
       endedAt,
       durationSec: Math.max(0, Math.round((endedAt - s.started_at) / 1000)),
@@ -255,6 +284,7 @@ export async function loadRecentSessions(
       setsCompleted: s.sets_completed,
       totalReps: sessionSets.reduce((sum, x) => sum + x.reps, 0),
       sets: sessionSets,
+      healthId: s.health_id,
     };
   });
 }

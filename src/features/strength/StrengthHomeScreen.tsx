@@ -1,5 +1,5 @@
 import React from 'react';
-import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ScreenProps } from '../../app/navigation/types';
 import { BriefButton, BriefScreen, Card, M, S } from '../../components/brief';
@@ -7,6 +7,8 @@ import {
   removeSession,
   removeWorkout,
   startWorkoutSession,
+  syncSession,
+  unsyncSession,
   volumeTrendPoints,
 } from '../../state/strengthService';
 import {
@@ -117,6 +119,43 @@ export function StrengthHomeScreen({ navigation }: ScreenProps) {
   const workouts = useStrengthStore(s => s.workouts);
   const sessions = useStrengthStore(s => s.sessions);
   const startDraft = useStrengthStore(s => s.startDraft);
+  // Health Connect write is Android-only, so the sync affordance shows there.
+  const canSync = Platform.OS === 'android';
+  const [syncingId, setSyncingId] = React.useState<string | null>(null);
+
+  function onSyncPress(s: SessionSummary) {
+    if (syncingId) return;
+    if (s.healthId) {
+      Alert.alert(
+        'Remove from Health Connect',
+        `Remove the “${s.name}” session from Health Connect? Your local record stays.`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Remove',
+            style: 'destructive',
+            onPress: async () => {
+              setSyncingId(s.id);
+              await unsyncSession(s);
+              setSyncingId(null);
+            },
+          },
+        ],
+      );
+      return;
+    }
+    void (async () => {
+      setSyncingId(s.id);
+      const ok = await syncSession(s);
+      setSyncingId(null);
+      if (!ok) {
+        Alert.alert(
+          'Not synced',
+          'Could not write to Health Connect. Make sure it’s connected in Setup.',
+        );
+      }
+    })();
+  }
 
   function newWorkout() {
     startDraft();
@@ -307,12 +346,43 @@ export function StrengthHomeScreen({ navigation }: ScreenProps) {
                   </Text>
                   <Text style={M(600, 9.5, { ls: 0.5, color: c.fnt })}>
                     {sessionDate(s.startedAt).toUpperCase()} · {s.setsCompleted}{' '}
-                    SETS
+                    SETS{s.kind === 'core' ? ' · CORE' : ''}
                   </Text>
                 </View>
-                <Text style={M(700, 12, { color: c.acc })}>
-                  {s.totalVolumeKg > 0 ? `${s.totalVolumeKg} KG` : '—'}
-                </Text>
+                <View style={styles.sessionRight}>
+                  <Text style={M(700, 12, { color: c.acc })}>
+                    {s.totalVolumeKg > 0 ? `${s.totalVolumeKg} KG` : '—'}
+                  </Text>
+                  {canSync ? (
+                    <Pressable
+                      onPress={() => onSyncPress(s)}
+                      disabled={syncingId === s.id}
+                      hitSlop={6}
+                      accessibilityRole="button"
+                      accessibilityLabel={
+                        s.healthId
+                          ? `Remove ${s.name} from Health Connect`
+                          : `Sync ${s.name} to Health Connect`
+                      }
+                      style={[
+                        styles.syncPill,
+                        s.healthId
+                          ? { backgroundColor: c.pillBg, borderColor: 'transparent' }
+                          : { borderColor: c.hair },
+                        { opacity: syncingId === s.id ? 0.5 : 1 },
+                      ]}
+                    >
+                      <Text
+                        style={M(700, 8.5, {
+                          ls: 0.6,
+                          color: s.healthId ? c.pillText : c.acc,
+                        })}
+                      >
+                        {s.healthId ? '✓ HEALTH' : '+ HEALTH'}
+                      </Text>
+                    </Pressable>
+                  ) : null}
+                </View>
               </Pressable>
             ))}
           </View>
@@ -373,4 +443,13 @@ const styles = StyleSheet.create({
   },
   sessionList: { marginTop: 8 },
   sessionMain: { flex: 1, minWidth: 0, gap: 4 },
+  sessionRight: { alignItems: 'flex-end', gap: 6 },
+  syncPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 9,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
 });

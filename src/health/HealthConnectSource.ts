@@ -1,6 +1,12 @@
 import { profileAge } from '../state/useProfileStore';
 import { nightIndex, nightIndexToTime } from './derive';
-import { FoodEntryInput, FoodLogResult, RawFetchWindows } from './fetchWindows';
+import {
+  ExerciseLogResult,
+  ExerciseSessionInput,
+  FoodEntryInput,
+  FoodLogResult,
+  RawFetchWindows,
+} from './fetchWindows';
 import { HealthSource } from './HealthSource';
 import { computeHrZones, HeartRateSample, resolveMaxHr } from './hrZones';
 import {
@@ -205,6 +211,7 @@ const PERMISSIONS: Permission[] = [
     recordType,
   })),
   { accessType: 'write', recordType: 'Nutrition' },
+  { accessType: 'write', recordType: 'ExerciseSession' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -1133,6 +1140,51 @@ export class HealthConnectSource implements HealthSource {
       return true;
     } catch (err) {
       console.warn('[HealthConnect] delete Nutrition failed', err);
+      return false;
+    }
+  }
+
+  async createExerciseSession(
+    input: ExerciseSessionInput,
+  ): Promise<ExerciseLogResult> {
+    const mod = await this.ensureInitialized();
+    if (!mod) return { ok: false, error: 'not-connected' };
+    // Health Connect rejects a zero/negative-duration session, so give a very
+    // short workout a one-minute floor. Heart rate from a wearable (Fitbit →
+    // Health Connect) overlaps this window and is correlated by the platform.
+    const end = Math.max(input.endMs, input.startMs + 60_000);
+    // 'core' maps to EXERCISE_CLASS (Google Health / Fitbit's label for core
+    // sessions), 'strength' to STRENGTH_TRAINING. Fall back to the known ints
+    // for this library version when the native enum isn't loaded.
+    const exerciseType =
+      input.kind === 'core'
+        ? (mod.ExerciseType?.EXERCISE_CLASS ?? 26)
+        : (mod.ExerciseType?.STRENGTH_TRAINING ?? 70);
+    const record: Record<string, unknown> = {
+      recordType: 'ExerciseSession',
+      startTime: new Date(input.startMs).toISOString(),
+      endTime: new Date(end).toISOString(),
+      exerciseType,
+      title: input.title,
+    };
+    if (input.notes) record.notes = input.notes;
+    try {
+      const ids = await mod.insertRecords([record]);
+      return { ok: true, id: ids?.[0] ?? null };
+    } catch (err) {
+      console.warn('[HealthConnect] insert ExerciseSession failed', err);
+      return { ok: false, error: String((err as Error)?.message ?? err) };
+    }
+  }
+
+  async deleteExerciseSession(id: string): Promise<boolean> {
+    const mod = await this.ensureInitialized();
+    if (!mod?.deleteRecordsByUuids) return false;
+    try {
+      await mod.deleteRecordsByUuids('ExerciseSession', [id], []);
+      return true;
+    } catch (err) {
+      console.warn('[HealthConnect] delete ExerciseSession failed', err);
       return false;
     }
   }

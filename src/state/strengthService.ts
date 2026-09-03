@@ -5,8 +5,10 @@ import {
   insertWorkout,
   loadRecentSessions,
   loadWorkouts,
+  updateSessionHealthId,
   updateWorkout,
 } from '../db/strengthRepository';
+import { logExerciseSession, removeExerciseSession } from '../health';
 import {
   ActiveSession,
   LoggedSet,
@@ -16,6 +18,7 @@ import {
   SessionSummary,
   setTargetFor,
   useStrengthStore,
+  WorkoutKind,
 } from './useStrengthStore';
 
 /**
@@ -53,6 +56,7 @@ export async function saveDraft(): Promise<SavedWorkout | null> {
     const workout: SavedWorkout = {
       id: draft.editingId,
       name,
+      kind: draft.kind,
       exercises: draft.exercises,
     };
     await updateWorkout(workout);
@@ -64,6 +68,7 @@ export async function saveDraft(): Promise<SavedWorkout | null> {
   const workout: SavedWorkout = {
     id: newStrengthId('wk'),
     name,
+    kind: draft.kind,
     exercises: draft.exercises,
   };
   await insertWorkout(workout);
@@ -84,6 +89,7 @@ export async function addWorkout(
   const workout: SavedWorkout = {
     id: newStrengthId('wk'),
     name: name.trim() || 'Untitled workout',
+    kind: 'strength',
     exercises,
   };
   await insertWorkout(workout);
@@ -110,6 +116,7 @@ export function buildSession(
   name: string,
   plan: PlannedExercise[],
   startedAt: number,
+  kind: WorkoutKind = 'strength',
 ): ActiveSession {
   const first = plan[0];
   const seed = first ? setTargetFor(first, 0) : null;
@@ -117,6 +124,7 @@ export function buildSession(
     id: newStrengthId('ss'),
     workoutId,
     name,
+    kind,
     startedAt,
     plan,
     exerciseIndex: 0,
@@ -136,6 +144,7 @@ export function startWorkoutSession(workout: SavedWorkout): void {
     workout.name,
     workout.exercises,
     Date.now(),
+    workout.kind ?? 'strength',
   );
   useStrengthStore.getState().startSession(session);
 }
@@ -150,6 +159,7 @@ export function startDraftSession(): boolean {
     draft.name.trim() || 'Ad-hoc workout',
     draft.exercises,
     Date.now(),
+    draft.kind,
   );
   useStrengthStore.getState().startSession(session);
   return true;
@@ -188,6 +198,7 @@ export function buildSummary(
     id: session.id,
     workoutId: session.workoutId,
     name: session.name,
+    kind: session.kind,
     startedAt: session.startedAt,
     endedAt,
     durationSec: Math.max(0, Math.round((endedAt - session.startedAt) / 1000)),
@@ -196,6 +207,59 @@ export function buildSummary(
     totalReps: sets.reduce((sum, s) => sum + s.reps, 0),
     sets,
   };
+}
+
+/** A one-line "N sets · N reps · N kg volume" note for a session's OS record. */
+function sessionNote(summary: SessionSummary): string {
+  const parts = [`${summary.setsCompleted} sets`, `${summary.totalReps} reps`];
+  if (summary.totalVolumeKg > 0) {
+    parts.push(`${summary.totalVolumeKg} kg volume`);
+  }
+  return parts.join(' · ');
+}
+
+/**
+ * Mirror a finished session to the OS exercise store (Health Connect), then
+ * record the returned record id on the session (store + DB) so the UI can show
+ * it as synced and later remove it. Best-effort: swallows any failure so a store
+ * hiccup never breaks the flow, and is a no-op on platforms without a
+ * workout-write path. Returns whether a record was written.
+ */
+export async function syncSession(summary: SessionSummary): Promise<boolean> {
+  try {
+    const res = await logExerciseSession({
+      startMs: summary.startedAt,
+      endMs: summary.endedAt,
+      title: summary.name,
+      kind: summary.kind,
+      notes: sessionNote(summary),
+    });
+    if (res.ok && res.id) {
+      await updateSessionHealthId(summary.id, res.id);
+      useStrengthStore.getState().setSessionHealthId(summary.id, res.id);
+      return true;
+    }
+  } catch (err) {
+    console.warn('[strength] exercise-session write failed', err);
+  }
+  return false;
+}
+
+/** Remove a session's mirrored Health Connect record (and clear its local id).
+ * No-op — returns false — when the session was never synced. */
+export async function unsyncSession(summary: SessionSummary): Promise<boolean> {
+  if (!summary.healthId) return false;
+  try {
+    const ok = await removeExerciseSession(summary.healthId);
+    if (ok) {
+      await updateSessionHealthId(summary.id, null);
+      useStrengthStore.getState().setSessionHealthId(summary.id, null);
+    }
+    return ok;
+  } catch (err) {
+    console.warn('[strength] exercise-session remove failed', err);
+    return false;
+  }
 }
 
 /**
@@ -214,6 +278,11 @@ export async function finishSession(): Promise<SessionSummary | null> {
     // Reflect it in the in-memory history immediately so the trend updates
     // without a reload (only real, persisted sessions enter the history).
     store.addSessionLocal(summary);
+    // Best-effort mirror to the OS exercise store (Health Connect on Android),
+    // so the lift shows up alongside cardio and a wearable's heart rate lines
+    // up with it by time. Fire-and-forget: the local record is authoritative,
+    // and the write is a no-op when the store is unavailable or unsupported.
+    void syncSession(summary);
   }
   store.setLastSummary(summary);
   store.clearSession();
