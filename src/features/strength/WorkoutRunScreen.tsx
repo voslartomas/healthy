@@ -403,7 +403,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: 12,
     paddingVertical: 14,
     paddingHorizontal: 15,
     marginTop: 18,

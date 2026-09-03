@@ -11,7 +11,7 @@ import {
 import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
 
 import { ScreenProps } from '../../app/navigation/types';
-import { BriefScreen, Card, M, S } from '../../components/brief';
+import { BAND, BriefScreen, Card, InkBand, M, S } from '../../components/brief';
 import { useGoalHistoryStore } from '../../state/useGoalHistoryStore';
 import { goalWeekly, useGoalsStore } from '../../state/useGoalsStore';
 import { useHealthStore } from '../../state/useHealthStore';
@@ -567,27 +567,30 @@ export function TrendsScreen(_props: ScreenProps) {
 
   return (
     <BriefScreen>
-      {/* Hero value */}
-      <View style={styles.heroRow}>
-        <Text style={[M(700, 70, { ls: -1, color: c.ink }), styles.hero]}>
-          {active.value}
-          {active.value !== '—' ? (
-            <Text style={M(700, 26, { ls: -0.2, color: c.fnt })}>
-              {' '}
-              {active.unit}
-            </Text>
-          ) : null}
-        </Text>
-      </View>
-      <View style={styles.avgRow}>
+      {/* Hero value + summary line, in the ink band */}
+      <InkBand paddingBottom={16}>
+        <View style={styles.heroRow}>
+          <Text style={[M(700, 70, { ls: -1, color: BAND.ink }), styles.hero]}>
+            {active.value}
+            {active.value !== '—' ? (
+              <Text style={M(700, 26, { ls: -0.2, color: BAND.fnt })}>
+                {' '}
+                {active.unit}
+              </Text>
+            ) : null}
+          </Text>
+        </View>
         <Text
           style={[
-            M(700, 10, { ls: 1, upper: true, color: c.fnt }),
+            M(700, 10, { ls: 1, upper: true, color: BAND.fnt }),
             styles.avgLine,
           ]}
         >
           AVG {active.avg} · RANGE {active.range}
         </Text>
+      </InkBand>
+
+      <View style={styles.rangeRow}>
         <View style={styles.rangeSwitch}>
           {TREND_RANGES.map(d => {
             const on = d === rangeDays;
@@ -688,16 +691,10 @@ export function TrendsScreen(_props: ScreenProps) {
 }
 
 const styles = StyleSheet.create({
-  heroRow: { flexDirection: 'row', alignItems: 'flex-end', marginTop: 6 },
+  heroRow: { flexDirection: 'row', alignItems: 'flex-end', marginTop: 2 },
   hero: { lineHeight: 74 }, // >= the 70px fontSize so iOS doesn't clip digit tops
-  avgRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    marginTop: 6,
-  },
-  avgLine: { flex: 1, minWidth: 0, lineHeight: 16 },
+  avgLine: { lineHeight: 16, marginTop: 6 },
+  rangeRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 14 },
   rangeSwitch: { flexDirection: 'row', gap: 6 },
   rangeBtn: {
     paddingVertical: 6,

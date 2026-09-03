@@ -511,7 +511,7 @@ const styles = StyleSheet.create({
   modelCard: {
     marginTop: 16,
     borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: 12,
     padding: 14,
     gap: 12,
   },

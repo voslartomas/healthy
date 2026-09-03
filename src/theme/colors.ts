@@ -20,6 +20,7 @@
 export interface Palette {
   // ── v3 core ──────────────────────────────────────────────────────────────
   bg: string; // page ground behind the cards
+  band: string; // full-bleed dark "ink band" behind headers & heroes (v4)
   card: string; // card surface
   ink: string; // primary text
   mut: string; // muted text
@@ -70,6 +71,7 @@ export interface Palette {
 export const light: Palette = {
   // v3 core
   bg: '#F4F6F9',
+  band: '#0E1726',
   card: '#FFFFFF',
   ink: '#0E1726',
   mut: '#4B5A6E',
@@ -117,6 +119,7 @@ export const light: Palette = {
 export const dark: Palette = {
   // v3 core
   bg: '#0B1220',
+  band: '#162236',
   card: '#131C2B',
   ink: '#E8EEF6',
   mut: '#94A6BE',

@@ -80,11 +80,33 @@ export const BRIEF_MAX_WIDTH = 440;
 /** Horizontal gutter of the card column (the design's `padding: 4px 22px`). */
 export const BRIEF_GUTTER = 22;
 
-/** The card title face — Archivo ExtraBold 16, used by {@link Card} and by the
+/** The card title face — Archivo ExtraBold 15, used by {@link Card} and by the
  * few screens that head a block without wrapping it in one. */
 export function cardTitleStyle(ink: string): TextStyle {
-  return S(800, 16, { ls: -0.16, color: ink });
+  return S(800, 15, { ls: -0.15, lh: 18, color: ink });
 }
+
+/**
+ * The fixed inverted palette used for content that sits inside an ink band. The
+ * band ({@link Palette.band}) is dark in *both* colour schemes, so the text,
+ * hairlines and accents on top of it are constant — white ink, cool-grey muted
+ * copy, and the light steel accents the dark theme already uses. Screens read
+ * these directly (not through {@link useTheme}) because there is no theme
+ * provider to override for a subtree. Mirrors the design's per-band CSS-var
+ * overrides in HealthApp v4. */
+export const BAND = {
+  ink: '#FFFFFF',
+  mut: '#D5DEE9',
+  fnt: '#B4C1D2',
+  hair: 'rgba(255,255,255,0.14)',
+  track: 'rgba(255,255,255,0.14)',
+  acc: '#6FA3D6',
+  accSolid: '#6FA3D6',
+  sand: '#7FA8CE',
+  grn: '#5FAE8B',
+  pillBg: 'rgba(95,174,139,0.18)',
+  pillText: '#5FAE8B',
+} as const;
 
 /** Shared field styling for the design's text inputs: hairline box on the page
  * ground, 12px radius, 12/14 padding. */
@@ -392,6 +414,218 @@ export function BigStat({
   return <View style={[styles.card, styles.bigRow, cardStyle]}>{body}</View>;
 }
 
+/**
+ * A full-bleed dark "ink band" — the v4 signature surface. It bleeds past the
+ * brief's 22px gutter to the column edge and re-adds the gutter as padding, so
+ * the dark fill runs edge-to-edge while its content keeps the page rhythm. The
+ * native header is the same band, so a hero band at the top of a screen (with
+ * the default −4 top margin) meets the header with no seam.
+ */
+export function InkBand({
+  children,
+  style,
+  marginTop = -4,
+  paddingTop = 8,
+  paddingBottom = 22,
+}: {
+  children: React.ReactNode;
+  style?: StyleProp<ViewStyle>;
+  marginTop?: number;
+  paddingTop?: number;
+  paddingBottom?: number;
+}) {
+  const c = useTheme().colors;
+  return (
+    <View
+      style={[
+        {
+          backgroundColor: c.band,
+          marginHorizontal: -BRIEF_GUTTER,
+          marginTop,
+          paddingHorizontal: BRIEF_GUTTER,
+          paddingTop,
+          paddingBottom,
+        },
+        style,
+      ]}
+    >
+      {children}
+    </View>
+  );
+}
+
+/**
+ * The oversized hero readout that sits inside an {@link InkBand}: a 72px Oswald
+ * number (optional smaller unit suffix) on the left, with an optional status
+ * pill and uppercase caption stacked to its lower-right. Rendered with the
+ * fixed {@link BAND} palette. Becomes a button when `onPress` is set.
+ */
+export function HeroRow({
+  value,
+  suffix,
+  suffixSize = 30,
+  suffixSpace,
+  pillText,
+  pillDot,
+  caption,
+  onPress,
+  accessibilityLabel,
+}: {
+  value: string;
+  suffix?: string;
+  suffixSize?: number;
+  /** Render a space before the unit (" kg"); omit for "%". */
+  suffixSpace?: boolean;
+  pillText?: string;
+  /** Show the green status dot before the pill text. */
+  pillDot?: boolean;
+  caption?: string;
+  onPress?: () => void;
+  accessibilityLabel?: string;
+}) {
+  const body = (
+    <>
+      <Text style={M(700, 72, { ls: -1.5, lh: 72, color: BAND.ink })}>
+        {value}
+        {suffix ? (
+          <Text style={M(700, suffixSize, { ls: -0.2, color: BAND.fnt })}>
+            {suffixSpace ? ' ' : ''}
+            {suffix}
+          </Text>
+        ) : null}
+      </Text>
+      {pillText || caption ? (
+        <View style={styles.heroRight}>
+          {pillText ? (
+            <View style={styles.heroPill}>
+              {pillDot ? <View style={styles.heroDot} /> : null}
+              <Text style={M(700, 10.5, { ls: 1, color: BAND.pillText })}>
+                {pillText}
+              </Text>
+            </View>
+          ) : null}
+          {caption ? (
+            <Text
+              style={[
+                M(700, 10, { ls: 1, upper: true, color: BAND.fnt }),
+                styles.heroCaption,
+              ]}
+            >
+              {caption}
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+    </>
+  );
+  if (onPress) {
+    return (
+      <Pressable
+        onPress={onPress}
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+        style={styles.heroBox}
+      >
+        {body}
+      </Pressable>
+    );
+  }
+  return <View style={styles.heroBox}>{body}</View>;
+}
+
+/** The outlined, rounded shell that holds a bordered stat grid ({@link
+ * GridRow} / {@link GridCell}). Clips the cells' bled left dividers. */
+export function GridBox({
+  children,
+  style,
+}: {
+  children: React.ReactNode;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const c = useTheme().colors;
+  return (
+    <View
+      style={[
+        styles.gridBox,
+        { backgroundColor: c.card, borderColor: c.hair },
+        style,
+      ]}
+    >
+      {children}
+    </View>
+  );
+}
+
+/** A row of cells inside a {@link GridBox}. `borderTop` draws the hairline that
+ * splits it from the row above (or from a card body it is nested under). */
+export function GridRow({
+  children,
+  borderTop,
+  style,
+}: {
+  children: React.ReactNode;
+  borderTop?: boolean;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const c = useTheme().colors;
+  return (
+    <View
+      style={[
+        styles.gridRow,
+        borderTop ? { borderTopWidth: 1, borderTopColor: c.hair } : null,
+        style,
+      ]}
+    >
+      {children}
+    </View>
+  );
+}
+
+/** One grid cell: a mono eyebrow label over its value node(s). `first` drops
+ * the left divider (the leading cell in a row); the rest carry a hairline. */
+export function GridCell({
+  label,
+  children,
+  first,
+  onPress,
+  accessibilityLabel,
+  style,
+}: {
+  label: React.ReactNode;
+  children: React.ReactNode;
+  first?: boolean;
+  onPress?: () => void;
+  accessibilityLabel?: string;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const c = useTheme().colors;
+  const cellStyle = [
+    styles.gridCell,
+    first ? null : { borderLeftWidth: 1, borderLeftColor: c.hair },
+    style,
+  ];
+  const body = (
+    <>
+      <Text style={M(700, 8.5, { ls: 1.2, upper: true, color: c.fnt })}>
+        {label}
+      </Text>
+      {children}
+    </>
+  );
+  return onPress ? (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      style={cellStyle}
+    >
+      {body}
+    </Pressable>
+  ) : (
+    <View style={cellStyle}>{body}</View>
+  );
+}
+
 export interface QuadItem {
   value: string;
   label: React.ReactNode;
@@ -593,6 +827,31 @@ const styles = StyleSheet.create({
   },
   bigRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 16 },
   bigRight: { paddingBottom: 6, flexShrink: 1 },
+  // Hero readout inside an ink band (72px number + pill/caption to lower-right).
+  heroBox: { flexDirection: 'row', alignItems: 'flex-end', gap: 16 },
+  heroRight: { paddingBottom: 6, flexShrink: 1 },
+  heroPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    paddingVertical: 6,
+    paddingHorizontal: 11,
+    borderRadius: 999,
+    backgroundColor: BAND.pillBg,
+  },
+  heroDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: BAND.grn },
+  heroCaption: { lineHeight: 16, marginTop: 5 },
+  // Bordered stat grid (GridBox / GridRow / GridCell).
+  gridBox: { borderWidth: 1, borderRadius: 12, overflow: 'hidden' },
+  gridRow: { flexDirection: 'row' },
+  gridCell: {
+    flex: 1,
+    minWidth: 0,
+    paddingVertical: 13,
+    paddingHorizontal: 12,
+    gap: 6,
+  },
   quad: { flexDirection: 'row', marginTop: 12 },
   quadCell: { flex: 1, gap: 4 },
   macroCap: {

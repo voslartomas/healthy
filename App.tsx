@@ -187,7 +187,9 @@ export default function App() {
           <WelcomeScreen />
         </View>
       )}
-      <StatusBar style={isDark ? 'light' : 'dark'} />
+      {/* The native header is the v4 dark ink band in both schemes, so the
+          status-bar glyphs above it are always light. */}
+      <StatusBar style="light" />
     </SafeAreaProvider>
   );
 }

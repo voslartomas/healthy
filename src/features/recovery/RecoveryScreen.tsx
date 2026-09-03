@@ -4,12 +4,14 @@ import Svg, { Line, Path } from 'react-native-svg';
 
 import { ScreenProps } from '../../app/navigation/types';
 import {
-  BigStat,
   BriefScreen,
   Card,
+  GridBox,
+  GridCell,
+  GridRow,
+  HeroRow,
+  InkBand,
   M,
-  PillSpec,
-  Quad,
   S,
 } from '../../components/brief';
 import { ReadinessContribution } from '../../health';
@@ -162,12 +164,8 @@ export function RecoveryScreen(_props: ScreenProps) {
   const hrvSeries = snap.trends.hrv.slice(-14).map(p => p.value);
   const baseline = snap.hrv?.baseline ?? null;
 
-  const pill: PillSpec = readiness
-    ? {
-        text: readiness.state.toUpperCase(),
-        dot: c.acc,
-      }
-    : { text: 'NOT CONNECTED', dot: c.fnt, bg: null };
+  const pillText = readiness ? readiness.state.toUpperCase() : 'NOT CONNECTED';
+  const pillDot = !!readiness;
 
   const W = 354,
     H = 130,
@@ -179,49 +177,58 @@ export function RecoveryScreen(_props: ScreenProps) {
 
   return (
     <BriefScreen>
-      <BigStat
-        value={readiness ? String(readiness.pct) : '—'}
-        suffix={readiness ? '%' : undefined}
-        pill={pill}
-        caption={
-          snap.live ? 'LIVE · GOOGLE HEALTH' : 'CONNECT A SOURCE TO START'
-        }
-      />
-
-      <Card title="Contributors" style={styles.gap16}>
-        <Quad
-          items={[
-            {
-              value: snap.hrv ? String(Math.round(snap.hrv.value)) : '——',
-              label: (
-                <Text>
-                  HRV MS{snap.hrv ? <Delta delta={snap.hrv.delta} /> : null}
-                </Text>
-              ),
-            },
-            {
-              value: snap.restingHr
-                ? String(Math.round(snap.restingHr.value))
-                : '——',
-              label: (
-                <Text>
-                  RHR
-                  {snap.restingHr ? (
-                    <Delta delta={snap.restingHr.delta} goodUp={false} />
-                  ) : null}
-                </Text>
-              ),
-            },
-            {
-              value: snap.sleep ? `${snap.sleep.performancePct}%` : '——',
-              label: snap.sleep
-                ? `SLEEP ${hoursToHm(snap.sleep.hours)}`
-                : 'SLEEP',
-            },
-            { value: '——', label: 'RESP RPM' },
-          ]}
+      <InkBand>
+        <HeroRow
+          value={readiness ? String(readiness.pct) : '—'}
+          suffix={readiness ? '%' : undefined}
+          pillText={pillText}
+          pillDot={pillDot}
+          caption={
+            snap.live ? 'LIVE · GOOGLE HEALTH' : 'CONNECT A SOURCE TO START'
+          }
         />
-      </Card>
+      </InkBand>
+
+      <GridBox style={styles.gap16}>
+        <GridRow>
+          <GridCell
+            first
+            label={
+              <>
+                HRV MS{snap.hrv ? <Delta delta={snap.hrv.delta} /> : null}
+              </>
+            }
+          >
+            <Text style={M(700, 20, { ls: -0.2, color: c.ink })}>
+              {snap.hrv ? String(Math.round(snap.hrv.value)) : '——'}
+            </Text>
+          </GridCell>
+          <GridCell
+            label={
+              <>
+                RHR
+                {snap.restingHr ? (
+                  <Delta delta={snap.restingHr.delta} goodUp={false} />
+                ) : null}
+              </>
+            }
+          >
+            <Text style={M(700, 20, { ls: -0.2, color: c.ink })}>
+              {snap.restingHr ? String(Math.round(snap.restingHr.value)) : '——'}
+            </Text>
+          </GridCell>
+          <GridCell
+            label={snap.sleep ? `SLEEP ${hoursToHm(snap.sleep.hours)}` : 'SLEEP'}
+          >
+            <Text style={M(700, 20, { ls: -0.2, color: c.ink })}>
+              {snap.sleep ? `${snap.sleep.performancePct}%` : '——'}
+            </Text>
+          </GridCell>
+          <GridCell label="RESP RPM">
+            <Text style={M(700, 20, { ls: -0.2, color: c.ink })}>——</Text>
+          </GridCell>
+        </GridRow>
+      </GridBox>
 
       <Card
         title="How this is scored"

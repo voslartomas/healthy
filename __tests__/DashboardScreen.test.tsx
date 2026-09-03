@@ -15,9 +15,11 @@ describe('DashboardScreen', () => {
   it('renders the brief cards and the recovery hero', async () => {
     await renderWithProviders(<DashboardScreen navigation={mockNav()} />);
 
-    expect(screen.getByText('Sleep →')).toBeOnTheScreen();
-    expect(screen.getByText('Body & fuel')).toBeOnTheScreen();
-    expect(screen.getByText('Fuel →')).toBeOnTheScreen();
+    // v4: sleep/HRV/RHR/load are a bordered metric grid; the fuel card leads
+    // with the "Body & fuel →" title.
+    expect(screen.getByText('SLEEP')).toBeOnTheScreen();
+    expect(screen.getByText('LOAD')).toBeOnTheScreen();
+    expect(screen.getByText('Body & fuel →')).toBeOnTheScreen();
     expect(screen.getByText('Week')).toBeOnTheScreen();
     // With no snapshot the recovery hero reads "not connected".
     expect(screen.getByText('NOT CONNECTED')).toBeOnTheScreen();
@@ -43,7 +45,9 @@ describe('DashboardScreen', () => {
     const nav = mockNav();
     await renderWithProviders(<DashboardScreen navigation={nav} />);
 
-    fireEvent.press(screen.getByLabelText(/Open recovery detail/));
+    // The HRV/RHR grid cells also deep-link to Recovery; press the hero, which
+    // carries the fuller "no recovery data" label when nothing is connected.
+    fireEvent.press(screen.getByLabelText(/Open recovery detail, no recovery data/));
     expect(nav.navigate).toHaveBeenCalledWith('Recovery');
   });
 

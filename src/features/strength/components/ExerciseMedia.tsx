@@ -96,7 +96,7 @@ export function ExerciseMedia({
     ? { width: height, height, borderRadius: 8, borderWidth: 1 }
     : variant === 'hero'
       ? { width: '100%', height, borderRadius: 0, borderWidth: 0 }
-      : { width: '100%', height, borderRadius: 10, borderWidth: 1 };
+      : { width: '100%', height, borderRadius: 12, borderWidth: 1 };
 
   const caption = sub ?? MUSCLE_LABELS[def.muscleGroup].toUpperCase();
 
@@ -144,7 +144,7 @@ export function ExerciseMedia({
       )}
       {!isThumb && caption ? (
         <View style={styles.badge}>
-          <Text style={M(700, 9, { ls: 1.4, color: c.fnt })}>{caption}</Text>
+          <Text style={M(700, 9, { ls: 1.4, color: '#FFFFFF' })}>{caption}</Text>
         </View>
       ) : null}
     </View>
@@ -204,5 +204,15 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  badge: { position: 'absolute', top: 10, left: 12 },
+  // A caption pill over the animation: white text on a translucent brand-blue
+  // fill (#336699) so it stays legible against the light/dark exercise frames.
+  badge: {
+    position: 'absolute',
+    top: 10,
+    left: 12,
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+    backgroundColor: 'rgba(51,102,153,0.85)',
+  },
 });

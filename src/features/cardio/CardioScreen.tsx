@@ -3,12 +3,12 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { ScreenProps } from '../../app/navigation/types';
 import {
-  BigStat,
   BriefScreen,
-  M,
-  PillSpec,
-  S,
   Card,
+  HeroRow,
+  InkBand,
+  M,
+  S,
 } from '../../components/brief';
 import { useHealthStore } from '../../state/useHealthStore';
 import { useTheme } from '../../theme/theme';
@@ -42,17 +42,17 @@ export function CardioScreen(_props: ScreenProps) {
     ? Math.round(cardio.weekLoad / cardio.daily.length)
     : 0;
 
-  const pill: PillSpec = hasLoad
-    ? { text: `WEEK LOAD ${cardio.weekLoad}` }
-    : { text: 'NO CARDIO DATA', dot: c.fnt, bg: null };
+  const pillText = hasLoad ? `WEEK LOAD ${cardio.weekLoad}` : 'NO CARDIO DATA';
 
   return (
     <BriefScreen>
-      <BigStat
-        value={hasLoad ? String(cardio.todayLoad) : '—'}
-        pill={pill}
-        caption="CARDIO LOAD · TODAY"
-      />
+      <InkBand>
+        <HeroRow
+          value={hasLoad ? String(cardio.todayLoad) : '—'}
+          pillText={pillText}
+          caption="CARDIO LOAD · TODAY"
+        />
+      </InkBand>
 
       <Card title="HR zones · 7 days" first>
         {!hasZones ? (

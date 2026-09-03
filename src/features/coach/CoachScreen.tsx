@@ -20,7 +20,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Svg, { Path } from 'react-native-svg';
 
 import { ScreenProps } from '../../app/navigation/types';
-import { M, S } from '../../components/brief';
+import { BAND, M, S } from '../../components/brief';
 import {
   appendMessage,
   createConversation,
@@ -121,11 +121,13 @@ export function CoachScreen({ navigation }: ScreenProps) {
   // Burger button in the header opens the conversation list.
   useLayoutEffect(() => {
     navigation.setOptions({
+      // The coach modal header is the dark ink band, so its burger reads in the
+      // light steel accent rather than the on-light accent.
       headerLeft: () => (
-        <BurgerButton color={c.acc} onPress={() => setMenuOpen(true)} />
+        <BurgerButton color={BAND.acc} onPress={() => setMenuOpen(true)} />
       ),
     });
-  }, [navigation, c.acc]);
+  }, [navigation]);
 
   const scrollToEnd = useCallback(
     () =>

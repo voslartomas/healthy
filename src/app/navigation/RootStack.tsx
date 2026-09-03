@@ -6,11 +6,13 @@ import { CardioScreen } from '../../features/cardio/CardioScreen';
 import { CoachOverlay } from '../../features/coach/CoachOverlay';
 import { CoachScreen } from '../../features/coach/CoachScreen';
 import { GoalDefineScreen } from '../../features/goals/GoalDefineScreen';
+import { FoodsLibraryScreen } from '../../features/nutrition/FoodsLibraryScreen';
 import { RecoveryScreen } from '../../features/recovery/RecoveryScreen';
 import { SleepScreen } from '../../features/sleep/SleepScreen';
 import { ExercisePickerScreen } from '../../features/strength/ExercisePickerScreen';
 import { WorkoutBuilderScreen } from '../../features/strength/WorkoutBuilderScreen';
 import { WorkoutRunScreen } from '../../features/strength/WorkoutRunScreen';
+import { WorkoutsLibraryScreen } from '../../features/strength/WorkoutsLibraryScreen';
 import { WorkoutSummaryScreen } from '../../features/strength/WorkoutSummaryScreen';
 import { useTheme } from '../../theme/theme';
 import {
@@ -96,6 +98,15 @@ export function RootStack() {
           options={{ headerTitle: WorkoutSummaryTitle, headerBackVisible: false }}
         />
         <Stack.Screen
+          name="WorkoutsLibrary"
+          component={asScreen(WorkoutsLibraryScreen)}
+          options={({ navigation }) => ({
+            presentation: 'modal',
+            title: 'Workouts',
+            headerRight: () => <HeaderClose onPress={navigation.goBack} />,
+          })}
+        />
+        <Stack.Screen
           name="Coach"
           component={asScreen(CoachScreen)}
           options={({ navigation }) => ({
@@ -110,6 +121,15 @@ export function RootStack() {
           options={({ navigation }) => ({
             presentation: 'modal',
             title: 'Define goal',
+            headerRight: () => <HeaderClose onPress={navigation.goBack} />,
+          })}
+        />
+        <Stack.Screen
+          name="FoodsLibrary"
+          component={asScreen(FoodsLibraryScreen)}
+          options={({ navigation }) => ({
+            presentation: 'modal',
+            title: 'Common foods',
             headerRight: () => <HeaderClose onPress={navigation.goBack} />,
           })}
         />

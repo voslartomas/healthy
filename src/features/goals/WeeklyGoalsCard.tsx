@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
+import Svg, { Circle } from 'react-native-svg';
 
 import { AppNav } from '../../app/navigation/types';
-import { M, Card } from '../../components/brief';
+import { Card, M } from '../../components/brief';
 import { ENERGY_METRICS, GOAL_SOURCES } from '../../data/goalSources';
 import { removeGoal } from '../../state/goalsService';
 import { useHealthStore } from '../../state/useHealthStore';
@@ -29,48 +30,27 @@ function todayIndex(): number {
   return (new Date().getDay() + 6) % 7;
 }
 
-/** "This week · N days left" — week runs Monday–Sunday. */
+/** "3 DAYS LEFT" — week runs Monday–Sunday. */
 function daysLeftLabel(): string {
   const left = 6 - todayIndex();
   return `${left} DAY${left === 1 ? '' : 'S'} LEFT`;
 }
 
-const DAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'] as const;
+const DAY_NAMES = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'] as const;
 
-/** The Mon→Sun letter strip under the header; today's letter reads in `ink`,
- * the rest in `fnt`, so the per-goal bars below have a column to line up to. */
-function WeekStrip() {
-  const c = useTheme().colors;
-  const today = todayIndex();
-  return (
-    <View style={styles.strip}>
-      {DAY_LETTERS.map((l, i) => (
-        <Text
-          key={i}
-          style={[
-            M(700, 8.5, {
-              ls: 0.8,
-              align: 'center',
-              color: i === today ? c.ink : c.fnt,
-            }),
-            styles.stripDay,
-          ]}
-        >
-          {l}
-        </Text>
-      ))}
-    </View>
-  );
-}
+// Ring geometry: r=13 in a 32×32 box (stroke 4), starting from 12 o'clock.
+const RING_R = 13;
+const RING_C = 2 * Math.PI * RING_R;
 
-/** The Today screen's "Week" section: auto-tracked weekly goals, each drawn as a
- * seven-day bar row in its own colour, with inline edit + a native modal screen
- * to define new ones. Kept as its own component because it owns the editing
- * state and subscribes to the goals + snapshot stores; the host passes
- * `navigation` so it can push the DefineGoal modal. */
+/**
+ * The Today screen's "Week" section (v4): auto-tracked weekly goals laid out as
+ * a grid of tiles — each a progress ring with its current value and a seven-day
+ * mini-bar row in the goal's colour — with inline edit and a native modal to
+ * define new ones. Owns the editing state and subscribes to the goals +
+ * snapshot stores; the host passes `navigation` to push the DefineGoal modal.
+ */
 export function WeeklyGoalsCard({ navigation }: { navigation: AppNav }) {
-  const t = useTheme();
-  const c = t.colors;
+  const c = useTheme().colors;
   const goals = useGoalsStore(s => s.goals);
   const [editing, setEditing] = useState(false);
 
@@ -79,31 +59,41 @@ export function WeeklyGoalsCard({ navigation }: { navigation: AppNav }) {
       title="Week"
       right={
         <View style={styles.titleRight}>
-          <Text style={M(700, 10.5, { color: c.fnt })}>{daysLeftLabel()}</Text>
+          <Text style={M(700, 9.5, { color: c.fnt })}>{daysLeftLabel()}</Text>
           <Pressable
             onPress={() => setEditing(e => !e)}
             accessibilityRole="button"
             accessibilityLabel={editing ? 'Done editing goals' : 'Edit goals'}
           >
-            <Text style={M(700, 10.5, { ls: 1, color: c.acc })}>
+            <Text style={M(700, 9.5, { ls: 1, color: c.acc })}>
               {editing ? 'DONE' : 'EDIT'}
             </Text>
           </Pressable>
         </View>
       }
     >
-      <WeekStrip />
-      <View style={styles.list}>
-        {goals.map((g, i) => (
-          <GoalRow key={g.id} goal={g} index={i} editing={editing} />
-        ))}
+      {goals.length > 0 ? (
+        <View style={styles.grid}>
+          {goals.map((g, i) => (
+            <GoalTile key={g.id} goal={g} index={i} editing={editing} />
+          ))}
+        </View>
+      ) : (
+        <Text style={[M(600, 11, { lh: 16, color: c.mut }), styles.empty]}>
+          No goals yet — define one to track your week.
+        </Text>
+      )}
+
+      <View style={styles.footer}>
+        <Text style={M(700, 8.5, { ls: 1, color: c.fnt })}>
+          MON → SUN · TODAY {DAY_NAMES[todayIndex()]}
+        </Text>
         <Pressable
           onPress={() => navigation.navigate('DefineGoal')}
           accessibilityRole="button"
           accessibilityLabel="Define a goal"
-          style={styles.add}
         >
-          <Text style={M(700, 10, { ls: 1.6, color: c.acc })}>
+          <Text style={M(700, 9.5, { ls: 1.6, color: c.acc })}>
             + DEFINE GOAL
           </Text>
         </Pressable>
@@ -112,7 +102,7 @@ export function WeeklyGoalsCard({ navigation }: { navigation: AppNav }) {
   );
 }
 
-function GoalRow({
+function GoalTile({
   goal,
   index,
   editing,
@@ -121,13 +111,9 @@ function GoalRow({
   index: number;
   editing: boolean;
 }) {
-  const t = useTheme();
-  const c = t.colors;
-  // Progress must reflect the *calendar* week (Mon–Sun) the header counts down,
-  // not a rolling last-7-days window — otherwise on Monday last week's activity
-  // still counts and every goal reads as already finished. The current-week
-  // entry weeklyGoalHistory already derives uses exactly that Monday-based
-  // window, so reusing it keeps this tile and the Trends grid in lock-step.
+  const c = useTheme().colors;
+  // Progress reflects the calendar week (Mon–Sun) the header counts down, using
+  // the same current-week window the Trends grid derives from.
   const week = useHealthStore(
     s => s.snapshot.weeklyHistory[s.snapshot.weeklyHistory.length - 1],
   );
@@ -141,46 +127,29 @@ function GoalRow({
       ? ENERGY_METRICS[goal.metric].unit
       : '';
 
-  // An average goal (deficit) is a whole-week average, so it is never "done"
-  // mid-week — a strong day-1 average can still slip. Show it as live progress
-  // with the count of days that have data so far, so it reads as in-progress
-  // rather than finished. Accumulating goals keep the ✓/complete treatment.
   const avg = isAverageGoal(goal);
   const done = !avg && isGoalComplete(goal, tracked, activities, energy);
-  const loggedDays = avg ? energy.filter(d => d.net != null).length : 0;
 
-  // Each goal owns a colour from the series, cycled by position. A binary goal
-  // (a small count with no unit — "3 strength workouts") shows a fixed tick on
-  // the days it happened; everything else scales the bar by that day's share.
   const color = c.goalSeries[index % c.goalSeries.length];
   const binary = !avg && !unit && goal.target <= 7;
   const days = week ? goalDailySeries(goal, week) : [0, 0, 0, 0, 0, 0, 0];
   const today = todayIndex();
 
-  const valText = avg
-    ? `${kfmt(cur)}/${kfmt(goal.target)}${unit} · ${loggedDays}d`
-    : done
-      ? `${kfmt(goal.target)}/${kfmt(goal.target)}`
-      : `${kfmt(cur)}/${kfmt(goal.target)}${unit}`;
+  const frac = goal.target > 0 ? Math.max(0, Math.min(1, cur / goal.target)) : 0;
+  const dash = `${frac * RING_C} ${RING_C}`;
 
   return (
-    <View style={styles.goal}>
-      <View style={styles.goalTop}>
+    <View style={styles.tile}>
+      <View style={styles.tileTop}>
         <Text
+          numberOfLines={2}
           style={[
-            M(700, 10, {
-              lh: 14,
-              ls: 0.6,
-              color: done ? color : c.mut,
-            }),
-            styles.label,
+            M(700, 9.5, { lh: 12, ls: 0.4, color: done ? color : c.mut }),
+            styles.tileLabel,
           ]}
         >
           {goal.name}
           {done ? ' ✓' : ''}
-        </Text>
-        <Text style={[M(700, 10, { lh: 14, color }), styles.val]}>
-          {valText}
         </Text>
         {editing ? (
           <Pressable
@@ -188,12 +157,48 @@ function GoalRow({
             accessibilityRole="button"
             accessibilityLabel={`Remove ${goal.name} goal`}
             hitSlop={8}
-            style={[styles.remove, { borderColor: c.hair }]}
           >
-            <Text style={M(700, 11, { color: c.fnt })}>×</Text>
+            <Text style={M(700, 12, { lh: 12, color: c.fnt })}>×</Text>
           </Pressable>
         ) : null}
       </View>
+
+      <View style={styles.tileMid}>
+        <Svg width={32} height={32}>
+          <Circle
+            cx={16}
+            cy={16}
+            r={RING_R}
+            fill="none"
+            stroke={c.track}
+            strokeWidth={4}
+          />
+          <Circle
+            cx={16}
+            cy={16}
+            r={RING_R}
+            fill="none"
+            stroke={color}
+            strokeWidth={4}
+            strokeLinecap="round"
+            strokeDasharray={dash}
+            transform="rotate(-90 16 16)"
+          />
+        </Svg>
+        <View style={styles.tileVals}>
+          <Text style={M(700, 13, { ls: -0.2, color: done ? color : c.ink })}>
+            {kfmt(cur)}
+          </Text>
+          <Text
+            numberOfLines={1}
+            style={M(600, 8.5, { ls: 0.6, color: c.fnt })}
+          >
+            /{kfmt(goal.target)}
+            {unit ? ` ${unit}` : ''}
+          </Text>
+        </View>
+      </View>
+
       <View style={styles.bars}>
         {days.map((v, d) => {
           if (v > 0) {
@@ -204,14 +209,12 @@ function GoalRow({
                 style={{
                   flex: 1,
                   borderRadius: 2,
-                  height: binary ? 8 : `${Math.max(38, v * 100)}%`,
+                  height: binary ? 8 : (`${Math.max(38, v * 100)}%` as const),
                   backgroundColor: color,
                 }}
               />
             );
           }
-          // An empty day: a low track stub, ringed in the goal colour when it is
-          // today so the "you are here" column is legible even before any data.
           return (
             <View
               key={d}
@@ -221,9 +224,7 @@ function GoalRow({
                 height: 8,
                 borderRadius: 2,
                 backgroundColor: c.track,
-                ...(d === today
-                  ? { borderWidth: 1, borderColor: color }
-                  : null),
+                ...(d === today ? { borderWidth: 1, borderColor: color } : null),
               }}
             />
           );
@@ -235,25 +236,29 @@ function GoalRow({
 
 const styles = StyleSheet.create({
   titleRight: { flexDirection: 'row', alignItems: 'baseline', gap: 12 },
-  strip: { flexDirection: 'row', gap: 4, marginTop: 14 },
-  stripDay: { flex: 1 },
-  list: { marginTop: 12, gap: 14 },
-  goal: { gap: 7 },
-  goalTop: { flexDirection: 'row', alignItems: 'baseline', gap: 10 },
-  label: { flex: 1, minWidth: 0 },
-  val: { flexShrink: 0, textAlign: 'right' },
-  bars: { flexDirection: 'row', gap: 4, alignItems: 'flex-end', height: 22 },
-  remove: {
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  add: {
+  empty: { marginTop: 14 },
+  grid: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
+    rowGap: 16,
+    columnGap: 12,
+    marginTop: 16,
+  },
+  tile: { flexGrow: 1, flexBasis: 96, minWidth: 96, gap: 8 },
+  tileTop: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 4,
+    minHeight: 24,
+  },
+  tileLabel: { flex: 1, minWidth: 0 },
+  tileMid: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  tileVals: { flex: 1, minWidth: 0, gap: 4 },
+  bars: { flexDirection: 'row', gap: 2, alignItems: 'flex-end', height: 22 },
+  footer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingVertical: 2,
+    marginTop: 16,
   },
 });

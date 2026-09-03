@@ -3,10 +3,14 @@ import { StyleSheet, Text, View } from 'react-native';
 
 import { ScreenProps } from '../../app/navigation/types';
 import {
-  BigStat,
   BriefButton,
   BriefScreen,
   Card,
+  cardTitleStyle,
+  GridCell,
+  GridRow,
+  HeroRow,
+  InkBand,
   M,
   S,
 } from '../../components/brief';
@@ -80,21 +84,39 @@ export function WorkoutSummaryScreen({ navigation }: ScreenProps) {
 
   return (
     <BriefScreen>
-      <BigStat
-        value={String(summary.totalVolumeKg)}
-        suffix=" kg"
-        suffixSize={26}
-        pill={{ text: summary.name.toUpperCase() }}
-        caption="TOTAL VOLUME"
-      />
+      <InkBand>
+        <HeroRow
+          value={String(summary.totalVolumeKg)}
+          suffix="kg"
+          suffixSpace
+          suffixSize={26}
+          pillText={summary.name.toUpperCase()}
+          caption="TOTAL VOLUME"
+        />
+      </InkBand>
 
-      <Card title="Session" style={styles.sessionCard}>
-        <View style={styles.metaRow}>
-          <Meta label="SETS" value={String(summary.setsCompleted)} />
-          <Meta label="REPS" value={String(summary.totalReps)} />
-          <Meta label="TIME" value={mmss(summary.durationSec)} />
+      <View style={[styles.sessionCard, { backgroundColor: c.card, borderColor: c.hair }]}>
+        <View style={styles.sessionHead}>
+          <Text style={cardTitleStyle(c.ink)}>Session</Text>
         </View>
-      </Card>
+        <GridRow borderTop>
+          <GridCell first label="SETS">
+            <Text style={M(700, 22, { ls: -0.2, color: c.ink })}>
+              {summary.setsCompleted}
+            </Text>
+          </GridCell>
+          <GridCell label="REPS">
+            <Text style={M(700, 22, { ls: -0.2, color: c.ink })}>
+              {summary.totalReps}
+            </Text>
+          </GridCell>
+          <GridCell label="TIME">
+            <Text style={M(700, 22, { ls: -0.2, color: c.ink })}>
+              {mmss(summary.durationSec)}
+            </Text>
+          </GridCell>
+        </GridRow>
+      </View>
 
       <Card title="Breakdown">
         {groups.length === 0 ? (
@@ -145,24 +167,15 @@ export function WorkoutSummaryScreen({ navigation }: ScreenProps) {
   );
 }
 
-function Meta({ label, value }: { label: string; value: string }) {
-  const c = useTheme().colors;
-  return (
-    <View style={styles.meta}>
-      <Text style={M(700, 22, { ls: -0.2, color: c.ink })}>{value}</Text>
-      <Text style={[M(600, 9, { ls: 1, color: c.fnt }), styles.metaLabel]}>
-        {label}
-      </Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   empty: { marginTop: 12 },
-  sessionCard: { marginTop: 16 },
-  metaRow: { flexDirection: 'row', marginTop: 14 },
-  meta: { flex: 1 },
-  metaLabel: { marginTop: 5 },
+  sessionCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginTop: 16,
+  },
+  sessionHead: { paddingTop: 16, paddingHorizontal: 18, paddingBottom: 14 },
   exBlock: {
     flexDirection: 'row',
     alignItems: 'flex-start',

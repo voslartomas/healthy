@@ -49,6 +49,10 @@ function summarize(w: SavedWorkout): string {
   return `${ex} ${ex === 1 ? 'EXERCISE' : 'EXERCISES'} · ${sets} SETS · ~${mins} MIN`;
 }
 
+/** How many saved workouts the Lift card shows inline before the rest move
+ * behind "MORE" (the full searchable workouts library modal). */
+const WORKOUT_LIMIT = 5;
+
 /** A dependency-free vertical-bar trend of session volume, newest bar accented,
  * with a headline delta vs the previous weighted session. */
 function VolumeTrend({ sessions }: { sessions: SessionSummary[] }) {
@@ -57,8 +61,9 @@ function VolumeTrend({ sessions }: { sessions: SessionSummary[] }) {
   if (points.length < 2) {
     return (
       <Text style={[S(600, 13, { lh: 19, color: c.mut }), styles.hint]}>
-        Log at least two weighted sessions to see whether your total volume is
-        trending up.
+        {points.length === 0
+          ? 'Your training-volume trend will show up here once you finish a couple of weighted workouts.'
+          : 'One weighted session so far — finish another to see whether your total volume is trending up.'}
       </Text>
     );
   }
@@ -102,18 +107,16 @@ function VolumeTrend({ sessions }: { sessions: SessionSummary[] }) {
 }
 
 /**
- * Strength home (tab 03 · LIFT): a media hero for the workout you'd start now,
- * the list of saved workouts with run / edit / delete, the volume trend and the
- * recent sessions. Ad-hoc workouts are built the same way (New workout → build →
- * Start) and just aren't saved.
+ * Strength home (tab 03 · LIFT): the list of saved workouts (first five, with
+ * run / edit / delete and a "MORE" affordance into the searchable library), the
+ * volume trend and the recent sessions. Ad-hoc workouts are built the same way
+ * (New workout → build → Start) and just aren't saved.
  */
 export function StrengthHomeScreen({ navigation }: ScreenProps) {
   const c = useTheme().colors;
   const workouts = useStrengthStore(s => s.workouts);
   const sessions = useStrengthStore(s => s.sessions);
   const startDraft = useStrengthStore(s => s.startDraft);
-
-  const hero = workouts[0] ?? null;
 
   function newWorkout() {
     startDraft();
@@ -162,43 +165,25 @@ export function StrengthHomeScreen({ navigation }: ScreenProps) {
 
   return (
     <BriefScreen>
-      {/* ── Hero: start the workout at the top of the list ───────────── */}
-      {hero ? (
-        <Card first flush>
-          <ExerciseMedia
-            exerciseId={hero.exercises[0].exerciseId}
-            variant="hero"
-            height={186}
-            sub="FIRST MOVE · LOOP"
-          />
-          <View style={styles.heroBody}>
-            <Text style={S(800, 22, { lh: 24, ls: -0.44, color: c.ink })}>
-              {hero.name}
-            </Text>
-            <Text
-              style={[M(700, 9.5, { ls: 1.2, color: c.fnt }), styles.heroMeta]}
-            >
-              {summarize(hero)}
-            </Text>
-            <BriefButton
-              label="START WORKOUT"
-              onPress={() => run(hero)}
-              fontSize={12.5}
-              style={styles.heroBtn}
-              accessibilityLabel={`Start ${hero.name}`}
-            />
-          </View>
-        </Card>
-      ) : null}
-
       {/* ── Saved workouts ──────────────────────────────────────────── */}
       <Card
-        first={!hero}
+        first
         title="Workouts"
         right={
-          <Text style={M(700, 9.5, { ls: 1, color: c.fnt })}>
-            {workouts.length} SAVED
-          </Text>
+          <View style={styles.wHeadRight}>
+            {workouts.length > WORKOUT_LIMIT ? (
+              <Pressable
+                onPress={() => navigation.navigate('WorkoutsLibrary')}
+                accessibilityRole="button"
+                accessibilityLabel="Browse all workouts"
+              >
+                <Text style={M(700, 9.5, { ls: 1, color: c.acc })}>MORE →</Text>
+              </Pressable>
+            ) : null}
+            <Text style={M(700, 9.5, { ls: 1, color: c.fnt })}>
+              {workouts.length} SAVED
+            </Text>
+          </View>
         }
       >
         {workouts.length === 0 ? (
@@ -207,7 +192,7 @@ export function StrengthHomeScreen({ navigation }: ScreenProps) {
             bench, bodyweight and pull-up-bar exercises.
           </Text>
         ) : (
-          workouts.map(w => (
+          workouts.slice(0, WORKOUT_LIMIT).map(w => (
             <View key={w.id} style={[styles.wRow, { borderTopColor: c.hair }]}>
               <ExerciseMedia
                 exerciseId={w.exercises[0].exerciseId}
@@ -237,9 +222,12 @@ export function StrengthHomeScreen({ navigation }: ScreenProps) {
                     onPress={() => edit(w)}
                     accessibilityRole="button"
                     accessibilityLabel={`Edit ${w.name}`}
-                    hitSlop={8}
+                    style={[
+                      styles.actBtn,
+                      { borderColor: c.hair, backgroundColor: c.bg },
+                    ]}
                   >
-                    <Text style={M(700, 9.5, { ls: 1, color: c.mut })}>
+                    <Text style={M(700, 10.5, { ls: 1, color: c.ink })}>
                       EDIT
                     </Text>
                   </Pressable>
@@ -247,9 +235,12 @@ export function StrengthHomeScreen({ navigation }: ScreenProps) {
                     onPress={() => confirmDelete(w)}
                     accessibilityRole="button"
                     accessibilityLabel={`Delete ${w.name}`}
-                    hitSlop={8}
+                    style={[
+                      styles.actBtn,
+                      { borderColor: c.red, backgroundColor: c.bg },
+                    ]}
                   >
-                    <Text style={M(700, 9.5, { ls: 1, color: c.red })}>
+                    <Text style={M(700, 10.5, { ls: 1, color: c.red })}>
                       DELETE
                     </Text>
                   </Pressable>
@@ -258,6 +249,19 @@ export function StrengthHomeScreen({ navigation }: ScreenProps) {
             </View>
           ))
         )}
+
+        {workouts.length > WORKOUT_LIMIT ? (
+          <Pressable
+            onPress={() => navigation.navigate('WorkoutsLibrary')}
+            accessibilityRole="button"
+            accessibilityLabel="Browse all workouts"
+            style={[styles.moreRow, { borderTopColor: c.hair }]}
+          >
+            <Text style={M(700, 10.5, { ls: 1, color: c.acc })}>
+              +{workouts.length - WORKOUT_LIMIT} MORE · SEARCH ALL →
+            </Text>
+          </Pressable>
+        ) : null}
 
         <BriefButton
           label="＋ NEW WORKOUT"
@@ -270,11 +274,9 @@ export function StrengthHomeScreen({ navigation }: ScreenProps) {
       </Card>
 
       {/* ── Volume trend ────────────────────────────────────────────── */}
-      {sessions.length > 0 ? (
-        <Card title="Volume trend">
-          <VolumeTrend sessions={sessions} />
-        </Card>
-      ) : null}
+      <Card title="Volume trend">
+        <VolumeTrend sessions={sessions} />
+      </Card>
 
       {/* ── Recent sessions ─────────────────────────────────────────── */}
       {sessions.length > 0 ? (
@@ -322,9 +324,6 @@ export function StrengthHomeScreen({ navigation }: ScreenProps) {
 
 const styles = StyleSheet.create({
   hint: { marginTop: 12 },
-  heroBody: { paddingHorizontal: 18, paddingTop: 16, paddingBottom: 18 },
-  heroMeta: { marginTop: 8 },
-  heroBtn: { marginTop: 16 },
   wRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -335,7 +334,20 @@ const styles = StyleSheet.create({
   },
   wMain: { flex: 1, minWidth: 0 },
   wMeta: { marginTop: 6 },
-  wActions: { flexDirection: 'row', gap: 16, marginTop: 9 },
+  wHeadRight: { flexDirection: 'row', alignItems: 'baseline', gap: 12 },
+  moreRow: {
+    borderTopWidth: 1,
+    paddingTop: 14,
+    marginTop: 13,
+    alignItems: 'center',
+  },
+  wActions: { flexDirection: 'row', gap: 10, marginTop: 11 },
+  actBtn: {
+    borderWidth: 1,
+    borderRadius: 999,
+    paddingVertical: 7,
+    paddingHorizontal: 14,
+  },
   newBtn: { marginTop: 14 },
   trendHead: {
     flexDirection: 'row',

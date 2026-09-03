@@ -7,7 +7,7 @@
 import React from 'react';
 import { Text } from 'react-native';
 
-import { M } from '../../components/brief';
+import { BAND, M } from '../../components/brief';
 import { buildMetrics } from '../../features/trends/metrics';
 import {
   activeCalorieGoal,
@@ -16,7 +16,6 @@ import {
 import { useHealthStore } from '../../state/useHealthStore';
 import { useStrengthStore } from '../../state/useStrengthStore';
 import { useTrendsStore } from '../../state/useTrendsStore';
-import { useTheme } from '../../theme/theme';
 
 const DAYS = [
   'Sunday',
@@ -62,7 +61,7 @@ function signed(n: number): string {
 
 /** The left eyebrow — uppercase mono context. */
 function Eyebrow({ text }: { text: string }) {
-  const c = useTheme().colors;
+  const c = BAND;
   return (
     <Text
       numberOfLines={1}
@@ -91,7 +90,7 @@ function Status({ text, color }: { text: string; color: string }) {
 // ── Today ────────────────────────────────────────────────────────────────────
 export const TodayTitle = () => <Eyebrow text={dateLabel()} />;
 export function TodayRight() {
-  const c = useTheme().colors;
+  const c = BAND;
   const live = useHealthStore(s => s.snapshot.live);
   return (
     <Status text={live ? 'Live' : 'No data'} color={live ? c.acc : c.fnt} />
@@ -101,7 +100,7 @@ export function TodayRight() {
 // ── Fuel ─────────────────────────────────────────────────────────────────────
 export const FuelTitle = () => <Eyebrow text={dateLabel()} />;
 export function FuelRight() {
-  const c = useTheme().colors;
+  const c = BAND;
   const snap = useHealthStore(s => s.snapshot);
   const goals = useCalorieGoalsStore(s => s.goals);
   const goal = activeCalorieGoal(goals);
@@ -122,7 +121,7 @@ export function FuelRight() {
 // ── Strength ─────────────────────────────────────────────────────────────────
 export const StrengthTitle = () => <Eyebrow text="Strength" />;
 export function StrengthRight() {
-  const c = useTheme().colors;
+  const c = BAND;
   const count = useStrengthStore(s => s.workouts.length);
   if (count > 0) {
     return (
@@ -141,7 +140,7 @@ export const WorkoutSummaryTitle = () => <Eyebrow text="Session complete" />;
 
 /** Live "exercise x/N" progress in the runner header. */
 export function WorkoutRunRight() {
-  const c = useTheme().colors;
+  const c = BAND;
   const session = useStrengthStore(s => s.session);
   if (!session || session.plan.length === 0) {
     return <Status text="—" color={c.fnt} />;
@@ -160,7 +159,7 @@ export function TrendsTitle() {
   return <Eyebrow text={`Last ${rangeDays} days`} />;
 }
 export function TrendsRight() {
-  const c = useTheme().colors;
+  const c = BAND;
   const trends = useHealthStore(s => s.snapshot.trends);
   const activeKey = useTrendsStore(s => s.activeKey);
   const rangeDays = useTrendsStore(s => s.rangeDays);
@@ -173,7 +172,7 @@ export function TrendsRight() {
 // ── Setup ────────────────────────────────────────────────────────────────────
 export const SetupTitle = () => <Eyebrow text="Coach & sources" />;
 export function SetupRight() {
-  const c = useTheme().colors;
+  const c = BAND;
   const live = useHealthStore(s => s.snapshot.live);
   return (
     <Status
@@ -186,7 +185,7 @@ export function SetupRight() {
 // ── Recovery ─────────────────────────────────────────────────────────────────
 export const RecoveryTitle = () => <Eyebrow text="Readiness" />;
 export function RecoveryRight() {
-  const c = useTheme().colors;
+  const c = BAND;
   const readiness = useHealthStore(s => s.snapshot.readiness);
   if (readiness) return <Status text={readiness.state} color={c.acc} />;
   return <Status text="No data" color={c.fnt} />;
@@ -195,7 +194,7 @@ export function RecoveryRight() {
 // ── Cardio ───────────────────────────────────────────────────────────────────
 export const CardioTitle = () => <Eyebrow text="Cardio load" />;
 export function CardioRight() {
-  const c = useTheme().colors;
+  const c = BAND;
   const cardio = useHealthStore(s => s.snapshot.cardio);
   if (cardio.hasZoneData) {
     return <Status text={`Week ${cardio.weekLoad}`} color={c.acc} />;

@@ -21,9 +21,9 @@ export const spacing = {
   xl: 18,
 } as const;
 
-/** Card geometry shared by every section card in the v3 sheet. */
+/** Card geometry shared by every section card in the v4 sheet. */
 export const card = {
-  radius: 10,
+  radius: 12,
   borderWidth: 1,
   paddingVertical: 16,
   paddingHorizontal: 18,

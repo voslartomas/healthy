@@ -367,7 +367,7 @@ const styles = StyleSheet.create({
   empty: { marginTop: 12 },
   row: {
     borderWidth: 1,
-    borderRadius: 10,
+    borderRadius: 12,
     padding: 14,
     marginTop: 12,
     gap: 14,

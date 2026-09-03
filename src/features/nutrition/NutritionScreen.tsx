@@ -10,14 +10,16 @@ import {
 
 import { ScreenProps } from '../../app/navigation/types';
 import {
-  BigStat,
   BriefScreen,
+  Card,
+  cardTitleStyle,
+  GridCell,
+  GridRow,
+  HeroRow,
+  InkBand,
   M,
   MacroBar,
-  PillSpec,
-  Quad,
   S,
-  Card,
 } from '../../components/brief';
 import {
   FoodEntryInput,
@@ -86,8 +88,12 @@ const PORTION_UNITS = [
   { key: 'serving', label: 'SERVING' },
 ] as const;
 
+/** How many saved-food chips the Fuel card shows inline before the rest move
+ * behind "MORE" (the full searchable library modal). */
+const CHIP_LIMIT = 8;
+
 /** Fuel screen: energy balance, macros, quick-log foods, meals + a calorie goal. */
-export function NutritionScreen(_props: ScreenProps) {
+export function NutritionScreen({ navigation }: ScreenProps) {
   const t = useTheme();
   const c = t.colors;
   const snap = useHealthStore(s => s.snapshot);
@@ -108,16 +114,16 @@ export function NutritionScreen(_props: ScreenProps) {
 
   // Hero: kcal left toward the goal's daily allowance when possible.
   let heroValue = '—';
-  let heroPill: PillSpec = { text: 'NO FOOD YET', dot: c.fnt, bg: null };
+  let heroPillText = 'NO FOOD YET';
   let heroCaption = 'LOG A MEAL TO START';
   if (activeGoal && eaten != null) {
     const left = Math.round(burned + activeGoal.targetNet - eaten);
     heroValue = signed(left).replace('+', '');
-    heroPill = { text: 'KCAL LEFT' };
+    heroPillText = 'KCAL LEFT';
     heroCaption = `ON TRACK FOR ${signed(activeGoal.targetNet)}`;
   } else if (eaten != null) {
     heroValue = grp(eaten);
-    heroPill = { text: 'KCAL EATEN' };
+    heroPillText = 'KCAL EATEN';
     heroCaption = hasNet ? `NET ${signed(net)}` : 'NO GOAL SET';
   }
 
@@ -348,26 +354,47 @@ export function NutritionScreen(_props: ScreenProps) {
 
   return (
     <BriefScreen>
-      <BigStat value={heroValue} pill={heroPill} caption={heroCaption} />
+      <InkBand>
+        <HeroRow
+          value={heroValue}
+          pillText={heroPillText}
+          caption={heroCaption}
+        />
+      </InkBand>
 
       {/* ── Balance ───────────────────────────────────────────────── */}
-      <Card title="Energy" first>
-        <Quad
-          items={[
-            { value: eaten != null ? grp(eaten) : '——', label: 'EATEN' },
-            { value: burned > 0 ? grp(burned) : '——', label: 'BURNED' },
-            {
-              value: hasNet ? signed(net) : '——',
-              color: hasNet && net < 0 ? c.grn : c.ink,
-              label: 'NET',
-            },
-            {
-              value: activeGoal ? signed(activeGoal.targetNet) : '——',
-              label: 'TARGET',
-            },
-          ]}
-        />
-      </Card>
+      <View style={[styles.energyCard, { backgroundColor: c.card, borderColor: c.hair }]}>
+        <View style={styles.energyHead}>
+          <Text style={cardTitleStyle(c.ink)}>Energy</Text>
+        </View>
+        <GridRow borderTop>
+          <GridCell first label="EATEN">
+            <Text style={M(700, 20, { ls: -0.2, color: c.ink })}>
+              {eaten != null ? grp(eaten) : '——'}
+            </Text>
+          </GridCell>
+          <GridCell label="BURNED">
+            <Text style={M(700, 20, { ls: -0.2, color: c.ink })}>
+              {burned > 0 ? grp(burned) : '——'}
+            </Text>
+          </GridCell>
+          <GridCell label="NET">
+            <Text
+              style={M(700, 20, {
+                ls: -0.2,
+                color: hasNet && net < 0 ? c.grn : c.ink,
+              })}
+            >
+              {hasNet ? signed(net) : '——'}
+            </Text>
+          </GridCell>
+          <GridCell label="TARGET">
+            <Text style={M(700, 20, { ls: -0.2, color: c.ink })}>
+              {activeGoal ? signed(activeGoal.targetNet) : '——'}
+            </Text>
+          </GridCell>
+        </GridRow>
+      </View>
 
       {/* ── Macros ────────────────────────────────────────────────── */}
       <Card title="Macros">
@@ -405,15 +432,26 @@ export function NutritionScreen(_props: ScreenProps) {
       <Card
         title="Common foods"
         right={
-          <Pressable
-            onPress={openNewCommon}
-            accessibilityRole="button"
-            accessibilityLabel="Add common food"
-          >
-            <Text style={M(700, 10.5, { ls: 1, color: c.acc })}>
-              {cfMode === 'new' ? 'CANCEL' : '+ ADD FOOD'}
-            </Text>
-          </Pressable>
+          <View style={styles.foodsActions}>
+            {commonFoods.length > CHIP_LIMIT ? (
+              <Pressable
+                onPress={() => navigation.navigate('FoodsLibrary')}
+                accessibilityRole="button"
+                accessibilityLabel="Browse all common foods"
+              >
+                <Text style={M(700, 10.5, { ls: 1, color: c.acc })}>MORE →</Text>
+              </Pressable>
+            ) : null}
+            <Pressable
+              onPress={openNewCommon}
+              accessibilityRole="button"
+              accessibilityLabel="Add common food"
+            >
+              <Text style={M(700, 10.5, { ls: 1, color: c.acc })}>
+                {cfMode === 'new' ? 'CANCEL' : '+ ADD FOOD'}
+              </Text>
+            </Pressable>
+          </View>
         }
       >
         {cfMode ? (
@@ -579,7 +617,7 @@ export function NutritionScreen(_props: ScreenProps) {
 
         {commonFoods.length > 0 ? (
           <View style={styles.chips}>
-            {commonFoods.map(food => (
+            {commonFoods.slice(0, CHIP_LIMIT).map(food => (
               <Pressable
                 key={food.id}
                 onPress={() => setPortionFood(food)}
@@ -608,6 +646,18 @@ export function NutritionScreen(_props: ScreenProps) {
                 <Text style={M(700, 10.5, { color: c.fnt })}>{food.kcal}</Text>
               </Pressable>
             ))}
+            {commonFoods.length > CHIP_LIMIT ? (
+              <Pressable
+                onPress={() => navigation.navigate('FoodsLibrary')}
+                accessibilityRole="button"
+                accessibilityLabel="Browse all common foods"
+                style={[styles.chip, { borderColor: c.hair }]}
+              >
+                <Text style={M(700, 11, { ls: 0.6, color: c.acc })}>
+                  +{commonFoods.length - CHIP_LIMIT} MORE →
+                </Text>
+              </Pressable>
+            ) : null}
           </View>
         ) : cfMode ? null : (
           <Text style={[S(600, 13, { color: c.mut }), styles.empty]}>
@@ -777,7 +827,15 @@ export function NutritionScreen(_props: ScreenProps) {
 }
 
 const styles = StyleSheet.create({
+  energyCard: {
+    borderWidth: 1,
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginTop: 16,
+  },
+  energyHead: { paddingTop: 16, paddingHorizontal: 18, paddingBottom: 12 },
   macroGap: { marginTop: 14 },
+  foodsActions: { flexDirection: 'row', alignItems: 'baseline', gap: 16 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 },
   chip: {
     flexDirection: 'row',

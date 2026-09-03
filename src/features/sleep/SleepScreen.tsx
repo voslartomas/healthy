@@ -3,7 +3,14 @@ import { StyleSheet, Text, View } from 'react-native';
 import Svg, { Line, Path } from 'react-native-svg';
 
 import { ScreenProps } from '../../app/navigation/types';
-import { BigStat, BriefScreen, Card, M, S } from '../../components/brief';
+import {
+  BriefScreen,
+  Card,
+  HeroRow,
+  InkBand,
+  M,
+  S,
+} from '../../components/brief';
 import { SleepStages } from '../../health';
 import { useHealthStore } from '../../state/useHealthStore';
 import { useTheme } from '../../theme/theme';
@@ -68,15 +75,15 @@ export function SleepScreen(_props: ScreenProps) {
 
   return (
     <BriefScreen>
-      <BigStat
-        value={sleep ? hoursToHm(sleep.hours) : '—'}
-        pill={
-          sleep
-            ? { text: `${sleep.performancePct}% OF NEED` }
-            : { text: 'NO SLEEP DATA', dot: c.fnt, bg: null }
-        }
-        caption={sleep ? 'OF YOUR 8H SLEEP NEED' : 'CONNECT A SOURCE IN SETUP'}
-      />
+      <InkBand>
+        <HeroRow
+          value={sleep ? hoursToHm(sleep.hours) : '—'}
+          pillText={sleep ? `${sleep.performancePct}% OF NEED` : 'NO SLEEP DATA'}
+          caption={
+            sleep ? 'OF YOUR 8H SLEEP NEED' : 'CONNECT A SOURCE IN SETUP'
+          }
+        />
+      </InkBand>
 
       <Card title="Stages" style={styles.gap16}>
         {stages && stageTotal > 0 ? (

@@ -112,10 +112,10 @@ export function WelcomeScreen() {
           accessibilityLabel={`Connect ${healthSourceName()}`}
           style={[
             styles.cta,
-            { backgroundColor: c.ink, opacity: busy ? 0.6 : 1 },
+            { backgroundColor: c.accSolid, opacity: busy ? 0.6 : 1 },
           ]}
         >
-          <Text style={M(700, 13, { ls: 1, color: c.inv })}>
+          <Text style={M(700, 13, { ls: 1, color: c.onAccent })}>
             {`CONNECT ${healthSourceName().toUpperCase()}`}
           </Text>
         </Pressable>

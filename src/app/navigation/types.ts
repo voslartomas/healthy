@@ -11,11 +11,13 @@ export type ScreenName =
   | 'Sleep'
   | 'Settings'
   | 'DefineGoal'
+  | 'FoodsLibrary'
   | 'Strength'
   | 'WorkoutBuilder'
   | 'ExercisePicker'
   | 'WorkoutRun'
-  | 'WorkoutSummary';
+  | 'WorkoutSummary'
+  | 'WorkoutsLibrary';
 
 /**
  * Minimal navigation surface the screens depend on. React Navigation's own
@@ -70,9 +72,11 @@ export type RootStackParamList = {
   ExercisePicker: undefined;
   WorkoutRun: undefined;
   WorkoutSummary: undefined;
+  WorkoutsLibrary: undefined;
   /** Native modal screens. */
   Coach: undefined;
   DefineGoal: undefined;
+  FoodsLibrary: undefined;
 };
 
 /** The five numbered tabs of the v3 brief (Coach moved to a global FAB). */
