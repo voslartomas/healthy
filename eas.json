@@ -23,7 +23,8 @@
     "production": {
       "autoIncrement": true,
       "env": {
-        "APP_ENV": "production"
+        "APP_ENV": "production",
+        "EXPO_NO_CAPABILITY_SYNC": "1"
       }
     }
   },
