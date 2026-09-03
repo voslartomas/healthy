@@ -1,0 +1,23 @@
+# deliver configuration (iOS / App Store Connect).
+#
+# Paths are pinned explicitly because Expo Continuous Native Generation
+# regenerates (and .gitignores) the ios/ directory, so nothing app-related can
+# live there. Everything deliver needs is kept under the repo-root fastlane/.
+metadata_path('./fastlane/metadata/ios')
+screenshots_path('./fastlane/screenshots/ios')
+
+# We only manage the store listing here — the binary is uploaded by EAS.
+skip_binary_upload(true)
+
+# Push screenshots and metadata; replace whatever is currently on Connect.
+skip_screenshots(false)
+skip_metadata(false)
+overwrite_screenshots(true)
+
+# Non-interactive: don't open the HTML preview / prompt for confirmation, and
+# never auto-submit for review (a human does that in App Store Connect).
+force(true)
+submit_for_review(false)
+run_precheck_before_submit(false)
+
+# en-US is the only locale we maintain today.

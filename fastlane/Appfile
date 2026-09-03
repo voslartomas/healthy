@@ -1,0 +1,15 @@
+# Shared app identity for fastlane. Values mirror app.json / eas.json.
+
+# --- Apple / App Store Connect (used by deliver) ---
+app_identifier('cz.healthy')          # ios.bundleIdentifier in app.json
+apple_id('t.voslar@gmail.com')        # submit.production.ios.appleId in eas.json
+team_id('3KS75QPJSR')                 # Apple Developer Portal team (appleTeamId)
+# itc_team_id('...')                  # only needed if the Apple ID belongs to
+                                      # more than one App Store Connect team.
+
+# --- Google Play (used by supply) ---
+# package_name / json_key are passed explicitly in the Fastfile so they can be
+# overridden by env vars in CI, but they are declared here for reference:
+for_platform :android do
+  package_name('cz.healthy')          # android.package in app.json
+end

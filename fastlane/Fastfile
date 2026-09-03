@@ -1,0 +1,68 @@
+# Fastfile — store-listing automation for Healthy.
+#
+# Division of labour:
+#   • EAS builds and submits the app *binaries* (see package.json scripts).
+#   • fastlane publishes the *store assets* (metadata + screenshots + Play
+#     graphics) that are version-controlled under fastlane/.
+#
+# Nothing here uploads a binary. Screenshots and copy are generated from the
+# Claude Design project "Store Assets.dc.html" and committed to git so a review
+# is always reproducible from the repo (see fastlane/STORE_ASSETS.md).
+
+# Don't auto-generate fastlane/README.md on every run — our own docs live in
+# fastlane/STORE_ASSETS.md.
+skip_docs
+
+# App Store Connect API key (recommended over Apple-ID + password).
+# Set these env vars in CI or your shell to use it:
+#   ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_PATH (path to the .p8),
+#   or ASC_KEY_CONTENT (the .p8 contents, base64 or raw).
+def asc_api_key
+  return nil unless ENV['ASC_KEY_ID'] && ENV['ASC_ISSUER_ID']
+
+  app_store_connect_api_key(
+    key_id: ENV['ASC_KEY_ID'],
+    issuer_id: ENV['ASC_ISSUER_ID'],
+    key_filepath: ENV['ASC_KEY_PATH'],
+    key_content: ENV['ASC_KEY_CONTENT'],
+    is_key_content_base64: ENV['ASC_KEY_CONTENT'].to_s.start_with?('-----') ? false : true,
+    in_house: false
+  )
+end
+
+platform :ios do
+  desc 'Upload iOS store listing (metadata + screenshots) to App Store Connect.'
+  desc 'Does NOT upload a binary — EAS does that. Auth: ASC_* API key env vars,'
+  desc 'or interactive Apple-ID login via the Appfile.'
+  lane :store_assets do
+    key = asc_api_key
+    deliver(key.nil? ? {} : { api_key: key })
+    # Remaining options (paths, skip_binary_upload, force, …) come from Deliverfile.
+  end
+end
+
+platform :android do
+  desc 'Upload Android store listing (metadata + screenshots + graphics) to Google Play.'
+  desc 'Does NOT upload an AAB/APK — EAS does that. Auth: a Play service-account'
+  desc 'JSON key (SUPPLY_JSON_KEY env var, defaults to ./service-account-key.json).'
+  lane :store_assets do
+    supply(
+      package_name: 'cz.healthy',
+      json_key: ENV['SUPPLY_JSON_KEY'] || './service-account-key.json',
+      metadata_path: './fastlane/metadata/android',
+      track: 'internal',
+      skip_upload_apk: true,
+      skip_upload_aab: true,
+      skip_upload_metadata: false,
+      skip_upload_images: false,
+      skip_upload_screenshots: false,
+      skip_upload_changelogs: false,
+      # Only the fields we actually provide are touched; the rest are left as-is.
+      validate_only: ENV['SUPPLY_VALIDATE_ONLY'] == 'true'
+    )
+  end
+end
+
+# To push both stores, run the two platform lanes:
+#   bundle exec fastlane ios store_assets
+#   bundle exec fastlane android store_assets

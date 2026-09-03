@@ -71,15 +71,20 @@ package-lock.json
 
 # fastlane
 #
-# It is recommended to not store the screenshots in the git repo. Instead, use fastlane to re-generate the
-# screenshots whenever they are needed.
-# For more information about the recommended setup visit:
-# https://docs.fastlane.tools/best-practices/source-control/
+# Our store screenshots are NOT app-captured throwaways — they are curated
+# marketing assets generated from the Claude Design "Store Assets" doc, so we
+# deliberately DO commit fastlane/screenshots and fastlane/metadata (see
+# fastlane/README.md). Only fastlane's transient run output is ignored.
 
 **/fastlane/report.xml
 **/fastlane/Preview.html
-**/fastlane/screenshots
 **/fastlane/test_output
+fastlane/*.html
+
+# fastlane credentials (never commit these)
+fastlane/*.p8
+fastlane/api_key.json
+fastlane/*.json.enc
 
 # Bundle artifact
 *.jsbundle

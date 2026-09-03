@@ -1,0 +1,1 @@
+The coach now runs on-device with Gemma 3 4B, keeps separate conversations, and can log food straight from chat. Fuel is split into energy, macros, common foods and a logged list. Trends cover 30 days.

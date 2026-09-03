@@ -1,0 +1,9 @@
+Healthy is for people who want a focused, data-first view of the health data they already have. It reads Apple Health and puts the whole day on one screen: recovery, HRV, resting heart rate, sleep stages, training load, weight and body fat.
+
+Everything is built around three things — the numbers that matter to you, a coach that runs locally on your phone, and goals you set in your own terms. No subscription, no locked metrics.
+
+Fuel tracks energy the honest way — eaten, burned, net, target — with a protein floor and a fat ceiling instead of a single number to obsess over. Log a meal in two taps from your common foods, or just tell the coach what you ate and it does the math. Everything you log is written back to Apple Health.
+
+The coach is optional and runs entirely on your phone. Download Gemma 3 4B once (2.7 GB) and it works offline — no account, no API key, and none of your health data leaves the device.
+
+Set weekly goals in your own terms — strength sessions, zone 2 minutes, a daily deficit, a protein floor — and get a short morning brief written from your own numbers, not from averages.
