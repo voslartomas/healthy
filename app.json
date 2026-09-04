@@ -47,6 +47,7 @@
       "expo-sqlite",
       "expo-secure-store",
       "expo-web-browser",
+      "expo-localization",
       [
         "expo-build-properties",
         {
@@ -94,6 +95,10 @@
     ],
     "extra": {
       "//": "Health data now comes from the on-device stores (Android Health Connect / iOS HealthKit) — no OAuth client IDs are needed. Android health READ/WRITE permissions and the permission-rationale activity are injected by ./plugins/withHealthConnect; iOS HealthKit usage strings + entitlement by the healthkit plugin above.",
+      "posthog": {
+        "apiKey": "phc_u3ztYkXSzMsYVuTenDA6GYUHmhQaHsUHoCFBdpefHt6e",
+        "host": "https://eu.i.posthog.com"
+      },
       "eas": {
         "projectId": "42c6722a-64c9-40f3-bb67-96a954d63e67"
       }

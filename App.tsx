@@ -10,8 +10,10 @@ import {
   DarkTheme,
 } from '@react-navigation/native';
 import { AppState, useColorScheme, View } from 'react-native';
+import { PostHogProvider } from 'posthog-react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
+import { posthog } from './src/analytics/posthog';
 import { navigationRef } from './src/app/navigation/navigationRef';
 import { RootStack } from './src/app/navigation/RootStack';
 import { useModelStore } from './src/features/coach/ondevice/useModelStore';
@@ -171,7 +173,7 @@ export default function App() {
   // the Welcome gate before we know which to show.
   const showSplash = minSplash || (status !== 'ready' && !hasLiveData);
 
-  return (
+  const tree = (
     <SafeAreaProvider>
       {showSplash ? (
         <SplashScreen />
@@ -179,6 +181,13 @@ export default function App() {
         <NavigationContainer
           ref={navigationRef}
           theme={isDark ? darkTheme : lightTheme}
+          onStateChange={() => {
+            // Manual screen capture: the navigator is mounted conditionally
+            // (behind splash/welcome), so we track route changes off the
+            // container ref rather than relying on provider autocapture.
+            const route = navigationRef.getCurrentRoute();
+            if (route) posthog?.screen(route.name, route.params);
+          }}
         >
           <RootStack />
         </NavigationContainer>
@@ -191,5 +200,19 @@ export default function App() {
           status-bar glyphs above it are always light. */}
       <StatusBar style="light" />
     </SafeAreaProvider>
+  );
+
+  // Wrap in the PostHog provider when analytics is configured; the provider
+  // powers the usePostHog() hook and app-lifecycle autocapture. Screen tracking
+  // is handled manually above. Falls through to the bare tree when unconfigured.
+  return posthog ? (
+    <PostHogProvider
+      client={posthog}
+      autocapture={{ captureScreens: false, captureTouches: true }}
+    >
+      {tree}
+    </PostHogProvider>
+  ) : (
+    tree
   );
 }
