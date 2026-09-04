@@ -12,6 +12,9 @@
       "supportsTablet": true,
       "bundleIdentifier": "cz.healthy",
       "appleTeamId": "3KS75QPJSR",
+      "config": {
+        "usesNonExemptEncryption": false
+      },
       "infoPlist": {
         "NSHealthShareUsageDescription": "Healthy reads your steps, workouts, heart rate, HRV, sleep and body metrics to show your daily brief and track your goals — all on your phone.",
         "NSHealthUpdateUsageDescription": "Healthy writes the food you log back to Apple Health so your nutrition stays in one place."
