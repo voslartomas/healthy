@@ -2,7 +2,7 @@ import React from 'react';
 import { Alert, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { ScreenProps } from '../../app/navigation/types';
-import { BriefScreen, M, S, Card } from '../../components/brief';
+import { BriefScreen, Card, M, S, SegmentedRow } from '../../components/brief';
 import { LanguageSelect } from '../coach/LanguageSelect';
 import { formatBytes, modelByLabel } from '../coach/ondevice/models';
 import { useModelStore } from '../coach/ondevice/useModelStore';
@@ -18,7 +18,11 @@ import {
 } from '../../health';
 import { ProfileSection } from './ProfileSection';
 import { createBackup, restoreBackup } from '../../state/backupService';
-import { PROVIDERS, useAppStore } from '../../state/useAppStore';
+import {
+  PROVIDERS,
+  ThemePreference,
+  useAppStore,
+} from '../../state/useAppStore';
 import { useHealthStore } from '../../state/useHealthStore';
 import { useTheme } from '../../theme/theme';
 
@@ -114,6 +118,9 @@ export function SettingsScreen(_props: ScreenProps) {
         </Text>
       </Card>
 
+      {/* ── Appearance ───────────────────────────────────────────── */}
+      <AppearanceSection />
+
       {/* ── Profile ─────────────────────────────────────────────────── */}
       <ProfileSection />
 
@@ -140,6 +147,41 @@ export function SettingsScreen(_props: ScreenProps) {
       {/* ── Backup ───────────────────────────────────────────────── */}
       <BackupSection />
     </BriefScreen>
+  );
+}
+
+const THEME_OPTIONS = [
+  { key: 'system' as const, label: 'SYSTEM' },
+  { key: 'light' as const, label: 'LIGHT' },
+  { key: 'dark' as const, label: 'DARK' },
+];
+
+/**
+ * Colour scheme picker.
+ *
+ * 'System' is the default and right for most people, but a phone on *scheduled*
+ * dark mode flips the app at sunset with no way to pin it — which is the whole
+ * reason this exists. Choosing Light or Dark overrides the OS for this app only.
+ */
+function AppearanceSection() {
+  const c = useTheme().colors;
+  const preference = useAppStore(s => s.themePreference);
+  const setPreference = useAppStore(s => s.setThemePreference);
+
+  return (
+    <Card title="Appearance">
+      <SegmentedRow<ThemePreference>
+        options={THEME_OPTIONS}
+        value={preference}
+        onChange={next => next && setPreference(next)}
+        style={styles.themeRow}
+      />
+      <Text style={[M(600, 10.5, { color: c.fnt }), styles.note]}>
+        {preference === 'system'
+          ? 'FOLLOWING YOUR PHONE — INCLUDING ITS SCHEDULED DARK MODE, WHICH SWITCHES THE APP AT SUNSET.'
+          : `ALWAYS ${preference.toUpperCase()}, WHATEVER YOUR PHONE IS SET TO.`}
+      </Text>
+    </Card>
   );
 }
 
@@ -511,6 +553,7 @@ const styles = StyleSheet.create({
   },
   knob: { width: 19, height: 19, borderRadius: 999 },
   coachNote: { marginTop: 4, lineHeight: 16 },
+  themeRow: { marginTop: 14 },
   voiceLabel: { marginTop: 22, marginBottom: 2 },
   modelCard: {
     marginTop: 16,

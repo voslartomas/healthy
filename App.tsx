@@ -9,7 +9,7 @@ import {
   DefaultTheme,
   DarkTheme,
 } from '@react-navigation/native';
-import { AppState, useColorScheme, View } from 'react-native';
+import { AppState, View } from 'react-native';
 import { PostHogProvider } from 'posthog-react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -35,6 +35,7 @@ import { initHealth, useHealthStore } from './src/state/useHealthStore';
 import { initWorkoutNotifications } from './src/state/workoutNotifications';
 import { colors } from './src/theme/colors';
 import { useAppFonts } from './src/theme/fonts';
+import { useResolvedScheme } from './src/theme/theme';
 
 const lightTheme = {
   ...DefaultTheme,
@@ -64,8 +65,10 @@ const darkTheme = {
 void holdNativeSplash().catch(() => {});
 
 export default function App() {
-  const scheme = useColorScheme();
-  const isDark = scheme === 'dark';
+  // Honours the Setup → Appearance choice, falling back to the OS. Read through
+  // the same hook the screens use so the navigation theme and the splash can
+  // never disagree with the rest of the app.
+  const isDark = useResolvedScheme() === 'dark';
   // Kick off loading the brand faces, but never block first paint on them — the
   // weight-specific `fontWeight` fallback keeps text bold until they swap in.
   useAppFonts();

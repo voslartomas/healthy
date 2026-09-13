@@ -65,6 +65,15 @@ export const PROVIDER_ORDER: AiProvider[] = [
 // both — the UI labels it per platform.
 export type HealthSource = 'device';
 
+/**
+ * Which colour scheme the app paints in.
+ *
+ * 'system' follows the OS, which is the default — but it is not always what the
+ * user wants: a phone on scheduled/auto dark mode flips the app at sunset with
+ * no way to pin it, which is the reason this setting exists at all.
+ */
+export type ThemePreference = 'system' | 'light' | 'dark';
+
 interface AppState {
   aiProvider: AiProvider;
   model: string;
@@ -77,12 +86,15 @@ interface AppState {
   /** True once the user has passed the first-run Welcome screen. Persisted, so
    * the brief opens straight to Today on every later launch. */
   onboarded: boolean;
+  /** Colour scheme to paint in; 'system' defers to the OS. */
+  themePreference: ThemePreference;
   setAiProvider: (provider: AiProvider) => void;
   setModel: (model: string) => void;
   setApiKey: (key: string) => void;
   setCoachLanguage: (language: string) => void;
   setConnection: (source: HealthSource, connected: boolean) => void;
   setOnboarded: (onboarded: boolean) => void;
+  setThemePreference: (preference: ThemePreference) => void;
 }
 
 /** SecureStore-backed storage for zustand persist. The API key is a secret, so
@@ -106,7 +118,9 @@ export const useAppStore = create<AppState>()(
       coachLanguage: 'Automatic',
       connections: { device: false },
       onboarded: false,
+      themePreference: 'system',
       setOnboarded: onboarded => set({ onboarded }),
+      setThemePreference: themePreference => set({ themePreference }),
       setAiProvider: provider =>
         set({ aiProvider: provider, model: PROVIDERS[provider].models[0] }),
       setModel: model => set({ model }),
@@ -128,6 +142,7 @@ export const useAppStore = create<AppState>()(
         apiKey: state.apiKey,
         coachLanguage: state.coachLanguage,
         onboarded: state.onboarded,
+        themePreference: state.themePreference,
       }),
     },
   ),

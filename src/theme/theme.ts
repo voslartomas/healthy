@@ -1,5 +1,6 @@
-import { useColorScheme } from 'react-native';
+import { ColorSchemeName, useColorScheme } from 'react-native';
 
+import { ThemePreference, useAppStore } from '../state/useAppStore';
 import { dark, light, Palette } from './colors';
 import { mono } from './fonts';
 
@@ -69,9 +70,39 @@ const darkShadow = {
   elevation: 0,
 };
 
+/**
+ * The colour scheme to paint in: the user's explicit choice when they have made
+ * one, otherwise whatever the OS reports.
+ *
+ * Pure, so the decision can be tested without standing up a renderer — and so
+ * the hook below is nothing but wiring.
+ */
+export function resolveScheme(
+  preference: ThemePreference,
+  // `null` as well as the typed `undefined`: the platform genuinely hands back
+  // null on some Android versions before it has answered.
+  system: ColorSchemeName | null,
+): 'light' | 'dark' {
+  if (preference === 'light' || preference === 'dark') return preference;
+  // The OS reports null until it answers; light is the design's ground state,
+  // so fall back to it rather than flashing dark on launch.
+  return system === 'dark' ? 'dark' : 'light';
+}
+
+/**
+ * Every surface resolves the scheme through here — {@link useTheme} for the
+ * screens, and App.tsx for the navigation theme and the splash — so a preference
+ * can never apply to some of the app and not the rest.
+ */
+export function useResolvedScheme(): 'light' | 'dark' {
+  return resolveScheme(
+    useAppStore(s => s.themePreference),
+    useColorScheme(),
+  );
+}
+
 export function useTheme(): Theme {
-  const scheme = useColorScheme();
-  const isDark = scheme === 'dark';
+  const isDark = useResolvedScheme() === 'dark';
   return {
     colors: isDark ? dark : light,
     dark: isDark,

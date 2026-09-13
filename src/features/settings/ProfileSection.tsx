@@ -5,11 +5,10 @@ import {
   Text,
   TextInput,
   TextInputEndEditingEventData,
-  Pressable,
   View,
 } from 'react-native';
 
-import { M, S, Card } from '../../components/brief';
+import { Card, M, S, SegmentedRow } from '../../components/brief';
 import { updateProfile } from '../../state/profileService';
 import { ageFromDob, Sex, useProfileStore } from '../../state/useProfileStore';
 import { useTheme } from '../../theme/theme';
@@ -47,7 +46,10 @@ function parseNum(s: string): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-const SEXES: Sex[] = ['male', 'female', 'other'];
+const SEX_OPTIONS = (['male', 'female', 'other'] as const).map(key => ({
+  key,
+  label: key.toUpperCase(),
+}));
 
 /**
  * Profile inputs (Setup tab): date of birth, height, weight, and sex. Age (from
@@ -151,32 +153,12 @@ export function ProfileSection() {
       </View>
 
       <Field label="SEX">
-        <View style={styles.sexRow}>
-          {SEXES.map(s => {
-            const on = profile.sex === s;
-            return (
-              <Pressable
-                key={s}
-                onPress={() => void updateProfile({ sex: on ? null : s })}
-                accessibilityRole="button"
-                accessibilityState={{ selected: on }}
-                style={[
-                  styles.sexBtn,
-                  {
-                    borderColor: on ? c.ink : c.hair,
-                    backgroundColor: on ? c.ink : 'transparent',
-                  },
-                ]}
-              >
-                <Text
-                  style={M(700, 11, { ls: 0.5, color: on ? c.inv : c.mut })}
-                >
-                  {s.toUpperCase()}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
+        <SegmentedRow<Sex>
+          options={SEX_OPTIONS}
+          value={profile.sex ?? null}
+          onChange={sex => void updateProfile({ sex })}
+          allowDeselect
+        />
       </Field>
     </Card>
   );
@@ -210,12 +192,4 @@ const styles = StyleSheet.create({
   fieldLabel: { marginBottom: 6 },
   row: { flexDirection: 'row', gap: 10 },
   half: { flex: 1 },
-  sexRow: { flexDirection: 'row', gap: 8 },
-  sexBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 999,
-    borderWidth: 1,
-    alignItems: 'center',
-  },
 });

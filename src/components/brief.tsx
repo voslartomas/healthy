@@ -742,6 +742,68 @@ export function MacroBar({
   );
 }
 
+export interface SegmentOption<T extends string> {
+  key: T;
+  label: string;
+}
+
+/**
+ * A row of mutually-exclusive pills — the design's one "pick one of these"
+ * control, filled with `accSolid` when chosen.
+ *
+ * Shared rather than restyled per screen because that is exactly how Setup ended
+ * up with two looks for the same gesture: Appearance filled its choice with the
+ * accent while the profile's Sex filled with `ink`.
+ *
+ * `allowDeselect` covers an optional field (Sex), where tapping the active pill
+ * clears it; a required choice (Appearance) leaves it off so a pill can never be
+ * turned off into nothing.
+ */
+export function SegmentedRow<T extends string>({
+  options,
+  value,
+  onChange,
+  allowDeselect = false,
+  style,
+}: {
+  options: readonly SegmentOption<T>[];
+  value: T | null;
+  onChange: (next: T | null) => void;
+  allowDeselect?: boolean;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const c = useTheme().colors;
+  return (
+    <View style={[styles.segRow, style]}>
+      {options.map(option => {
+        const on = value === option.key;
+        return (
+          <Pressable
+            key={option.key}
+            onPress={() => onChange(on && allowDeselect ? null : option.key)}
+            accessibilityRole="radio"
+            accessibilityState={{ selected: on }}
+            accessibilityLabel={option.label}
+            style={[
+              styles.segPill,
+              {
+                backgroundColor: on ? c.accSolid : 'transparent',
+                borderColor: on ? c.accSolid : c.hair,
+              },
+            ]}
+          >
+            <Text
+              style={M(700, 10.5, { ls: 0.8, color: on ? c.onAccent : c.mut })}
+            >
+              {option.label}
+            </Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 type ButtonKind = 'solid' | 'outline' | 'dashed';
 
 /**
@@ -914,5 +976,13 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  segRow: { flexDirection: 'row', gap: 8 },
+  segPill: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 11,
+    borderRadius: 999,
+    borderWidth: 1,
   },
 });
