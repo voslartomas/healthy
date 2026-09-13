@@ -16,6 +16,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  RefreshControl,
   ScrollView,
   StyleProp,
   StyleSheet,
@@ -122,13 +123,22 @@ export function inputStyle(c: Palette): ViewStyle {
 }
 
 /** Page-ground scrolling screen body with the v3 gutter, centered and capped to
- * a phone-width column on wide screens. */
+ * a phone-width column on wide screens.
+ *
+ * Pass `onRefresh` to enable pull-to-refresh; `refreshing` drives the spinner and
+ * should be the store's in-flight flag, so a refresh started elsewhere (app
+ * foreground, a just-logged meal) also shows up here rather than only a pull the
+ * user performed themselves. */
 export function BriefScreen({
   children,
   scrollRef,
+  onRefresh,
+  refreshing = false,
 }: {
   children: React.ReactNode;
   scrollRef?: React.Ref<ScrollView>;
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }) {
   const t = useTheme();
   // Lift the whole sheet above the keyboard so a focused input is never hidden.
@@ -157,6 +167,16 @@ export function BriefScreen({
         // Let a Save/＋ button fire on the first tap while the keyboard is up,
         // instead of that tap only dismissing the keyboard.
         keyboardShouldPersistTaps="handled"
+        refreshControl={
+          onRefresh ? (
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={t.colors.fnt}
+              colors={[t.colors.accSolid]}
+            />
+          ) : undefined
+        }
       >
         <View
           style={{

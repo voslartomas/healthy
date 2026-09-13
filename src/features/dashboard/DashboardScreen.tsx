@@ -62,8 +62,14 @@ function recoveryPill(snap: HealthSnapshot): {
   text: string;
   dot: boolean;
 } {
-  if (!snap.readiness) return { text: 'NOT CONNECTED', dot: false };
-  return { text: snap.readiness.state.toUpperCase(), dot: true };
+  if (snap.readiness)
+    return { text: snap.readiness.state.toUpperCase(), dot: true };
+  // A stale snapshot (the cache, before the day's first live read) has its
+  // readiness suppressed on purpose — the HRV and sleep it would be computed
+  // from are yesterday's. Say we're still updating rather than "NOT CONNECTED",
+  // which would read as a broken setup.
+  if (snap.stale) return { text: 'UPDATING', dot: false };
+  return { text: 'NOT CONNECTED', dot: false };
 }
 
 /** The fallback hint under the hero number when there is nothing to explain. */
@@ -84,8 +90,11 @@ const CONTRIBUTOR_SHORT: Record<ReadinessContribution['key'], string> = {
 function readinessCaption(snap: HealthSnapshot): string {
   const parts = snap.readiness?.contributors ?? [];
   if (parts.length === 0) {
-    return snap.readiness
-      ? (READINESS_CAPTION[snap.readiness.state] ?? 'TAP FOR DETAIL')
+    if (snap.readiness) {
+      return READINESS_CAPTION[snap.readiness.state] ?? 'TAP FOR DETAIL';
+    }
+    return snap.stale
+      ? 'WAITING FOR TODAY’S DATA'
       : 'CONNECT A SOURCE TO START';
   }
   return (
@@ -128,6 +137,8 @@ function deltaSub(
 export function DashboardScreen({ navigation }: ScreenProps) {
   const c = useTheme().colors;
   const snap = useHealthStore(s => s.snapshot);
+  const refreshing = useHealthStore(s => s.refreshing);
+  const refreshHealth = useHealthStore(s => s.refresh);
   const briefText = useDailyBriefStore(s => s.text);
   const briefStatus = useDailyBriefStore(s => s.status);
   const briefError = useDailyBriefStore(s => s.error);
@@ -191,12 +202,20 @@ export function DashboardScreen({ navigation }: ScreenProps) {
     1,
   );
 
-  const syncNote = snap.live
-    ? `SYNCED · ${healthSourceName().toUpperCase()} · ${snap.sources.length} SOURCE${snap.sources.length === 1 ? '' : 'S'}`
-    : 'NO HEALTH DATA YET — CONNECT IN SETUP';
+  // Never claim "SYNCED" over data we know is not current. A cache-derived
+  // snapshot is flagged `stale` until the day's first live read lands, and saying
+  // so is the difference between the user trusting a number and being misled by
+  // it. `refreshing` takes precedence so a pull always visibly does something.
+  const syncNote = refreshing
+    ? 'UPDATING…'
+    : !snap.live
+      ? 'NO HEALTH DATA YET — CONNECT IN SETUP'
+      : snap.stale
+        ? 'SHOWING SAVED DATA — PULL TO REFRESH'
+        : `SYNCED · ${healthSourceName().toUpperCase()} · ${snap.sources.length} SOURCE${snap.sources.length === 1 ? '' : 'S'}`;
 
   return (
-    <BriefScreen>
+    <BriefScreen refreshing={refreshing} onRefresh={() => void refreshHealth()}>
       {/* ── Recovery hero + daily brief, in the ink band ─────────────── */}
       <InkBand paddingBottom={20}>
         <HeroRow

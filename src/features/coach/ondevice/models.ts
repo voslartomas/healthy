@@ -91,7 +91,23 @@ ws     ::= [ \t\n]*
  * protocol and a compact description of each tool. Prepended to the first user
  * turn by {@link renderGemmaPrompt}.
  */
-export function buildSystemPreamble(system: string, tools: ToolSpec[]): string {
+export function buildSystemPreamble(
+  system: string,
+  tools: ToolSpec[],
+  /**
+   * When set, the model MUST open with a call to this tool — the user chose the
+   * action in the UI, so there is no intent left to infer.
+   *
+   * This matters more on device than in the cloud. The cloud providers have a
+   * real `tool_choice` the API enforces; here the only lever is the prompt, and
+   * the default rules below lean hard the other way ("default to just talking",
+   * "only when the user CLEARLY asks"). Those rules exist because small models
+   * over-trigger tools in open chat, but they are exactly wrong once the user has
+   * pressed "Log food" — so a forced turn swaps them out rather than piling a
+   * contradictory instruction on top.
+   */
+  forceTool?: string,
+): string {
   // No tools → pure text generation (e.g. the daily brief). Keep the action
   // protocol minimal so the model just writes a reply.
   if (tools.length === 0) {
@@ -118,19 +134,37 @@ export function buildSystemPreamble(system: string, tools: ToolSpec[]): string {
     toolLines,
     '',
     'RULES:',
-    '- Default to just talking. Answer questions and give advice with {"reply": ...}. Only call a tool when the user CLEARLY asks you to log, add, track, change, remove, or save a food.',
-    '- If the user is only asking a question or mentioning food without asking to log it, do NOT call any tool — reply in words.',
-    '- When you DO call log_food, the "entries" array MUST contain at least one object, and each object MUST have "name" and "kcal". Estimate kcal and macros (proteinG, carbsG, fatG) yourself. Never call a tool with empty args, and never ask the user for calories or macros.',
-    '',
-    'EXAMPLE A — the user asks a question, so just reply (no tool):',
-    'User: "how much protein should I eat to build muscle?"',
-    'You: {"reply": "Aim for roughly 1.6–2.2 g of protein per kg of bodyweight a day, spread across your meals."}',
-    '',
-    'EXAMPLE B — the user explicitly asks to log, so use the tool:',
-    'User: "log 2 eggs and a slice of toast for breakfast"',
-    'You (turn 1): {"tool": "log_food", "args": {"entries": [{"name": "2 eggs + toast", "kcal": 240, "proteinG": 18, "carbsG": 15, "fatG": 12, "mealType": "BREAKFAST"}]}}',
-    'TOOL_RESULT log_food: {"ok": true}',
-    'You (turn 2): {"reply": "Logged breakfast — 240 kcal, 18g protein, 15g carbs, 12g fat."}',
+    ...(forceTool
+      ? [
+          // The user picked the action in the UI, so the "default to talking"
+          // rules are dropped rather than contradicted — a small model given both
+          // "only call a tool when clearly asked" and "you must call this tool"
+          // tends to obey the first.
+          `- The user has ALREADY chosen the action: your first JSON object MUST be {"tool": "${forceTool}", "args": {...}}. Do not reply in words on this turn, and do not ask a follow-up question first.`,
+          '- Their message describes what to act on. Fill in the args from it, estimating any numbers yourself.',
+          '- When calling log_food, the "entries" array MUST contain at least one object, and each object MUST have "name" and "kcal". Estimate kcal and macros (proteinG, carbsG, fatG) yourself. Never call a tool with empty args, and never ask the user for calories or macros.',
+          '',
+          'EXAMPLE — the action is already chosen, so call the tool immediately:',
+          'User: "two eggs and a slice of toast"',
+          'You (turn 1): {"tool": "log_food", "args": {"entries": [{"name": "2 eggs + toast", "kcal": 240, "proteinG": 18, "carbsG": 15, "fatG": 12, "mealType": "BREAKFAST"}]}}',
+          'TOOL_RESULT log_food: {"ok": true}',
+          'You (turn 2): {"reply": "Logged breakfast — 240 kcal, 18g protein, 15g carbs, 12g fat."}',
+        ]
+      : [
+          '- Default to just talking. Answer questions and give advice with {"reply": ...}. Only call a tool when the user CLEARLY asks you to log, add, track, change, remove, or save a food.',
+          '- If the user is only asking a question or mentioning food without asking to log it, do NOT call any tool — reply in words.',
+          '- When you DO call log_food, the "entries" array MUST contain at least one object, and each object MUST have "name" and "kcal". Estimate kcal and macros (proteinG, carbsG, fatG) yourself. Never call a tool with empty args, and never ask the user for calories or macros.',
+          '',
+          'EXAMPLE A — the user asks a question, so just reply (no tool):',
+          'User: "how much protein should I eat to build muscle?"',
+          'You: {"reply": "Aim for roughly 1.6–2.2 g of protein per kg of bodyweight a day, spread across your meals."}',
+          '',
+          'EXAMPLE B — the user explicitly asks to log, so use the tool:',
+          'User: "log 2 eggs and a slice of toast for breakfast"',
+          'You (turn 1): {"tool": "log_food", "args": {"entries": [{"name": "2 eggs + toast", "kcal": 240, "proteinG": 18, "carbsG": 15, "fatG": 12, "mealType": "BREAKFAST"}]}}',
+          'TOOL_RESULT log_food: {"ok": true}',
+          'You (turn 2): {"reply": "Logged breakfast — 240 kcal, 18g protein, 15g carbs, 12g fat."}',
+        ]),
     '',
     'After you call a tool you receive its result as the next user turn, prefixed with TOOL_RESULT. If it says ok:true, send a {"reply": ...} stating the numbers plainly. If it reports an error, fix your args and call the tool again.',
   ].join('\n');

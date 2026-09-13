@@ -157,6 +157,17 @@ export interface RawHealthData {
    * where the record-level fallback is used.
    */
   energyBurnedTodayAgg?: number | null;
+  /**
+   * The HRmax the per-session `hrZones` in {@link exercise} were binned against —
+   * either 220−age or the highest bpm observed across the read.
+   *
+   * Carried so a later read can tell whether the zones it already holds are on
+   * the same scale as the one it is about to use, and therefore whether it may
+   * reuse them instead of re-reading every session's heart rate. See
+   * `HealthSource.ZoneReuse`. Null when no HRmax was resolvable (no age, no
+   * trustworthy observed maximum), in which case no session has zones either.
+   */
+  hrMax?: number | null;
   /** Epoch ms when the read completed. */
   readAt: number;
 }
@@ -418,4 +429,21 @@ export interface HealthSnapshot {
   readAt: number;
   /** True when this came from real platform reads, false for sample fallback. */
   live: boolean;
+  /**
+   * True when the underlying read was taken on an EARLIER local day than the
+   * derivation — i.e. this is the SQLite cache being shown before the first live
+   * read of the day has landed.
+   *
+   * Distinct from {@link live}, which says whether the data is real at all (and
+   * which gates the onboarding bypass, so it must stay true for a cache of real
+   * reads). This says whether it is CURRENT.
+   *
+   * It is what stops `deriveSnapshot` trusting the platform's pre-computed
+   * "today" energy aggregate, which carries no date of its own. The other
+   * previous-day values (sleep, HRV, resting HR) are suppressed by their own
+   * freshness window instead, since a read taken TODAY can still only offer a
+   * night that is too old to present as last night. The UI uses this flag to
+   * label the sync line honestly rather than claiming "SYNCED".
+   */
+  stale: boolean;
 }

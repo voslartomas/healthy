@@ -1,5 +1,5 @@
 import { profileAge } from '../state/useProfileStore';
-import { nightIndex, nightIndexToTime } from './derive';
+import { exerciseKey, nightIndex, nightIndexToTime } from './derive';
 import {
   ExerciseLogResult,
   ExerciseSessionInput,
@@ -7,7 +7,7 @@ import {
   FoodLogResult,
   RawFetchWindows,
 } from './fetchWindows';
-import { HealthSource } from './HealthSource';
+import { HealthSource, ZoneReuse } from './HealthSource';
 import { computeHrZones, HeartRateSample, resolveMaxHr } from './hrZones';
 import {
   EnergyRecord,
@@ -219,6 +219,19 @@ const PERMISSIONS: Permission[] = [
 // ---------------------------------------------------------------------------
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Whether to emit the parity DIAGNOSTIC dumps (tags HEA-HRV / HEA-SLEEP /
+ * HEA-CAL / HEA-ACT) that exist to settle mismatches against the Google Health
+ * app on real data.
+ *
+ * DEV ONLY. These were running on every read in release builds, and they are not
+ * free: HEA-ACT alone `JSON.stringify`s every complete ExerciseSession record
+ * from the last 14 days — segments, laps, route points and all — and pushes one
+ * console line per record across the bridge, on a read the user is waiting on.
+ * The data they print is a debugging aid, never something the app consumes.
+ */
+const DIAGNOSTICS = __DEV__;
 
 function toMs(iso: string | undefined): number | null {
   if (!iso) return null;
@@ -502,6 +515,7 @@ export class HealthConnectSource implements HealthSource {
   async readRaw(
     now: number,
     windows: RawFetchWindows,
+    reuse?: ZoneReuse,
   ): Promise<RawHealthData | null> {
     const mod = await this.ensureInitialized();
     if (!mod) return null;
@@ -576,7 +590,7 @@ export class HealthConnectSource implements HealthSource {
     // between the two is the night-bucketing fix (see nightIndex in ./derive).
     // If `median` still reads low and `mean` matches better, the nightly
     // aggregate should move to the mean. Tag: HEA-HRV. Remove once dialed in.
-    {
+    if (DIAGNOSTICS) {
       const med = (a: number[]): number => {
         const s = [...a].sort((x, y) => x - y);
         const m = Math.floor(s.length / 2);
@@ -703,7 +717,7 @@ export class HealthConnectSource implements HealthSource {
     // If `platform` is null the aggregate is unavailable and we are showing our
     // own sum; if it disagrees with `ourAsleep`, the `sessions` rows show which
     // block or which stage type we are losing. Tag: HEA-SLEEP.
-    {
+    if (DIAGNOSTICS) {
       const r0 = (x: number) => Math.round(x);
       const hm = (ms: number) => {
         const d = new Date(ms);
@@ -800,7 +814,7 @@ export class HealthConnectSource implements HealthSource {
     // interval. Lets us see exactly what the "BURNED 1800 vs ~1000" number is
     // made of — which record type, which source(s), how many buckets and whether
     // they span the whole day. Tag: HEA-CAL. Remove once dialed in.
-    {
+    if (DIAGNOSTICS) {
       const startOfToday = now - (now % DAY_MS);
       const summarize = (recs: EnergyRecord[]) => {
         const bySrc = new Map<
@@ -872,39 +886,89 @@ export class HealthConnectSource implements HealthSource {
     // heart-rate PER SESSION (small, bounded) rather than a huge multi-week bulk
     // HeartRate pull; this is more reads than the old 8-day window, the accepted
     // cost of an HR-based (rather than session-length) zone-2 figure (ADR-006).
-    const zoneSessions = exercise;
     const sessionHr = new Map<ExerciseRecord, HeartRateSample[]>();
     const allHr: HeartRateSample[] = [];
-    for (const s of zoneSessions) {
-      const recs = await this.readAll(
-        mod,
-        'HeartRate',
-        new Date(s.start).toISOString(),
-        new Date(s.end).toISOString(),
-        6,
-      );
-      const samples: HeartRateSample[] = [];
-      for (const rec of recs) {
-        for (const smp of rec.samples ?? []) {
-          const t = toMs(smp.time);
-          if (t != null && typeof smp.beatsPerMinute === 'number') {
-            samples.push({ time: t, bpm: smp.beatsPerMinute });
-          }
+    /**
+     * Read the per-session heart rate CONCURRENTLY, in bounded batches.
+     *
+     * These are independent point reads — one per session — and awaiting them one
+     * at a time made the whole read scale linearly with how much the user trains:
+     * a deep pull over 90 days of daily workouts serialised ~60 native round
+     * trips, and it dominated refresh time.
+     *
+     * Bounded rather than one big Promise.all: each read can page up to 6 times
+     * and a long session's HR stream is thousands of samples, so an unbounded fan
+     * out over a 12-week history would put all of it in flight — and in memory —
+     * at once.
+     */
+    const readHrFor = async (sessions: ExerciseRecord[]): Promise<void> => {
+      const CONCURRENCY = 6;
+      for (let i = 0; i < sessions.length; i += CONCURRENCY) {
+        const results = await Promise.all(
+          sessions.slice(i, i + CONCURRENCY).map(async s => {
+            const recs = await this.readAll(
+              mod,
+              'HeartRate',
+              new Date(s.start).toISOString(),
+              new Date(s.end).toISOString(),
+              6,
+            );
+            const samples: HeartRateSample[] = [];
+            for (const rec of recs) {
+              for (const smp of rec.samples ?? []) {
+                const t = toMs(smp.time);
+                if (t != null && typeof smp.beatsPerMinute === 'number') {
+                  samples.push({ time: t, bpm: smp.beatsPerMinute });
+                }
+              }
+            }
+            return { session: s, samples };
+          }),
+        );
+        for (const { session, samples } of results) {
+          sessionHr.set(session, samples);
+          allHr.push(...samples);
         }
       }
-      sessionHr.set(s, samples);
-      allHr.push(...samples);
+    };
+
+    // Skip the HR read for sessions whose zones the caller already holds. Past
+    // workouts do not change, so the periodic deep backfill would otherwise pay
+    // one round trip per workout to recompute twelve weeks of identical zones.
+    const known = reuse?.zones;
+    const age = profileAge(now);
+    await readHrFor(
+      known ? exercise.filter(s => !known.has(exerciseKey(s))) : exercise,
+    );
+    // `reuse.hrMax` keeps the observed-max scale from falling just because we read
+    // fewer samples this time (no-op when an age is known).
+    let hrMax = resolveMaxHr(age, allHr, reuse?.hrMax);
+
+    // Zones are minutes binned by %HRmax, so reused zones are only valid if they
+    // were binned against the scale we are about to use. When the scale has moved
+    // — the user filled in their age, or a harder session raised the observed
+    // maximum — the offer is void: read the skipped sessions after all and
+    // recompute from one scale, rather than leave the history half on each.
+    const scaleMoved =
+      known != null && known.size > 0 && hrMax !== reuse?.hrMax;
+    if (scaleMoved) {
+      await readHrFor(exercise.filter(s => !sessionHr.has(s)));
+      hrMax = resolveMaxHr(age, allHr);
     }
-    const hrMax = resolveMaxHr(profileAge(now), allHr);
-    for (const s of zoneSessions) {
-      s.hrZones = computeHrZones(sessionHr.get(s) ?? [], hrMax);
+    const reusable = scaleMoved ? undefined : known;
+
+    for (const s of exercise) {
+      const samples = sessionHr.get(s);
+      s.hrZones = samples
+        ? computeHrZones(samples, hrMax)
+        : (reusable?.get(exerciseKey(s)) ?? null);
     }
 
     // DIAGNOSTIC (raw activity dump): the COMPLETE Health Connect ExerciseSession
     // records for the last 14 days — full JSON, exactly as the native module
     // returns them (nothing curated), plus a per-source count so multi-source
     // duplication is explicit. Tag: HEA-ACT. Remove once dialed in.
-    {
+    if (DIAGNOSTICS) {
       const twoWeeksAgo = now - 14 * DAY_MS;
       const recentRaw = exerciseRecs
         .filter(r => {
@@ -1064,6 +1128,9 @@ export class HealthConnectSource implements HealthSource {
       weight,
       bodyFat,
       energyBurnedTodayAgg,
+      // The scale the zones above were binned against, so the next read can tell
+      // whether it may reuse them (see ZoneReuse).
+      hrMax,
       sources: [...sources],
       readAt: now,
     };

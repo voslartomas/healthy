@@ -43,6 +43,19 @@ export interface CoachConfig {
   apiKey: string;
 }
 
+/**
+ * How the model may use tools this turn.
+ *
+ * `'auto'` (the default) leaves it to the model to recognise intent. That is
+ * right for open conversation but unreliable when the user has already told the
+ * APP what they want: "two eggs and toast" is genuinely ambiguous between logging
+ * a meal and asking about one, and the model often just replies.
+ *
+ * `{ force: name }` makes the call mandatory, so an explicit UI action ("Log
+ * food", then describe it) never depends on the model reading intent correctly.
+ */
+export type ToolChoice = 'auto' | { force: string };
+
 export interface RunOptions {
   system: string;
   /** Prior turns plus the new user message, oldest first. */
@@ -50,6 +63,22 @@ export interface RunOptions {
   tools: ToolSpec[];
   exec: ToolExecutor;
   signal?: AbortSignal;
+  /** Defaults to `'auto'`. See {@link ToolChoice}. */
+  toolChoice?: ToolChoice;
+}
+
+/**
+ * The tool this round must call, or null for a free choice.
+ *
+ * Only the FIRST round is ever forced. Once the tool has run, the model needs an
+ * unconstrained turn to report the result in words — keep forcing and it just
+ * calls the tool again, burning {@link MAX_TOOL_ROUNDS} and failing the turn with
+ * "took too many steps" instead of confirming the meal it already logged.
+ */
+function forcedTool(opts: RunOptions, round: number): string | null {
+  if (round > 0) return null;
+  const choice = opts.toolChoice;
+  return choice && choice !== 'auto' ? choice.force : null;
 }
 
 /** A user-facing error whose message is safe to show in a chat bubble. */
@@ -179,6 +208,7 @@ async function runAnthropic(
   }));
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    const force = forcedTool(opts, round);
     const res = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -193,6 +223,8 @@ async function runAnthropic(
         system: opts.system,
         tools,
         messages,
+        // Omitted entirely when not forcing, which is Anthropic's own default.
+        ...(force ? { tool_choice: { type: 'tool', name: force } } : {}),
       }),
       signal: opts.signal,
     });
@@ -249,6 +281,7 @@ async function runOpenAI(cfg: CoachConfig, opts: RunOptions): Promise<string> {
   ];
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    const force = forcedTool(opts, round);
     const res = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -259,7 +292,9 @@ async function runOpenAI(cfg: CoachConfig, opts: RunOptions): Promise<string> {
         model: modelId(cfg.model),
         messages,
         tools,
-        tool_choice: 'auto',
+        tool_choice: force
+          ? { type: 'function', function: { name: force } }
+          : 'auto',
       }),
       signal: opts.signal,
     });
@@ -321,6 +356,7 @@ async function runGemini(cfg: CoachConfig, opts: RunOptions): Promise<string> {
   }));
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
+    const force = forcedTool(opts, round);
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -328,6 +364,19 @@ async function runGemini(cfg: CoachConfig, opts: RunOptions): Promise<string> {
         systemInstruction: { parts: [{ text: opts.system }] },
         contents,
         tools,
+        // Mode ANY obliges a function call; restricting the allowed names to the
+        // one we want makes it the only option. Omitted when not forcing, which
+        // leaves Gemini's default AUTO in place.
+        ...(force
+          ? {
+              toolConfig: {
+                functionCallingConfig: {
+                  mode: 'ANY',
+                  allowedFunctionNames: [force],
+                },
+              },
+            }
+          : {}),
       }),
       signal: opts.signal,
     });

@@ -51,6 +51,36 @@ describe('buildSystemPreamble', () => {
     expect(p).not.toContain('log_food');
     expect(p).not.toContain('TOOL_RESULT');
   });
+
+  /**
+   * On device there is no API-level `tool_choice` — the only lever is the prompt.
+   * The default rules lean hard AWAY from calling tools ("default to just
+   * talking"), which is right for open chat and exactly wrong once the user has
+   * pressed an action button. A forced preamble must therefore REPLACE those
+   * rules, not append a contradictory instruction: given both, a small model
+   * tends to obey the first.
+   */
+  describe('forced tool', () => {
+    it('replaces the default do-not-call rules with a mandate', () => {
+      const p = buildSystemPreamble('You are a coach.', TOOLS, 'log_food');
+      expect(p).toContain('MUST be {"tool": "log_food"');
+      expect(p).not.toContain('Default to just talking');
+      expect(p).not.toContain('do NOT call any tool');
+    });
+
+    it('keeps the default rules when not forcing', () => {
+      const p = buildSystemPreamble('You are a coach.', TOOLS);
+      expect(p).toContain('Default to just talking');
+      expect(p).not.toContain('has ALREADY chosen the action');
+    });
+
+    it('still explains the post-call turn, so it can report the result', () => {
+      // Without this the model has no instruction to follow up in words and the
+      // turn ends with no confirmation of what it just logged.
+      const p = buildSystemPreamble('You are a coach.', TOOLS, 'log_food');
+      expect(p).toContain('TOOL_RESULT');
+    });
+  });
 });
 
 describe('renderGemmaPrompt', () => {

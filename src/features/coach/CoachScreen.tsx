@@ -21,6 +21,7 @@ import Svg, { Path } from 'react-native-svg';
 
 import { ScreenProps } from '../../app/navigation/types';
 import { BAND, M, S } from '../../components/brief';
+import { Icon, IconName } from '../../components/Icon';
 import {
   appendMessage,
   createConversation,
@@ -47,6 +48,46 @@ import { useVoiceInput, VoiceState } from './useVoiceInput';
 function formatMs(ms: number): string {
   return ms < 1000 ? `${ms} MS` : `${(ms / 1000).toFixed(1)} S`;
 }
+
+/**
+ * An action the user can pick BEFORE typing, which obliges the model to call
+ * `tool` for that message instead of deciding whether to.
+ *
+ * The coach is otherwise left to read intent from the wording, and it genuinely
+ * cannot do that reliably: "two eggs and toast" is as much a question as a request
+ * to log, so the model often just replied and nothing was written. Naming the
+ * action in the UI removes the guess — the model's only job is to fill in the
+ * arguments (estimating kcal and macros) from what the user describes.
+ */
+interface CoachIntent {
+  key: string;
+  /** Chip label. */
+  label: string;
+  /** Icon name from `../../components/Icon`. */
+  icon: IconName;
+  /** The tool the model is obliged to call. */
+  tool: string;
+  /** Composer placeholder while this intent is armed — it should tell the user
+   * what to describe, since they no longer have to phrase it as a command. */
+  placeholder: string;
+}
+
+const COACH_INTENTS: CoachIntent[] = [
+  {
+    key: 'food',
+    label: 'Log food',
+    icon: 'nutrition',
+    tool: 'log_food',
+    placeholder: 'Describe what you ate…',
+  },
+  {
+    key: 'workout',
+    label: 'New workout',
+    icon: 'strength',
+    tool: 'create_workout',
+    placeholder: 'Which muscles, how many exercises…',
+  },
+];
 
 /** Build the coach system prompt, grounding it in the user's live health data
  * (recovery, body, sleep, activity, nutrition, goals) so it can both log food
@@ -90,6 +131,8 @@ export function CoachScreen({ navigation }: ScreenProps) {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  /** The action the next message is for, or null for open conversation. */
+  const [intent, setIntent] = useState<CoachIntent | null>(null);
   const scrollRef = useRef<ScrollView>(null);
 
   // Voice input: the transcript is appended to whatever's typed so the user can
@@ -138,10 +181,12 @@ export function CoachScreen({ navigation }: ScreenProps) {
   );
 
   const send = useCallback(
-    async (raw: string) => {
+    async (raw: string, intent?: CoachIntent | null) => {
       const value = raw.trim();
       if (!value || busy) return;
       setInput('');
+      // One-shot: the chip describes THIS message, so clear it either way.
+      setIntent(null);
 
       // Build history from the live conversation (fresh from the store).
       const prior =
@@ -176,6 +221,11 @@ export function CoachScreen({ navigation }: ScreenProps) {
             history: [...history, { role: 'user', content: value }],
             tools: [...food.tools, ...workoutTools.tools],
             exec,
+            // With an intent chip active the user has already told the app what
+            // they want, so the model is obliged to call that tool rather than
+            // left to infer it from the wording — "two eggs and toast" otherwise
+            // reads as easily as a question as a request to log.
+            toolChoice: intent ? { force: intent.tool } : 'auto',
           },
         );
         if (reply) appendMessage('ai', reply, Date.now() - started);
@@ -292,6 +342,48 @@ export function CoachScreen({ navigation }: ScreenProps) {
             {voice.error.toUpperCase()}
           </Text>
         ) : null}
+        {/* Pick an action, then just describe it — no need to phrase the message
+            as a command for the model to recognise. */}
+        <View style={[styles.intents, { borderTopColor: c.hair }]}>
+          {COACH_INTENTS.map(it => {
+            const on = intent?.key === it.key;
+            return (
+              <Pressable
+                key={it.key}
+                onPress={() => setIntent(on ? null : it)}
+                disabled={busy}
+                accessibilityRole="button"
+                accessibilityState={{ selected: on }}
+                accessibilityLabel={
+                  on ? `${it.label} selected, tap to cancel` : it.label
+                }
+                style={[
+                  styles.intentChip,
+                  {
+                    backgroundColor: on ? c.accSolid : 'transparent',
+                    borderColor: on ? c.accSolid : c.hair,
+                    opacity: busy ? 0.45 : 1,
+                  },
+                ]}
+              >
+                <Icon
+                  name={on ? 'close' : it.icon}
+                  size={11}
+                  color={on ? c.onAccent : c.fnt}
+                />
+                <Text
+                  style={M(700, 9.5, {
+                    ls: 0.8,
+                    upper: true,
+                    color: on ? c.onAccent : c.fnt,
+                  })}
+                >
+                  {it.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
         <View
           style={[
             styles.composer,
@@ -304,13 +396,13 @@ export function CoachScreen({ navigation }: ScreenProps) {
           <TextInput
             value={input}
             onChangeText={setInput}
-            onSubmitEditing={() => send(input)}
+            onSubmitEditing={() => send(input, intent)}
             placeholder={
               voice.state === 'recording'
                 ? 'Listening…'
                 : voice.state === 'transcribing'
                   ? 'Transcribing…'
-                  : 'Tell coach what you ate…'
+                  : (intent?.placeholder ?? 'Ask your coach anything…')
             }
             placeholderTextColor={c.fnt}
             accessibilityLabel="Message your coach"
@@ -323,7 +415,7 @@ export function CoachScreen({ navigation }: ScreenProps) {
             ]}
           />
           <Pressable
-            onPress={() => send(input)}
+            onPress={() => send(input, intent)}
             disabled={!input.trim() || busy}
             accessibilityRole="button"
             accessibilityLabel="Send"
@@ -490,6 +582,22 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   typingDot: { width: 6, height: 6, borderRadius: 3 },
+  intents: {
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+    borderTopWidth: 1,
+  },
+  intentChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
   composer: {
     flexDirection: 'row',
     alignItems: 'center',

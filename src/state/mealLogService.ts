@@ -37,12 +37,15 @@ export async function logMeal(
     // Keep every entry at or before `at` so a meal logged "now" never lands in
     // the future, while still spacing items so their order is preserved.
     const entryAt = at - (items.length - 1 - i) * 1000;
-    const res = await logFoodEntry(
-      { ...items[i], mealType, at: entryAt },
-      entryAt,
-    );
-    if (res.ok) logged += 1;
-    else failed += 1;
+    const input = { ...items[i], mealType, at: entryAt };
+    const res = await logFoodEntry(input, entryAt);
+    if (res.ok) {
+      logged += 1;
+      // Writing through `../health` directly skips the store's own optimistic
+      // bookkeeping, so do it here: the meal counts toward today from this
+      // moment, whether or not the read below has caught up with the write yet.
+      useHealthStore.getState().notePendingFood(input, res.name ?? null);
+    } else failed += 1;
   }
   if (logged > 0) await useHealthStore.getState().refresh();
   return { ok: logged > 0, logged, failed };

@@ -10,10 +10,12 @@ import {
   FULL_WINDOWS,
   RawFetchWindows,
 } from './fetchWindows';
+import type { ZoneReuse } from './HealthSource';
 import { HealthSnapshot, RawHealthData } from './types';
 
 export * from './types';
-export { deriveSnapshot, mergeRaw, pruneRaw } from './derive';
+export { deriveSnapshot, exerciseKey, mergeRaw, pruneRaw } from './derive';
+export type { ZoneReuse } from './HealthSource';
 export { FULL_METRICS_DAYS, FULL_WINDOWS, LIGHT_WINDOWS } from './fetchWindows';
 export type {
   ExerciseLogResult,
@@ -64,6 +66,7 @@ export const EMPTY_SNAPSHOT: HealthSnapshot = {
   sources: [],
   readAt: 0,
   live: false,
+  stale: false,
 };
 
 /** True when the current platform's native health module is available. */
@@ -112,6 +115,7 @@ export async function readSnapshot(now: number): Promise<HealthSnapshot> {
 export async function fetchRaw(
   now: number,
   windows: RawFetchWindows = FULL_WINDOWS,
+  reuse?: ZoneReuse,
 ): Promise<RawHealthData | null> {
   const source = activeHealthSource();
   if (!source.isConfigured()) {
@@ -119,7 +123,7 @@ export async function fetchRaw(
     return null;
   }
   try {
-    const raw = await source.readRaw(now, windows);
+    const raw = await source.readRaw(now, windows, reuse);
     if (raw) {
       console.log('[health] raw counts', {
         exercise: raw.exercise.length,

@@ -19,12 +19,14 @@ describe('sleepQualityScore', () => {
     // efficiency (asleep ÷ in bed), which says nothing about how much you slept.
     const short = 5 * 60 + 40; // 340 min
     const score = sleepQualityScore(short, night(short, 0.2, 0.22));
-    // A short night is penalised on all three components at once, which is the
-    // point of grading deep/REM on absolute minutes rather than on their share:
-    //   length 340/480          = 70.8  × 0.50
-    //   deep    68/96           = 70.8  × 0.25
-    //   REM     75/105          = 71.4  × 0.25
-    expect(score).toBe(71);
+    // A short night is penalised on length AND on both restorative stages at
+    // once, which is the point of grading deep/REM on absolute minutes rather
+    // than on their share of the night:
+    //   deep        68/96  = 70.8  × 0.35 = 24.8
+    //   REM         75/105.6 = 71.0 × 0.30 = 21.3
+    //   continuity  8min awake, under tolerance = 100 × 0.15 = 15.0
+    //   length     340/480  = 70.8  × 0.20 = 14.2
+    expect(score).toBe(75);
   });
 
   it('scores a full night with a full night of deep and REM at 100', () => {
@@ -59,7 +61,28 @@ describe('sleepQualityScore', () => {
       lightMin: 480,
       awakeMin: 0,
     };
-    // Full length (50) but no restorative sleep at all.
-    expect(sleepQualityScore(480, allLight)).toBe(50);
+    // Full length (20) and unbroken (15), but no restorative sleep at all — so
+    // it cannot score anywhere near a real night. Under the old length-dominant
+    // weighting this same night scored 50.
+    expect(sleepQualityScore(480, allLight)).toBe(35);
+  });
+
+  it('penalises a fragmented night even at full length with good stages', () => {
+    const stages = { deepMin: 96, remMin: 106, lightMin: 278, awakeMin: 0 };
+    const unbroken = sleepQualityScore(480, stages);
+    const fragmented = sleepQualityScore(480, { ...stages, awakeMin: 75 });
+    expect(unbroken).toBe(100);
+    // 75 awake = 55 past the 20min tolerance → continuity 31, costing ~10 points.
+    expect(fragmented).toBe(90);
+    expect(fragmented).toBeLessThan(unbroken);
+  });
+
+  it('ignores the brief arousals every normal night has', () => {
+    const stages = { deepMin: 96, remMin: 106, lightMin: 278, awakeMin: 0 };
+    // Anything up to the tolerance is free — wearables record these and they are
+    // not a sign of a bad night.
+    expect(sleepQualityScore(480, { ...stages, awakeMin: 18 })).toBe(
+      sleepQualityScore(480, stages),
+    );
   });
 });

@@ -9,6 +9,7 @@ import {
   updateWorkout,
 } from '../db/strengthRepository';
 import { logExerciseSession, removeExerciseSession } from '../health';
+import { useHealthStore } from './useHealthStore';
 import {
   ActiveSession,
   LoggedSet,
@@ -237,12 +238,32 @@ export async function syncSession(summary: SessionSummary): Promise<boolean> {
     if (res.ok && res.id) {
       await updateSessionHealthId(summary.id, res.id);
       useStrengthStore.getState().setSessionHealthId(summary.id, res.id);
+      // The session is now part of the OS exercise history, which is what the
+      // health snapshot is derived from — so re-read it. Without this the
+      // dashboard's cardio load, the week's strength-goal count and the
+      // activities list all kept their pre-workout values until some later
+      // foreground happened to refresh (App.tsx throttles that to once per 30s),
+      // which is the "finishing a workout doesn't update anything" report.
+      await refreshHealthSnapshot();
       return true;
     }
   } catch (err) {
     console.warn('[strength] exercise-session write failed', err);
   }
   return false;
+}
+
+/**
+ * Re-read the health snapshot after we changed the OS exercise history. Failures
+ * are swallowed: the local session is authoritative, so a refresh that can't run
+ * (offline, no permission) must not surface as a failed sync.
+ */
+async function refreshHealthSnapshot(): Promise<void> {
+  try {
+    await useHealthStore.getState().refresh();
+  } catch (err) {
+    console.warn('[strength] health refresh after sync failed', err);
+  }
 }
 
 /** Remove a session's mirrored Health Connect record (and clear its local id).
@@ -254,6 +275,8 @@ export async function unsyncSession(summary: SessionSummary): Promise<boolean> {
     if (ok) {
       await updateSessionHealthId(summary.id, null);
       useStrengthStore.getState().setSessionHealthId(summary.id, null);
+      // Removed from the OS history too, so the snapshot has to drop it.
+      await refreshHealthSnapshot();
     }
     return ok;
   } catch (err) {

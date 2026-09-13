@@ -203,6 +203,20 @@ function baselineNights(entries: [number, number][]): number[] {
     .map(([, value]) => value);
 }
 
+/**
+ * How recent a nightly reading has to be to count as the CURRENT one — used for
+ * the "last night" sleep period and for the HRV / resting-HR values shown beside
+ * it. Long enough that someone opening the app late in the evening still sees
+ * last night, short enough never to reach the night before that.
+ *
+ * This is also what stops the SQLite cache passing an old night off as the
+ * current one on the first open of the morning. That cache was written before
+ * last night happened, so the newest reading in it is from the night BEFORE
+ * last; unbounded, "most recent sample" surfaced it as today's HRV, and "most
+ * recent sleep period" as last night's sleep — both unqualified.
+ */
+const NIGHTLY_FRESH_WINDOW_MS = 36 * 60 * 60 * 1000;
+
 /** Most recent sample from the highest-priority source that has any samples. */
 export function latestFromPrimary(
   samples: InstantSample[],
@@ -225,11 +239,19 @@ function dailyBaseline(samples: InstantSample[]): number {
   return median([...byDay.values()].map(s => s.value));
 }
 
+/**
+ * Latest value + self-calibrating baseline. When `now` is given the VALUE must
+ * fall inside {@link NIGHTLY_FRESH_WINDOW_MS} of it, or the metric reads as absent
+ * — see {@link hrvMetric} for why. The baseline always spans every sample we
+ * have, stale or not; it is a 30-day median and does not go wrong overnight.
+ */
 function metricWithBaseline(
   samples: InstantSample[],
+  now?: number,
 ): MetricWithBaseline | null {
   const latest = latestFromPrimary(samples);
   if (!latest) return null;
+  if (now != null && now - latest.time > NIGHTLY_FRESH_WINDOW_MS) return null;
   const baseline = dailyBaseline(samples) || latest.value;
   return {
     value: latest.value,
@@ -280,10 +302,36 @@ export function nightlyAverage(samples: InstantSample[]): Map<number, number> {
  * latest-single-sample selection for HRV, which surfaced an arbitrary 5-minute
  * value that matched neither the app nor itself day-to-day.
  */
-export function hrvMetric(samples: InstantSample[]): MetricWithBaseline | null {
+export function hrvMetric(
+  samples: InstantSample[],
+  now?: number,
+): MetricWithBaseline | null {
   const byNight = nightlyAverage(samples);
   if (byNight.size === 0) return null;
   const latestNight = Math.max(...byNight.keys());
+  // With a reference time, that night has to be a CURRENT one
+  // ({@link NIGHTLY_FRESH_WINDOW_MS}). Unbounded, the first open of the morning
+  // — still showing the SQLite cache, which predates last night — surfaced the
+  // night-before-last's RMSSD as this morning's, and the recovery hero derived
+  // from it as today's readiness. The baseline still uses every night we have.
+  //
+  // Judged on the AGE of the night's newest sample, not by comparing night
+  // indices: the buckets cut at local noon, so `now` and a reading 40 hours
+  // earlier can land in adjacent buckets or the same one depending on the hour
+  // the app happens to be opened. Sample age is the same test `metricWithBaseline`
+  // applies, and does not shift with the time of day.
+  if (now != null) {
+    const primary = primarySource(samples);
+    const newest = samples.reduce(
+      (max, s) =>
+        (primary == null || s.source === primary) &&
+        nightIndex(s.time) === latestNight
+          ? Math.max(max, s.time)
+          : max,
+      -Infinity,
+    );
+    if (now - newest > NIGHTLY_FRESH_WINDOW_MS) return null;
+  }
   const value = byNight.get(latestNight) as number;
   const baseline = median(baselineNights([...byNight.entries()])) || value;
   return { value, baseline, delta: value - baseline };
@@ -925,19 +973,20 @@ export function sleepPeriods(sleep: SleepRecord[]): SleepRecord[] {
   return out;
 }
 
-/** How far back "last night" can reach — enough for someone opening the app late
- * in the evening, without pulling in the night before that. */
-const LAST_SLEEP_WINDOW_MS = 36 * 60 * 60 * 1000;
-
 /**
  * The night the app calls "last night": the LONGEST sleep period to end within
- * {@link LAST_SLEEP_WINDOW_MS}, falling back to the most recent period when
- * nothing is that fresh.
+ * {@link NIGHTLY_FRESH_WINDOW_MS}, or null when nothing is that fresh.
  *
  * Not simply the latest-ending session, which was wrong twice over: it showed
  * one block of a night written as several sessions, and it let a twenty-minute
  * afternoon nap replace the previous night's seven hours purely because the nap
  * ends later.
+ *
+ * There is deliberately NO fallback to "the most recent period we have". That
+ * fallback is how the SQLite cache came to show the night-before-last's seven
+ * hours as last night's on the first open of the morning, at full confidence and
+ * with a "% NEED" score attached. A night we cannot vouch for is absent, and the
+ * UI renders "——" for it — the same contract as every other missing metric.
  */
 function lastSleep(
   sleep: SleepRecord[],
@@ -949,8 +998,8 @@ function lastSleep(
   if (periods.length === 0) return null;
   const longest = (xs: SleepRecord[]) =>
     xs.reduce((a, b) => (b.durationMin > a.durationMin ? b : a));
-  const recent = periods.filter(p => now - p.end <= LAST_SLEEP_WINDOW_MS);
-  return recent.length > 0 ? longest(recent) : periods[periods.length - 1];
+  const recent = periods.filter(p => now - p.end <= NIGHTLY_FRESH_WINDOW_MS);
+  return recent.length > 0 ? longest(recent) : null;
 }
 
 /**
@@ -1033,6 +1082,59 @@ function mainSleepByNight(
 const SLEEP_NEED_MIN = 8 * 60;
 
 /**
+ * What a metric sitting EXACTLY on the user's own 30-day baseline scores.
+ *
+ * Anchored high on purpose. The previous revision centred the scale at 65, so a
+ * completely ordinary day — resting HR on its median, HRV on its median — scored
+ * 65/100 and drew a two-thirds-full bar. That reads as a mediocre grade, when
+ * what it actually means is "you are where you always are", i.e. rested. Being at
+ * your own normal IS the rested state; a readiness score's job is to flag
+ * DEPARTURES from it, which is what the asymmetric slopes below do.
+ *
+ * Not 100, so there is still headroom for a genuinely better-than-usual day and
+ * the number doesn't flatline at the top.
+ */
+const BASELINE_SCORE = 88;
+
+/**
+ * How far from baseline a metric has to deviate to saturate the scale, as a
+ * fraction of the baseline: `gain` to reach 100 in the GOOD direction, `loss` to
+ * reach 0 in the bad one. Separate because the two directions are not
+ * symmetric — see each metric's note in {@link readiness}.
+ */
+interface BaselineSpan {
+  gain: number;
+  loss: number;
+}
+
+/** HRV: 15% above your median is about as rested as a night gets; the downside
+ * span is wide because ordinary night-to-night RMSSD noise runs ~10% and must not
+ * read as strain. At a 60ms baseline: 69→100, 60→88, 54→63, 50→46, 45→25. */
+const HRV_SPAN: BaselineSpan = { gain: 0.15, loss: 0.35 };
+
+/** Resting HR: tighter than HRV in both directions because resting HR is stable
+ * day to day — 6% below your normal is as low as it usefully goes, and 20% above
+ * is severe. At a 52bpm baseline: 50→96, 52→88, 54→71, 57→46, 60→20. */
+const RHR_SPAN: BaselineSpan = { gain: 0.06, loss: 0.2 };
+
+/**
+ * Score one baseline-relative input onto 0–100, anchored at
+ * {@link BASELINE_SCORE} when it sits on the baseline.
+ *
+ * `dev` is the deviation in the GOOD direction as a fraction of the baseline — for
+ * HRV that means above it, for resting HR below it, so callers invert as needed.
+ * At or better than baseline climbs toward 100 over `span.gain`; worse falls
+ * toward 0 over `span.loss`.
+ */
+function baselineScore(dev: number, span: BaselineSpan): number {
+  const reach = dev >= 0 ? span.gain : span.loss;
+  // A zero span would divide by zero; treat it as "saturates immediately".
+  if (reach <= 0) return dev >= 0 ? 100 : 0;
+  const range = dev >= 0 ? 100 - BASELINE_SCORE : BASELINE_SCORE;
+  return clamp(BASELINE_SCORE + (dev / reach) * range);
+}
+
+/**
  * Composite readiness ("recovery") score — NON-CLINICAL, see ADR-004.
  *
  * A transparent 0–100 blend of three real, directly-measured inputs, each
@@ -1043,43 +1145,77 @@ const SLEEP_NEED_MIN = 8 * 60;
  * This is our interpretation layer, deliberately simple and disclosed; it makes
  * no medical claim and is not a substitute for the proprietary scores wearables
  * compute. Returns null unless at least HRV or RHR is available.
+ *
+ * The two baseline-relative inputs are scored by {@link baselineScore}: AT
+ * baseline is the rested state and scores {@link BASELINE_SCORE}, not the middle
+ * of the range. The score measures how far you have DEPARTED from your own
+ * normal, in the direction that matters, and each metric gets its own asymmetric
+ * span because their day-to-day noise differs by an order of magnitude.
+ *
+ * Sleep is deliberately NOT baseline-relative — it is graded against the absolute
+ * 8h need. Baselining it would score a chronic six-hour sleeper as fully rested
+ * for sleeping their usual six hours, which is the one place self-calibration
+ * would actively mislead.
  */
 export function readiness(
   hrv: MetricWithBaseline | null,
   restingHr: MetricWithBaseline | null,
-  sleep: { performancePct: number; hours?: number } | null,
+  sleep: {
+    performancePct: number;
+    hours?: number;
+    /** The night's stage split when the source reported one. Drives a
+     * restorative-quality score rather than a length-only one. */
+    stages?: SleepStages | null;
+  } | null,
 ): ReadinessMetric | null {
   if (!hrv && !restingHr) return null;
 
   const parts: ReadinessContribution[] = [];
   if (hrv && hrv.baseline > 0) {
-    // ±20% around baseline maps to 0..100, centered at 65.
-    const ratio = (hrv.value - hrv.baseline) / hrv.baseline;
+    // Higher HRV than baseline ⇒ more recovered. Gentler downside slope than
+    // resting HR's: night-to-night RMSSD swings of 10–15% are ordinary noise, so
+    // it takes a sustained drop to read as strain.
     parts.push({
       key: 'hrv',
       value: hrv.value,
       reference: hrv.baseline,
-      score: clamp(65 + ratio * 175),
+      score: baselineScore((hrv.value - hrv.baseline) / hrv.baseline, HRV_SPAN),
       weight: 0.5,
     });
   }
   if (restingHr && restingHr.baseline > 0) {
-    const ratio = (restingHr.baseline - restingHr.value) / restingHr.baseline;
+    // LOWER resting HR than baseline ⇒ more recovered, so the deviation is
+    // inverted. Steep downside: resting HR is stable day to day, so even a few
+    // percent above your own normal is a real signal (illness, strain, alcohol).
     parts.push({
       key: 'rhr',
       value: restingHr.value,
       reference: restingHr.baseline,
-      score: clamp(65 + ratio * 300),
+      score: baselineScore(
+        (restingHr.baseline - restingHr.value) / restingHr.baseline,
+        RHR_SPAN,
+      ),
       weight: 0.3,
     });
   }
   if (sleep) {
+    const hours =
+      sleep.hours ?? (sleep.performancePct / 100) * (SLEEP_NEED_MIN / 60);
     parts.push({
       key: 'sleep',
-      value:
-        sleep.hours ?? (sleep.performancePct / 100) * (SLEEP_NEED_MIN / 60),
+      value: hours,
       reference: SLEEP_NEED_MIN / 60,
-      score: clamp(sleep.performancePct),
+      // Graded on how RESTORATIVE the night was — deep, REM and how much of it
+      // was spent awake — not on its length alone ({@link sleepQualityScore}).
+      // Eight hours of fragmented light sleep is not a recovered night, and
+      // scoring it as one was why readiness could look fine after a bad night.
+      //
+      // Falls back to length-vs-need when the source reported no stage split; we
+      // never invent stages, and a duration-only score is the honest best we can
+      // do for that night.
+      score: sleep.stages
+        ? sleepQualityScore(hours * 60, sleep.stages)
+        : clamp(sleep.performancePct),
       weight: 0.2,
     });
   }
@@ -1271,6 +1407,33 @@ export function sleepHoursSeries(
 const DEEP_TARGET_MIN = 0.2 * SLEEP_NEED_MIN; // 96 min
 const REM_TARGET_MIN = 0.22 * SLEEP_NEED_MIN; // ~105 min
 
+/** Awake minutes inside the sleep period that are normal for a healthy night —
+ * everyone surfaces briefly between cycles, and wearables record it. Up to this
+ * much costs nothing. */
+const AWAKE_TOLERANCE_MIN = 20;
+
+/** Awake minutes BEYOND the tolerance that take continuity from 100 to 0. At 20 +
+ * 80 = 100 minutes awake the night was severely fragmented however long it ran. */
+const AWAKE_SPAN_MIN = 80;
+
+/**
+ * What the sleep score is made of. Deep + REM + continuity are 80% of it: how
+ * RESTORATIVE the night was, which is the thing that actually varies and the
+ * thing the user can act on. Length is kept as a fifth of the weight because it
+ * bounds the rest — you cannot get a full night's deep sleep in five hours — but
+ * it is no longer the headline term.
+ *
+ * The previous split (length 0.5, deep 0.25, REM 0.25, awake unused) let an eight
+ * hour night of almost entirely light, repeatedly-interrupted sleep score in the
+ * 60s purely on duration, which is not what "slept well" means.
+ */
+const SLEEP_WEIGHTS = {
+  deep: 0.35,
+  rem: 0.3,
+  continuity: 0.15,
+  length: 0.2,
+} as const;
+
 /**
  * Sleep quality 0–100 — NON-CLINICAL, the same kind of disclosed blend as the
  * readiness heuristic (ADR-004):
@@ -1291,10 +1454,21 @@ export function sleepQualityScore(
   durationMin: number,
   stages: SleepStages,
 ): number {
+  // No sleep is not quality sleep. Without this the continuity term would award
+  // an empty night full marks for having recorded no wake-ups.
+  if (durationMin <= 0) return 0;
   const lengthScore = clamp((durationMin / SLEEP_NEED_MIN) * 100);
   const deepScore = clamp((stages.deepMin / DEEP_TARGET_MIN) * 100);
   const remScore = clamp((stages.remMin / REM_TARGET_MIN) * 100);
-  return Math.round(lengthScore * 0.5 + deepScore * 0.25 + remScore * 0.25);
+  // Continuity: brief arousals are normal and free, sustained wakefulness is not.
+  const excessAwake = Math.max(0, stages.awakeMin - AWAKE_TOLERANCE_MIN);
+  const continuityScore = clamp(100 - (excessAwake / AWAKE_SPAN_MIN) * 100);
+  return Math.round(
+    deepScore * SLEEP_WEIGHTS.deep +
+      remScore * SLEEP_WEIGHTS.rem +
+      continuityScore * SLEEP_WEIGHTS.continuity +
+      lengthScore * SLEEP_WEIGHTS.length,
+  );
 }
 
 /**
@@ -1403,6 +1577,24 @@ export function buildTrendSeries(raw: RawHealthData): TrendSeries {
   };
 }
 
+/**
+ * Stable identity of an exercise session across reads. Used both to splice cached
+ * and fresh history without double-counting ({@link mergeRaw}) and to recognise a
+ * session whose HR zones we have already computed, so a deep read need not
+ * re-read its heart rate (see `HealthSource.readRaw`).
+ *
+ * A session's start instant plus its type and writing app is as close to a stable
+ * id as the platforms give us — Health Connect record UUIDs are not stable across
+ * a re-sync, so they cannot be used for this.
+ */
+export function exerciseKey(e: {
+  start: number;
+  typeName: string;
+  source: string;
+}): string {
+  return `${e.start}|${e.typeName}|${e.source}`;
+}
+
 /** Keep `recent` first (authoritative), then history entries strictly older
  * than `cutoff` whose key hasn't already been seen — so a session/day present
  * in both reads (boundary overlap) is counted exactly once. */
@@ -1481,7 +1673,7 @@ export function mergeRaw(
       recent.exercise,
       cutoff,
       e => e.start,
-      e => `${e.start}|${e.typeName}|${e.source}`,
+      exerciseKey,
     ),
     steps: spliceByKey(
       history.steps,
@@ -1545,7 +1737,9 @@ export function deriveSnapshot(
   raw: RawHealthData,
   now: number,
 ): HealthSnapshot {
-  const hrvBase = hrvMetric(raw.hrvRmssd);
+  // `now` is passed so a value too old to be "current" reads as absent rather
+  // than as this morning's — see NIGHTLY_FRESH_WINDOW_MS.
+  const hrvBase = hrvMetric(raw.hrvRmssd, now);
   // Tag with the algorithm the source actually measured: Health Connect reports
   // RMSSD (Android), HealthKit reports SDNN (iOS). These are NOT numerically
   // comparable (HEA-4), so the tag travels with every HRV value and is never
@@ -1553,7 +1747,7 @@ export function deriveSnapshot(
   const hrv = hrvBase
     ? { ...hrvBase, algorithm: raw.hrvAlgorithm ?? ('RMSSD' as const) }
     : null;
-  const restingHr = metricWithBaseline(raw.restingHr);
+  const restingHr = metricWithBaseline(raw.restingHr, now);
 
   const lastSleepSession = lastSleep(raw.sleep, now, raw.nightlySleepAgg);
   const sleep = lastSleepSession
@@ -1569,6 +1763,23 @@ export function deriveSnapshot(
 
   const startOfToday = startOfLocalDay(now);
 
+  /**
+   * Whether the read behind `raw` was taken on an EARLIER local day than the one
+   * we are deriving for — i.e. this is the SQLite cache, loaded on the first open
+   * of the morning, before any live read has landed.
+   *
+   * Almost everything below is computed THROUGH `now` (windowed from
+   * `startOfToday`, bucketed by `nightIndex`), so it reads correctly — empty —
+   * from a stale cache and self-corrects the moment fresh records arrive. The
+   * exception is what the platform pre-aggregated for "today" at fetch time,
+   * `energyBurnedTodayAgg`: a bare number with no date attached. Preferring it
+   * unconditionally credited YESTERDAY's full-day burn to today, so a morning
+   * open showed a large bogus deficit (yesterday's ~2400 kcal burned against
+   * today's empty intake) next to a correct 0 steps. Recompute from the
+   * date-filtered records instead whenever the aggregate can't be trusted.
+   */
+  const stale = startOfLocalDay(raw.readAt) !== startOfToday;
+
   return {
     hrv,
     restingHr,
@@ -1581,7 +1792,7 @@ export function deriveSnapshot(
     // Health UI exactly); fall back to the single-source record computation on
     // platforms/reads without it (iOS/HealthKit, tests, aggregate failure).
     energyBurnedToday:
-      raw.energyBurnedTodayAgg != null
+      raw.energyBurnedTodayAgg != null && !stale
         ? raw.energyBurnedTodayAgg
         : Math.round(
             activeEnergyInWindow(burnEnergyRecords(raw), startOfToday, now),
@@ -1601,5 +1812,6 @@ export function deriveSnapshot(
     sources: raw.sources,
     readAt: raw.readAt,
     live: true,
+    stale,
   };
 }

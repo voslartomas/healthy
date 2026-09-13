@@ -53,8 +53,11 @@ const MIN_TRUSTED_OBSERVED_MAX = 100;
 
 /** Classic age-based HRmax (220 − age). Null for an implausible age so callers
  * fall back to the observed-max estimate. */
-export function estimateMaxHrFromAge(age: number | null | undefined): number | null {
-  if (age == null || !Number.isFinite(age) || age <= 0 || age > 120) return null;
+export function estimateMaxHrFromAge(
+  age: number | null | undefined,
+): number | null {
+  if (age == null || !Number.isFinite(age) || age <= 0 || age > 120)
+    return null;
   return 220 - age;
 }
 
@@ -75,12 +78,23 @@ export function estimateMaxHrFromObserved(
  * Resolve an HRmax to bin against: prefer the age-based estimate (from the user
  * profile), else the observed maximum across the supplied samples. Returns null
  * when neither is available, which makes {@link computeHrZones} return null.
+ *
+ * `observedFloor` is a previously-observed maximum to keep in play — used when a
+ * read deliberately skips sessions whose zones are already known, so that seeing
+ * fewer samples this time cannot LOWER the scale and silently re-grade the
+ * sessions it did read (a lower HRmax pushes every %HRmax up a zone). Ignored
+ * entirely when an age is known, since that estimate does not depend on samples.
  */
 export function resolveMaxHr(
   age: number | null | undefined,
   observedSamples: HeartRateSample[],
+  observedFloor?: number | null,
 ): number | null {
-  return estimateMaxHrFromAge(age) ?? estimateMaxHrFromObserved(observedSamples);
+  const byAge = estimateMaxHrFromAge(age);
+  if (byAge != null) return byAge;
+  const observed = estimateMaxHrFromObserved(observedSamples);
+  if (observed == null) return observedFloor ?? null;
+  return observedFloor != null ? Math.max(observed, observedFloor) : observed;
 }
 
 /**
@@ -108,7 +122,10 @@ export function computeHrZones(
     peakMin: 0,
   };
   for (let i = 0; i < sorted.length - 1; i++) {
-    const dwellMs = Math.min(sorted[i + 1].time - sorted[i].time, MAX_DWELL_GAP_MS);
+    const dwellMs = Math.min(
+      sorted[i + 1].time - sorted[i].time,
+      MAX_DWELL_GAP_MS,
+    );
     if (dwellMs <= 0) continue;
     const minutes = dwellMs / 60_000;
     const frac = sorted[i].bpm / hrMax;

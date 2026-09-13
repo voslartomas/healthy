@@ -6,7 +6,7 @@ import {
   FoodLogResult,
   RawFetchWindows,
 } from './fetchWindows';
-import { HealthSource } from './HealthSource';
+import { HealthSource, ZoneReuse } from './HealthSource';
 import { computeHrZones, HeartRateSample, resolveMaxHr } from './hrZones';
 import {
   CardioZones,
@@ -448,6 +448,12 @@ export class HealthKitSource implements HealthSource {
   async readRaw(
     now: number,
     windows: RawFetchWindows,
+    // Accepted for interface parity and deliberately ignored. This adapter reads
+    // heart rate ONCE in bulk for the whole window and slices it per session, so
+    // there are no per-session round trips to skip — the saving `reuse` exists for
+    // is specific to Health Connect, which has to read each session separately.
+    // Recomputing here is cheap and keeps one scale across the whole read.
+    _reuse?: ZoneReuse,
   ): Promise<RawHealthData | null> {
     const mod = loadModule();
     if (!mod) return null;
@@ -523,8 +529,8 @@ export class HealthKitSource implements HealthSource {
     // TDEE per day = Σactive + Σbasal in the same UTC day bucket.
     const totalEnergy = this.buildTotalEnergy(activeS, basalS, sources);
 
-    // Workouts + per-session HR zones.
-    const exercise = await this.buildExercise(
+    // Workouts + per-session HR zones, with the HRmax they were binned against.
+    const { records: exercise, hrMax } = await this.buildExercise(
       mod,
       exerciseFrom,
       to,
@@ -558,6 +564,7 @@ export class HealthKitSource implements HealthSource {
       weight,
       bodyFat,
       sources: [...sources],
+      hrMax,
       readAt: now,
     };
   }
@@ -601,7 +608,10 @@ export class HealthKitSource implements HealthSource {
     to: Date,
     now: number,
     sources: Set<string>,
-  ): Promise<ExerciseRecord[]> {
+    // The HRmax comes back alongside the records because zones are only
+    // comparable against the scale they were binned on — the caller stores it on
+    // the read (see RawHealthData.hrMax).
+  ): Promise<{ records: ExerciseRecord[]; hrMax: number | null }> {
     let workouts: readonly WorkoutSample[] = [];
     try {
       workouts =
@@ -611,9 +621,9 @@ export class HealthKitSource implements HealthSource {
         })) ?? [];
     } catch (err) {
       console.warn('[HealthKit] query workouts failed', err);
-      return [];
+      return { records: [], hrMax: null };
     }
-    if (workouts.length === 0) return [];
+    if (workouts.length === 0) return { records: [], hrMax: null };
 
     // Pull the heart-rate samples once across the whole window, then slice per
     // workout — one query instead of N, and a shared observed HRmax.
@@ -658,7 +668,7 @@ export class HealthKitSource implements HealthSource {
         source,
       });
     }
-    return out;
+    return { records: out, hrMax };
   }
 
   private async buildSleep(

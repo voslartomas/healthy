@@ -129,6 +129,72 @@ describe('readiness (non-clinical heuristic)', () => {
     expect(high!.pct).toBeGreaterThan(low!.pct);
     expect(high!.state).toBe('Recovered');
   });
+
+  /**
+   * Sitting ON the baseline is the RESTED state, so it scores high (88) rather
+   * than mid-range. The earlier revision centred the scale at 65, which marked an
+   * entirely ordinary day two-thirds of the way up the bar and read as a poor
+   * grade. See ADR-004.
+   */
+  it('scores a metric sitting exactly on its baseline as rested, not average', () => {
+    const r = readiness(
+      { value: 60, baseline: 60, delta: 0 },
+      { value: 52, baseline: 52, delta: 0 },
+      null,
+    );
+    const hrv = r!.contributors.find(c => c.key === 'hrv');
+    const rhr = r!.contributors.find(c => c.key === 'rhr');
+    expect(Math.round(hrv!.score)).toBe(88);
+    expect(Math.round(rhr!.score)).toBe(88);
+    expect(r!.state).toBe('Recovered');
+  });
+
+  it('scores slightly better than baseline above the baseline anchor', () => {
+    // The reported case: 51 bpm against a 52 baseline used to read 68/100.
+    const r = readiness(null, { value: 51, baseline: 52, delta: -1 }, null);
+    const rhr = r!.contributors.find(c => c.key === 'rhr');
+    expect(Math.round(rhr!.score)).toBe(92);
+  });
+
+  it('saturates at 100 once a metric is well past its baseline', () => {
+    const r = readiness(
+      { value: 69, baseline: 60, delta: 9 }, // +15%
+      { value: 48.9, baseline: 52, delta: -3.1 }, // -6%
+      null,
+    );
+    for (const cont of r!.contributors) {
+      expect(Math.round(cont.score)).toBe(100);
+    }
+    expect(r!.pct).toBe(100);
+  });
+
+  it('falls off asymmetrically — a worse-than-baseline day drops steeply', () => {
+    const at = readiness(null, { value: 52, baseline: 52, delta: 0 }, null);
+    const up2 = readiness(null, { value: 54, baseline: 52, delta: 2 }, null);
+    const up5 = readiness(null, { value: 57, baseline: 52, delta: 5 }, null);
+    const score = (r: ReturnType<typeof readiness>) =>
+      Math.round(r!.contributors[0].score);
+    // Elevated resting HR is the signal, so it must actually move the number...
+    expect(score(at)).toBe(88);
+    expect(score(up2)).toBe(71);
+    expect(score(up5)).toBe(46);
+    // ...but 2 bpm of ordinary variation must not read as "Strained".
+    expect(up2!.state).not.toBe('Strained');
+  });
+
+  it('does not baseline sleep — a habitual short sleeper is not "rested"', () => {
+    // Sleep is graded against the absolute 8h need. Six hours scores 75 whoever
+    // you are; self-calibrating it would score a chronic short sleeper as fully
+    // rested for their usual night.
+    const r = readiness(
+      { value: 60, baseline: 60, delta: 0 },
+      { value: 52, baseline: 52, delta: 0 },
+      { performancePct: 75, hours: 6 },
+    );
+    const sleep = r!.contributors.find(c => c.key === 'sleep');
+    expect(Math.round(sleep!.score)).toBe(75);
+    expect(sleep!.reference).toBe(8);
+  });
 });
 
 describe('trackedFromExercise', () => {
@@ -267,15 +333,17 @@ describe('trend series', () => {
     expect(s[0].value).toBe(7);
   });
 
-  it('scores sleep quality from length, deep and REM, only for staged nights', () => {
+  it('scores sleep quality from deep, REM, continuity and length, only for staged nights', () => {
     const sleep = [
       {
         start: dayStart - 8 * 3_600_000,
         end: dayStart - 3_600_000,
         durationMin: 420,
         source: FITBIT,
-        // 7h of 8h need = 87.5 (×0.5); deep 90/96 = 93.75 (×0.25);
-        // REM 120/105 clamps to 100 (×0.25) → 44 + 23 + 25 = 92.
+        // deep 90/96 = 93.75 (×0.35 = 32.8); REM 120/105.6 clamps to 100
+        // (×0.30 = 30); continuity 30min awake → 10 over the 20min tolerance,
+        // 10/80 = 87.5 (×0.15 = 13.1); length 420/480 = 87.5 (×0.20 = 17.5)
+        // → 93.
         stages: { deepMin: 90, remMin: 120, lightMin: 180, awakeMin: 30 },
       },
       {
@@ -288,7 +356,7 @@ describe('trend series', () => {
     ];
     const q = sleepQualitySeries(sleep);
     expect(q).toHaveLength(1);
-    expect(q[0].value).toBe(92);
+    expect(q[0].value).toBe(93);
   });
 });
 

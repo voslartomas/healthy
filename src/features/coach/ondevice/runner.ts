@@ -97,6 +97,25 @@ export async function runOnDevice(
   }
 
   const preamble = buildSystemPreamble(opts.system, opts.tools);
+  /**
+   * Forcing here is prompt-level, not API-enforced as it is for the cloud
+   * providers — the grammar admits both a tool call and a plain reply, so a small
+   * model can still ignore the instruction. Hence the swapped-in preamble plus one
+   * corrective retry below: between them, an explicit UI action reliably produces
+   * the tool call instead of a chat response.
+   */
+  const forced =
+    opts.toolChoice && opts.toolChoice !== 'auto'
+      ? opts.toolChoice.force
+      : null;
+  const forcedPreamble = forced
+    ? buildSystemPreamble(opts.system, opts.tools, forced)
+    : null;
+  /** True while the model still owes us the forced call. */
+  let mustCall = forcedPreamble != null;
+  /** Corrective retries left for a model that replies when it must call. */
+  let corrections = 1;
+
   const turns: GemmaTurn[] = opts.history.map(m => ({
     role: m.role,
     content: m.content,
@@ -105,7 +124,10 @@ export async function runOnDevice(
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
     if (opts.signal?.aborted) throw new CoachError('Cancelled.');
 
-    const prompt = renderGemmaPrompt(preamble, turns);
+    const prompt = renderGemmaPrompt(
+      mustCall && forcedPreamble ? forcedPreamble : preamble,
+      turns,
+    );
     let raw: string;
     try {
       raw = await engine.complete(prompt, {
@@ -119,7 +141,26 @@ export async function runOnDevice(
     }
 
     const action = parseAction(raw);
-    if (action.kind === 'reply') return action.reply.trim();
+    if (action.kind === 'reply') {
+      // Chatted when the turn was mandatory. Say so and let it try again — the
+      // user pressed an action button, so a reply is not an acceptable outcome.
+      if (mustCall && corrections > 0) {
+        corrections -= 1;
+        turns.push({ role: 'assistant', content: raw.trim() });
+        turns.push({
+          role: 'user',
+          content:
+            `That is not valid. You MUST respond with a single JSON object ` +
+            `{"tool": "${forced}", "args": {...}} for the message before this. Do it now.`,
+        });
+        continue;
+      }
+      return action.reply.trim();
+    }
+
+    // The obligation is discharged: later rounds are free, so the model can
+    // report the result in words instead of calling the tool over and over.
+    mustCall = false;
 
     // Record the model's tool call, run it, and feed the result back.
     turns.push({ role: 'assistant', content: raw.trim() });
