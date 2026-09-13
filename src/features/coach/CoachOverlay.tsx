@@ -9,6 +9,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { navigate, navigationRef } from '../../app/navigation/navigationRef';
+import { fabBottom } from '../../app/navigation/tabBarLayout';
 import { BRIEF_MAX_WIDTH, M } from '../../components/brief';
 import { Icon, IconName } from '../../components/Icon';
 import { useTheme } from '../../theme/theme';
@@ -87,7 +88,9 @@ export function CoachOverlay() {
       <View
         style={[
           styles.stack,
-          { bottom: insets.bottom + 78, right: gutter + 20 },
+          // Sit clear of the floating tab pill rather than of the screen edge,
+          // so the two can't drift apart when the pill's geometry changes.
+          { bottom: fabBottom(insets.bottom), right: gutter + 20 },
         ]}
       >
         {menuOpen

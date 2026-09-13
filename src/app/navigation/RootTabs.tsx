@@ -2,6 +2,7 @@ import {
   BottomTabBarProps,
   createBottomTabNavigator,
 } from '@react-navigation/bottom-tabs';
+import { BlurView } from 'expo-blur';
 import React from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -13,6 +14,7 @@ import { SettingsScreen } from '../../features/settings/SettingsScreen';
 import { StrengthHomeScreen } from '../../features/strength/StrengthHomeScreen';
 import { TrendsScreen } from '../../features/trends/TrendsScreen';
 import { useTheme } from '../../theme/theme';
+import { TAB_PILL, tabPillBottom } from './tabBarLayout';
 import {
   FuelRight,
   FuelTitle,
@@ -39,58 +41,99 @@ const TABS: Record<keyof RootTabParamList, { num: string; label: string }> = {
   Settings: { num: '05', label: 'SETUP' },
 };
 
-/** The flat, numbered v3 tab bar (no icons — just 01/02/03/04 + labels). */
+/**
+ * The floating glass tab pill.
+ *
+ * It keeps the design's numbered 01–05 identity but detaches from the bottom
+ * edge and frosts whatever scrolls beneath it. Being absolutely positioned, it
+ * takes no layout space — the screens run full height and their content passes
+ * under the pill, which is the whole point of the effect. `box-none` on the
+ * container means only the pill itself catches touches, not the full-width strip
+ * it sits in.
+ *
+ * Only iOS actually blurs. `expo-blur` on Android needs the content you want
+ * blurred wrapped in a `BlurTargetView` whose ref is handed to the BlurView —
+ * i.e. the whole navigator — and without that it silently renders a plain
+ * translucent view (verified on device: text behind the pill stayed sharp even
+ * at intensity 100). Restructuring the navigation tree around a blur target is
+ * not worth it for a tab bar, so Android gets a near-opaque tinted pill instead,
+ * which still reads as floating glass against its shadow and hairline.
+ *
+ * Hence the platform-dependent scrim: light on iOS so the native blur shows
+ * through, heavy on Android so the numerals never fight the content sliding
+ * underneath them.
+ */
 function BriefTabBar({ state, navigation }: BottomTabBarProps) {
   const t = useTheme();
   const c = t.colors;
   const insets = useSafeAreaInsets();
+  // `card` with alpha — the pill is the same surface as the cards it floats
+  // over, just see-through. Kept deliberately transparent so content visibly
+  // slides under it; the floor on how far that can go is legibility of the
+  // numerals, not taste.
+  //
+  // iOS can afford far more of it because the native blur softens whatever
+  // shows through; Android has no blur here (see below), so its scrim does all
+  // the separating on its own and has to be heavier.
+  const scrim = t.dark
+    ? Platform.select({
+        ios: 'rgba(19,28,43,0.40)',
+        default: 'rgba(19,28,43,0.82)',
+      })
+    : Platform.select({
+        ios: 'rgba(255,255,255,0.48)',
+        default: 'rgba(255,255,255,0.82)',
+      });
+
   return (
     <View
-      style={[
-        styles.bar,
-        {
-          backgroundColor: c.bg,
-          borderTopColor: c.hair,
-          // Sit closer to the home indicator than the full safe-area inset — the
-          // inset over-reserves for a tab bar. Trim it, but keep a floor so the
-          // labels never touch the indicator (or the edge on non-notched phones).
-          // Android reports little/no bottom inset on button-nav devices, so the
-          // labels sit almost on the edge — give them a larger floor there.
-          paddingBottom: Math.max(
-            insets.bottom - 16,
-            Platform.OS === 'android' ? 21 : 6,
-          ),
-        },
-      ]}
+      pointerEvents="box-none"
+      style={[styles.dock, { bottom: tabPillBottom(insets.bottom) }]}
     >
-      <View style={styles.barInner}>
-        {state.routes.map((route, i) => {
-          const focused = state.index === i;
-          const meta = TABS[route.name as keyof RootTabParamList];
-          const color = focused ? c.acc : c.fnt;
-          const onPress = () => {
-            const event = navigation.emit({
-              type: 'tabPress',
-              target: route.key,
-              canPreventDefault: true,
-            });
-            if (!focused && !event.defaultPrevented)
-              navigation.navigate(route.name);
-          };
-          return (
-            <Pressable
-              key={route.key}
-              onPress={onPress}
-              accessibilityRole="button"
-              accessibilityState={{ selected: focused }}
-              accessibilityLabel={meta.label}
-              style={styles.tab}
-            >
-              <Text style={M(700, 14, { color })}>{meta.num}</Text>
-              <Text style={M(700, 8.5, { ls: 1.4, color })}>{meta.label}</Text>
-            </Pressable>
-          );
-        })}
+      <View
+        style={[
+          styles.pill,
+          {
+            borderColor: c.hair,
+            shadowColor: c.scrim,
+          },
+        ]}
+      >
+        <BlurView
+          intensity={80}
+          tint={t.dark ? 'dark' : 'light'}
+          style={StyleSheet.absoluteFill}
+        />
+        <View style={[StyleSheet.absoluteFill, { backgroundColor: scrim }]} />
+        <View style={styles.row}>
+          {state.routes.map((route, i) => {
+            const focused = state.index === i;
+            const meta = TABS[route.name as keyof RootTabParamList];
+            const color = focused ? c.acc : c.fnt;
+            const onPress = () => {
+              const event = navigation.emit({
+                type: 'tabPress',
+                target: route.key,
+                canPreventDefault: true,
+              });
+              if (!focused && !event.defaultPrevented)
+                navigation.navigate(route.name);
+            };
+            return (
+              <Pressable
+                key={route.key}
+                onPress={onPress}
+                accessibilityRole="button"
+                accessibilityState={{ selected: focused }}
+                accessibilityLabel={meta.label}
+                style={styles.tab}
+              >
+                <Text style={M(700, 13, { color })}>{meta.num}</Text>
+                <Text style={M(700, 8, { ls: 1.2, color })}>{meta.label}</Text>
+              </Pressable>
+            );
+          })}
+        </View>
       </View>
     </View>
   );
@@ -133,20 +176,39 @@ export function RootTabs() {
 }
 
 const styles = StyleSheet.create({
-  bar: {
-    borderTopWidth: 1,
-    paddingTop: 9,
+  // Full-width strip the pill is centred in; `box-none` above keeps it from
+  // intercepting touches meant for the content behind it.
+  //
+  // The inset lives here as PADDING, not as a margin on the pill: a percentage
+  // width resolves against this container's content box, so padding insets the
+  // pill, whereas a margin on a `width: '100%'` box just pushes it wider than
+  // its container and it renders edge-to-edge.
+  dock: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
     alignItems: 'center',
+    paddingHorizontal: TAB_PILL.sideGutter,
   },
-  barInner: {
-    flexDirection: 'row',
+  pill: {
     width: '100%',
-    maxWidth: BRIEF_MAX_WIDTH,
+    maxWidth: BRIEF_MAX_WIDTH - TAB_PILL.sideGutter * 2,
+    height: TAB_PILL.height,
+    borderRadius: TAB_PILL.radius,
+    borderWidth: 1,
+    // Required for the blur to clip to the rounded corners.
+    overflow: 'hidden',
+    justifyContent: 'center',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.28,
+    shadowRadius: 20,
+    elevation: 10,
   },
+  row: { flexDirection: 'row', alignItems: 'center' },
   tab: {
     flex: 1,
     alignItems: 'center',
-    gap: 5,
+    gap: 3,
     paddingVertical: 2,
   },
 });
