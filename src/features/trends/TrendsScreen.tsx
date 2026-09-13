@@ -12,9 +12,17 @@ import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
 
 import { ScreenProps } from '../../app/navigation/types';
 import { BAND, BriefScreen, Card, InkBand, M, S } from '../../components/brief';
+import { Icon } from '../../components/Icon';
+import { useFoodTagsStore } from '../../state/useFoodTagsStore';
 import { useGoalHistoryStore } from '../../state/useGoalHistoryStore';
 import { goalWeekly, useGoalsStore } from '../../state/useGoalsStore';
+import {
+  buildHabitViews,
+  sleepOnsetsFromSnapshot,
+  useHabitsStore,
+} from '../../state/useHabitsStore';
 import { useHealthStore } from '../../state/useHealthStore';
+import { useNow } from '../../state/useNow';
 import {
   TREND_RANGES,
   TrendRange,
@@ -393,15 +401,43 @@ function Legend({
   );
 }
 
+/** Right-align real weeks in the fixed 12-column grid, padding the front with
+ * "no data" columns for weeks older than the window. */
+function padCells(cells: HistCell[], keyPrefix: string): HistCell[] {
+  const out: HistCell[] = [];
+  for (let i = 0; i < HIST_WEEKS - cells.length; i += 1) {
+    out.push({
+      key: `${keyPrefix}e${i}`,
+      noData: true,
+      frac: 0,
+      met: false,
+      current: false,
+    });
+  }
+  return out.concat(cells.slice(-HIST_WEEKS));
+}
+
 /**
- * Weekly-goal attainment over the last 12 covered weeks: a hit/close/missed grid
- * per goal (the in-progress week dashed), an overall hit-rate and a legend.
+ * Attainment over the last 12 weeks for everything the user committed to — the
+ * weekly goals and the daily habits — plus the row that only lights up when both
+ * held: the PERFECT WEEK.
+ *
+ * Goals and habits are two different clocks (a weekly total vs. a daily streak),
+ * but they share the frame: 12 right-aligned columns ending at the week in
+ * progress. That is what lets a single gold star sit above a column and mean
+ * "everything you asked of yourself, that week".
  */
 function GoalsHistorySection() {
   const c = useTheme().colors;
   const goals = useGoalsStore(s => s.goals);
   const persisted = useGoalHistoryStore(s => s.weeks);
   const liveHistory = useHealthStore(s => s.snapshot.weeklyHistory);
+  const habits = useHabitsStore(s => s.habits);
+  const habitDays = useHabitsStore(s => s.days);
+  const tagRows = useFoodTagsStore(s => s.rows);
+  const sleep = useHealthStore(s => s.snapshot.sleep);
+  // A grid of weeks only needs to notice the day turning over.
+  const now = useNow(5 * 60_000);
 
   const rows = useMemo<HistRow[]>(() => {
     const currentWeekStart =
@@ -429,27 +465,16 @@ function GoalsHistorySection() {
       const entries = [...byWeek.entries()]
         .sort((a, b) => a[0] - b[0])
         .slice(-HIST_WEEKS);
-      // Right-align the real weeks in a fixed 12-column grid; pad the front with
-      // "no data" columns for weeks older than our history window.
-      const cells: HistCell[] = [];
-      for (let i = 0; i < HIST_WEEKS - entries.length; i++) {
-        cells.push({
-          key: `e${i}`,
-          noData: true,
-          frac: 0,
-          met: false,
-          current: false,
-        });
-      }
-      for (const [weekStart, v] of entries) {
-        cells.push({
+      const cells = padCells(
+        entries.map(([weekStart, v]) => ({
           key: `w${weekStart}`,
           noData: false,
           frac: v.target > 0 ? Math.min(v.current / v.target, 1) : 0,
           met: v.current >= v.target,
           current: weekStart >= currentWeekStart,
-        });
-      }
+        })),
+        goal.id,
+      );
       const done = cells.filter(w => !w.noData && !w.current);
       return {
         id: goal.id,
@@ -461,22 +486,131 @@ function GoalsHistorySection() {
     });
   }, [goals, persisted, liveHistory]);
 
-  const totalHit = rows.reduce((s, r) => s + r.hit, 0);
-  const totalDone = rows.reduce((s, r) => s + r.completed, 0);
+  const habitRows = useMemo<HistRow[]>(() => {
+    const views = buildHabitViews({
+      habits,
+      days: habitDays,
+      tagRows,
+      sleepOnset: sleepOnsetsFromSnapshot(useHealthStore.getState().snapshot),
+      now,
+    });
+    return views.map(v => {
+      const cells = padCells(
+        v.weeks.map(w => ({
+          key: `w${w.weekStart}`,
+          noData: !w.covered,
+          // A week that held every judged day but one allowed slip is still a
+          // hit; "close" is a week that mostly held.
+          frac: w.judged > 0 ? w.held / w.judged : 0,
+          met: w.met,
+          current: w.current,
+        })),
+        v.habit.id,
+      );
+      const done = cells.filter(w => !w.noData && !w.current);
+      return {
+        id: v.habit.id,
+        name: v.habit.name.toUpperCase(),
+        cells,
+        hit: done.filter(w => w.met).length,
+        completed: done.length,
+      };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [habits, habitDays, tagRows, sleep, now]);
 
-  if (goals.length === 0) {
+  // A week is perfect when every row that HAS data for it was met. Weeks no row
+  // can speak for stay blank rather than claiming a win.
+  //
+  // Goal weeks are keyed to UTC Mondays and habit weeks to LOCAL ones, so the
+  // two can't be joined on the key — what aligns them is that both grids
+  // right-align on the week in progress. Goal rows only get that column once
+  // there is live health history to seed it from, so without it they are left
+  // out of the perfect-week reckoning rather than compared column-for-column
+  // against a different week.
+  const alignedGoalRows = liveHistory.length > 0 ? rows : [];
+  const allRows = [...rows, ...habitRows];
+  const perfectRows = [...alignedGoalRows, ...habitRows];
+  const perfect = Array.from({ length: HIST_WEEKS }, (_, i) => {
+    const judged = perfectRows
+      .map(r => r.cells[i])
+      .filter(cell => !cell.noData);
+    if (judged.length === 0) return null;
+    if (judged.some(cell => cell.current)) return null;
+    return judged.every(cell => cell.met);
+  });
+  const perfectHit = perfect.filter(p => p === true).length;
+  const perfectDone = perfect.filter(p => p != null).length;
+
+  const totalHit = allRows.reduce((s, r) => s + r.hit, 0);
+  const totalDone = allRows.reduce((s, r) => s + r.completed, 0);
+
+  if (goals.length === 0 && habitRows.length === 0) {
     return (
-      <Card title="Weekly goals" style={styles.section}>
+      <Card title="Goals & habits" style={styles.section}>
         <Text style={[S(600, 13, { color: c.mut }), styles.emptyGoals]}>
-          Define goals on Today to track weekly hit-rate here.
+          Define goals and habits on Today to track your weekly hit-rate here.
         </Text>
       </Card>
     );
   }
 
+  const renderRow = (r: HistRow) => (
+    <View key={r.id}>
+      <View style={styles.histHead}>
+        <Text
+          numberOfLines={1}
+          style={[M(700, 9.5, { ls: 0.6, color: c.mut }), styles.histName]}
+        >
+          {r.name}
+        </Text>
+        <Text style={M(700, 9.5, { color: c.fnt })}>
+          {r.hit}/{r.completed}
+        </Text>
+      </View>
+      <View style={styles.histBars}>
+        {r.cells.map((w, i) => {
+          if (w.noData) {
+            return (
+              <View
+                key={w.key}
+                style={[
+                  styles.histBar,
+                  styles.histBarEmpty,
+                  { borderColor: c.hair },
+                ]}
+              />
+            );
+          }
+          const color = w.met ? c.grn : w.frac >= 0.8 ? c.acc : c.track;
+          return (
+            <View
+              key={w.key}
+              style={[
+                styles.histBar,
+                { backgroundColor: color },
+                // A perfect week outranks its own row's colour — the whole
+                // column goes gold so the run reads at a glance.
+                perfect[i] === true && {
+                  backgroundColor: c.gold,
+                },
+                w.current && {
+                  opacity: 0.45,
+                  borderWidth: 1,
+                  borderColor: c.fnt,
+                  borderStyle: 'dashed',
+                },
+              ]}
+            />
+          );
+        })}
+      </View>
+    </View>
+  );
+
   return (
     <Card
-      title="Weekly goals · 12 weeks"
+      title="Goals & habits · 12 weeks"
       style={styles.section}
       right={
         <Text style={M(700, 10.5, { color: c.grn })}>
@@ -484,64 +618,58 @@ function GoalsHistorySection() {
         </Text>
       }
     >
-      <View style={styles.histList}>
-        {rows.map(r => (
-          <View key={r.id}>
-            <View style={styles.histHead}>
-              <Text
-                numberOfLines={1}
-                style={[
-                  M(700, 9.5, { ls: 0.6, color: c.mut }),
-                  styles.histName,
-                ]}
-              >
-                {r.name}
-              </Text>
-              <Text style={M(700, 9.5, { color: c.fnt })}>
-                {r.hit}/{r.completed}
-              </Text>
-            </View>
-            <View style={styles.histBars}>
-              {r.cells.map(w => {
-                if (w.noData) {
-                  return (
-                    <View
-                      key={w.key}
-                      style={[
-                        styles.histBar,
-                        styles.histBarEmpty,
-                        { borderColor: c.hair },
-                      ]}
-                    />
-                  );
-                }
-                const color = w.met ? c.grn : w.frac >= 0.8 ? c.acc : c.track;
-                return (
-                  <View
-                    key={w.key}
-                    style={[
-                      styles.histBar,
-                      { backgroundColor: color },
-                      w.current && {
-                        opacity: 0.45,
-                        borderWidth: 1,
-                        borderColor: c.fnt,
-                        borderStyle: 'dashed',
-                      },
-                    ]}
-                  />
-                );
-              })}
-            </View>
+      {/* Stars sit above the grid, one per column, so a perfect week is visible
+          before you read a single row. */}
+      <View style={styles.starRow}>
+        {perfect.map((p, i) => (
+          <View key={i} style={styles.starCell}>
+            {p === true ? <Icon name="star" size={12} color={c.gold} /> : null}
           </View>
         ))}
       </View>
+
+      <View style={styles.histList}>{rows.map(renderRow)}</View>
+
+      {habitRows.length > 0 ? (
+        <View style={[styles.habitList, { borderTopColor: c.hair }]}>
+          {habitRows.map(renderRow)}
+          <View>
+            <View style={styles.histHead}>
+              <Text
+                style={[
+                  M(700, 9.5, { ls: 0.6, color: c.ink }),
+                  styles.histName,
+                ]}
+              >
+                PERFECT WEEK
+              </Text>
+              <Text style={M(700, 9.5, { color: c.grn })}>
+                {perfectHit}/{perfectDone}
+              </Text>
+            </View>
+            <View style={styles.histBars}>
+              {perfect.map((p, i) => (
+                <View
+                  key={i}
+                  style={[
+                    styles.histBar,
+                    p == null
+                      ? [styles.histBarEmpty, { borderColor: c.hair }]
+                      : { backgroundColor: p ? c.gold : c.track },
+                  ]}
+                />
+              ))}
+            </View>
+          </View>
+        </View>
+      ) : null}
 
       <View style={styles.histAxis}>
         <Text style={M(600, 9, { ls: 1, color: c.fnt })}>12 WKS AGO</Text>
         <Text style={M(600, 9, { ls: 1, color: c.fnt })}>THIS WK</Text>
       </View>
       <View style={styles.legendRow}>
+        <Legend color={c.gold} label="PERFECT WEEK" />
         <Legend color={c.grn} label="HIT" />
         <Legend color={c.acc} label="CLOSE" />
         <Legend color={c.track} label="MISSED" />
@@ -727,7 +855,10 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
   },
   emptyGoals: { marginTop: 12 },
-  histList: { gap: 9, marginTop: 14 },
+  histList: { gap: 9, marginTop: 10 },
+  habitList: { gap: 9, marginTop: 14, paddingTop: 12, borderTopWidth: 1 },
+  starRow: { flexDirection: 'row', gap: 3, marginTop: 14, height: 14 },
+  starCell: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   histHead: {
     flexDirection: 'row',
     justifyContent: 'space-between',

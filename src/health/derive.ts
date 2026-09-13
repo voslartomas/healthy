@@ -17,6 +17,7 @@ import {
   RawHealthData,
   ReadinessContribution,
   ReadinessMetric,
+  SleepNight,
   SleepRecord,
   SleepStages,
   StepsRecord,
@@ -1082,6 +1083,32 @@ function mainSleepByNight(
 const SLEEP_NEED_MIN = 8 * 60;
 
 /**
+ * Every night's sleep ONSET in the read window, oldest first.
+ *
+ * The sleep habits ("asleep before 23:00") judge a day by when the night
+ * started, and the snapshot's `sleep` only carries the latest one. Deriving the
+ * whole window here means a habit created today can show — and score — the weeks
+ * of nights the platform already holds, rather than accruing history one night at
+ * a time from the day it was made.
+ *
+ * A night is keyed to the day it BEGAN on, not the morning it ended: your
+ * bedtime on Sunday is Sunday's. `nightIndexToTime` labels a night by the
+ * morning, so step back one local day (via noon, which is safely inside the
+ * previous day even across a DST shift).
+ */
+function sleepNightsFrom(
+  sleep: SleepRecord[],
+  agg?: { night: number; minutes: number }[] | null,
+): SleepNight[] {
+  return [...mainSleepByNight(sleep, agg).entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([night, record]) => ({
+      day: startOfLocalDay(nightIndexToTime(night) - HALF_DAY_MS),
+      onset: record.start,
+    }));
+}
+
+/**
  * What a metric sitting EXACTLY on the user's own 30-day baseline scores.
  *
  * Anchored high on purpose. The previous revision centred the scale at 65, so a
@@ -1756,6 +1783,7 @@ export function deriveSnapshot(
         performancePct: Math.round(
           clamp((lastSleepSession.durationMin / SLEEP_NEED_MIN) * 100),
         ),
+        lastSessionStart: lastSleepSession.start,
         lastSessionEnd: lastSleepSession.end,
         stages: lastSleepSession.stages,
       }
@@ -1803,6 +1831,7 @@ export function deriveSnapshot(
     weeklyHistory: weeklyGoalHistory(raw, now),
     dailyEnergy: dailyEnergySeries(raw, now),
     trends: buildTrendSeries(raw),
+    sleepNights: sleepNightsFrom(raw.sleep, raw.nightlySleepAgg),
     tracked: trackedFromExercise(
       raw.exercise,
       raw.steps,

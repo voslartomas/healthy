@@ -136,6 +136,33 @@ async function ensureSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       health_id       TEXT,
       created_at      INTEGER NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS food_tags (
+      id        TEXT PRIMARY KEY NOT NULL,
+      entry_id  TEXT,
+      day_start INTEGER NOT NULL,
+      name      TEXT NOT NULL,
+      tags      TEXT NOT NULL,
+      logged_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS habits (
+      id          TEXT PRIMARY KEY NOT NULL,
+      name        TEXT NOT NULL,
+      type        TEXT NOT NULL DEFAULT 'other',
+      auto        INTEGER NOT NULL DEFAULT 0,
+      allowance   TEXT NOT NULL DEFAULT 'never',
+      tag         TEXT,
+      before_time TEXT,
+      sort_order  INTEGER NOT NULL DEFAULT 0,
+      created_at  INTEGER NOT NULL,
+      updated_at  INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS habit_days (
+      habit_id   TEXT NOT NULL,
+      day_start  INTEGER NOT NULL,
+      status     TEXT NOT NULL,
+      updated_at INTEGER NOT NULL,
+      PRIMARY KEY (habit_id, day_start)
+    );
     CREATE TABLE IF NOT EXISTS strength_session_sets (
       id           TEXT PRIMARY KEY NOT NULL,
       session_id   TEXT NOT NULL,
@@ -188,6 +215,17 @@ async function runMigrations(db: SQLite.SQLiteDatabase): Promise<void> {
     // it re-accrues from the live native reads (covered weeks only).
     await db.execAsync('DELETE FROM goal_weeks;');
     await db.execAsync('PRAGMA user_version = 3;');
+  }
+  if (version < 4) {
+    // v4: habits changed which day owns a night. A sleep habit used to credit a
+    // night to the MORNING it ended on; it now credits it to the EVENING it
+    // began on ("your bedtime on Sunday is Sunday's"), which shifts every
+    // derived verdict by a day. The rows in `habit_days` were written under the
+    // old rule, so drop them — the sleep ones re-accrue from the read window on
+    // the next refresh, and a manual check on the wrong day is worse than none.
+    // Safe to wipe wholesale: the table shipped in the same unreleased change.
+    await db.execAsync('DELETE FROM habit_days;');
+    await db.execAsync('PRAGMA user_version = 4;');
   }
 }
 

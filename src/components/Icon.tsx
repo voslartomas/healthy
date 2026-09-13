@@ -43,7 +43,8 @@ export type IconName =
   | 'bars'
   | 'droplet'
   | 'flame'
-  | 'sparkles';
+  | 'sparkles'
+  | 'star';
 
 interface IconProps {
   name: IconName;
@@ -60,6 +61,7 @@ const SOLID: ReadonlySet<IconName> = new Set([
   'appleHealth',
   'claude',
   'heart',
+  'star',
 ]);
 
 export function Icon({
@@ -291,6 +293,14 @@ function renderIcon(
           <Path d="M4 17v2" {...s} />
           <Path d="M6 18H4" {...s} />
         </>
+      );
+    case 'star':
+      // The perfect-week marker: a solid five-point star.
+      return (
+        <Path
+          d="M12 2l2.9 6.3 6.9.8-5.1 4.7 1.4 6.8L12 17.3 5.9 20.6l1.4-6.8L2.2 9.1l6.9-.8z"
+          fill={color}
+        />
       );
     case 'googleHealth':
       return <Path d="M3 12h4l2 5 4-12 2 7h6" {...s} />;

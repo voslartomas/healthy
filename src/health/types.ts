@@ -188,6 +188,10 @@ export interface SleepMetric {
   hours: number;
   /** Duration as a % of the 8h sleep-need target, clamped 0–100. */
   performancePct: number;
+  /** When the last session STARTED — i.e. the night's sleep onset. Read by the
+   * "asleep before 23:00" habit; optional because snapshots cached by earlier
+   * builds have no such field. */
+  lastSessionStart?: number;
   lastSessionEnd: number;
   /** Last session's stage breakdown (minutes); null when no hypnogram. */
   stages: SleepStages | null;
@@ -264,6 +268,19 @@ export interface TrendSeries {
   weight: TrendPoint[];
   /** Body fat (%), one point per measured day, oldest first. */
   bodyFat: TrendPoint[];
+}
+
+/**
+ * One night's sleep onset, keyed to the local day it belongs to.
+ *
+ * Nights are bucketed noon→noon and labelled by the morning they END on (see
+ * derive.nightIndex), so `day` is the local midnight of the morning you woke up
+ * — the day a "asleep before 23:00" habit is asking about.
+ */
+export interface SleepNight {
+  day: number;
+  /** When the night's sleep started (epoch ms). */
+  onset: number;
 }
 
 /**
@@ -422,6 +439,14 @@ export interface HealthSnapshot {
   dailyEnergy: DailyEnergy[];
   /** Per-metric daily history (~30 days) for the Trends screen. */
   trends: TrendSeries;
+  /**
+   * Every night in the read window with its sleep onset, oldest first.
+   *
+   * Unlike {@link sleep}, which is only the latest session, this reaches back as
+   * far as the read does — which is what lets a newly created "asleep before
+   * 23:00" habit show real history from day one instead of starting empty.
+   */
+  sleepNights: SleepNight[];
   /** Auto-tracked weekly totals per goal source, from real activity. */
   tracked: Partial<Record<GoalSourceKey, number>>;
   /** Distinct writing apps, for the "Synced via …" line. */

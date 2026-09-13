@@ -21,7 +21,7 @@ import Svg, { Path } from 'react-native-svg';
 
 import { ScreenProps } from '../../app/navigation/types';
 import { BAND, M, S } from '../../components/brief';
-import { Icon, IconName } from '../../components/Icon';
+import { Icon } from '../../components/Icon';
 import {
   appendMessage,
   createConversation,
@@ -36,6 +36,7 @@ import {
 import { useTheme } from '../../theme/theme';
 import { CoachError, CoachMessage, runCoach, ToolExecutor } from './aiClient';
 import { CoachMarkdown } from './CoachMarkdown';
+import { CoachIntent, COACH_INTENTS, coachIntentByKey } from './intents';
 import { ConversationDrawer } from './ConversationDrawer';
 import { buildDataContext } from './dataContext';
 import { makeFoodToolset } from './foodTool';
@@ -48,46 +49,6 @@ import { useVoiceInput, VoiceState } from './useVoiceInput';
 function formatMs(ms: number): string {
   return ms < 1000 ? `${ms} MS` : `${(ms / 1000).toFixed(1)} S`;
 }
-
-/**
- * An action the user can pick BEFORE typing, which obliges the model to call
- * `tool` for that message instead of deciding whether to.
- *
- * The coach is otherwise left to read intent from the wording, and it genuinely
- * cannot do that reliably: "two eggs and toast" is as much a question as a request
- * to log, so the model often just replied and nothing was written. Naming the
- * action in the UI removes the guess — the model's only job is to fill in the
- * arguments (estimating kcal and macros) from what the user describes.
- */
-interface CoachIntent {
-  key: string;
-  /** Chip label. */
-  label: string;
-  /** Icon name from `../../components/Icon`. */
-  icon: IconName;
-  /** The tool the model is obliged to call. */
-  tool: string;
-  /** Composer placeholder while this intent is armed — it should tell the user
-   * what to describe, since they no longer have to phrase it as a command. */
-  placeholder: string;
-}
-
-const COACH_INTENTS: CoachIntent[] = [
-  {
-    key: 'food',
-    label: 'Log food',
-    icon: 'nutrition',
-    tool: 'log_food',
-    placeholder: 'Describe what you ate…',
-  },
-  {
-    key: 'workout',
-    label: 'New workout',
-    icon: 'strength',
-    tool: 'create_workout',
-    placeholder: 'Which muscles, how many exercises…',
-  },
-];
 
 /** Build the coach system prompt, grounding it in the user's live health data
  * (recovery, body, sleep, activity, nutrition, goals) so it can both log food
@@ -111,7 +72,7 @@ function buildSystemPrompt(): string {
 /** AI coach chat, presented as a native modal screen. A live, provider-backed
  * conversation that logs food to Health Connect via tool calls. Provider, model
  * and key come from Setup. */
-export function CoachScreen({ navigation }: ScreenProps) {
+export function CoachScreen({ navigation, route }: ScreenProps) {
   const t = useTheme();
   const c = t.colors;
   const insets = useSafeAreaInsets();
@@ -131,8 +92,12 @@ export function CoachScreen({ navigation }: ScreenProps) {
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
-  /** The action the next message is for, or null for open conversation. */
-  const [intent, setIntent] = useState<CoachIntent | null>(null);
+  /** The action the next message is for, or null for open conversation.
+   * Seeded from the route param so opening the chat from the FAB's long-press
+   * menu ("LOG FOOD" / "NEW WORKOUT") arrives with that chip already armed. */
+  const [intent, setIntent] = useState<CoachIntent | null>(() =>
+    coachIntentByKey(route?.params?.intent),
+  );
   const scrollRef = useRef<ScrollView>(null);
 
   // Voice input: the transcript is appended to whatever's typed so the user can

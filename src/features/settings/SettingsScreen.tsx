@@ -452,7 +452,11 @@ function VoiceModelCard() {
   );
 }
 
-/** The v3 pill toggle (ink track when on, accent knob). */
+/** The v4 pill toggle: the track fills with the accent when on and the knob
+ * flips to `inv`, so "connected" reads as the app's one affirmative colour in
+ * both schemes. (v3 filled the track with `ink` and tinted the knob accent —
+ * in dark mode that put a near-white track behind a blue knob, which read as
+ * off.) */
 function Toggle({
   on,
   onToggle,
@@ -473,13 +477,13 @@ function Toggle({
       style={[
         styles.toggle,
         {
-          borderColor: on ? c.ink : c.hair,
-          backgroundColor: on ? c.ink : 'transparent',
+          borderColor: on ? c.acc : c.hair,
+          backgroundColor: on ? c.acc : 'transparent',
           justifyContent: on ? 'flex-end' : 'flex-start',
         },
       ]}
     >
-      <View style={[styles.knob, { backgroundColor: on ? c.acc : c.fnt }]} />
+      <View style={[styles.knob, { backgroundColor: on ? c.inv : c.fnt }]} />
     </Pressable>
   );
 }

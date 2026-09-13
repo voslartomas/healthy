@@ -14,7 +14,13 @@ import type { ZoneReuse } from './HealthSource';
 import { HealthSnapshot, RawHealthData } from './types';
 
 export * from './types';
-export { deriveSnapshot, exerciseKey, mergeRaw, pruneRaw } from './derive';
+export {
+  deriveSnapshot,
+  exerciseKey,
+  mergeRaw,
+  pruneRaw,
+  startOfLocalDay,
+} from './derive';
 export type { ZoneReuse } from './HealthSource';
 export { FULL_METRICS_DAYS, FULL_WINDOWS, LIGHT_WINDOWS } from './fetchWindows';
 export type {
@@ -62,6 +68,7 @@ export const EMPTY_SNAPSHOT: HealthSnapshot = {
     weight: [],
     bodyFat: [],
   },
+  sleepNights: [],
   tracked: {},
   sources: [],
   readAt: 0,

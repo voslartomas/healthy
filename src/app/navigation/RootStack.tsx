@@ -6,6 +6,7 @@ import { CardioScreen } from '../../features/cardio/CardioScreen';
 import { CoachOverlay } from '../../features/coach/CoachOverlay';
 import { CoachScreen } from '../../features/coach/CoachScreen';
 import { GoalDefineScreen } from '../../features/goals/GoalDefineScreen';
+import { HabitDefineScreen } from '../../features/habits/HabitDefineScreen';
 import { FoodsLibraryScreen } from '../../features/nutrition/FoodsLibraryScreen';
 import { RecoveryScreen } from '../../features/recovery/RecoveryScreen';
 import { SleepScreen } from '../../features/sleep/SleepScreen';
@@ -121,6 +122,15 @@ export function RootStack() {
           options={({ navigation }) => ({
             presentation: 'modal',
             title: 'Define goal',
+            headerRight: () => <HeaderClose onPress={navigation.goBack} />,
+          })}
+        />
+        <Stack.Screen
+          name="HabitDefine"
+          component={asScreen(HabitDefineScreen)}
+          options={({ navigation, route }) => ({
+            presentation: 'modal',
+            title: route.params?.habitId ? 'Edit habit' : 'New habit',
             headerRight: () => <HeaderClose onPress={navigation.goBack} />,
           })}
         />

@@ -30,6 +30,7 @@ import {
 import { useHealthStore } from '../../state/useHealthStore';
 import { useTheme } from '../../theme/theme';
 import { WeeklyGoalsCard } from '../goals/WeeklyGoalsCard';
+import { HabitsCard } from '../habits/HabitsCard';
 import { useDailyBriefStore } from './useDailyBriefStore';
 
 /** Decimal hours → "7:42". */
@@ -472,6 +473,9 @@ export function DashboardScreen({ navigation }: ScreenProps) {
 
       {/* ── Week ─────────────────────────────────────────────────────── */}
       <WeeklyGoalsCard navigation={navigation} />
+
+      {/* ── Habits ───────────────────────────────────────────────────── */}
+      <HabitsCard navigation={navigation} />
 
       <Text
         style={[M(600, 9.5, { ls: 1, upper: true, color: c.fnt }), styles.sync]}

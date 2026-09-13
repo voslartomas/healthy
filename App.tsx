@@ -24,8 +24,10 @@ import { initCalorieGoals } from './src/state/calorieGoalsService';
 import { initCommonFoods } from './src/state/commonFoodsService';
 import { initConversations } from './src/state/conversationsService';
 import { initDailyEnergy } from './src/state/dailyEnergyService';
+import { initFoodTags } from './src/state/foodTagsService';
 import { initGoalHistory } from './src/state/goalHistoryService';
 import { initGoals } from './src/state/goalsService';
+import { initHabits, recordSleepOutcomes } from './src/state/habitsService';
 import { initProfile } from './src/state/profileService';
 import { initStrength } from './src/state/strengthService';
 import { useAppStore } from './src/state/useAppStore';
@@ -112,6 +114,12 @@ export default function App() {
     initDailyEnergy().catch(err =>
       console.warn('Failed to load daily energy', err),
     );
+    initFoodTags().catch(err => console.warn('Failed to load food tags', err));
+    // Habits must be loaded before `recordSleepOutcomes`, which freezes the
+    // verdict of every night the snapshot can still see.
+    initHabits()
+      .then(() => recordSleepOutcomes())
+      .catch(err => console.warn('Failed to load habits', err));
     initGoalHistory().catch(err =>
       console.warn('Failed to load goal history', err),
     );
@@ -123,6 +131,26 @@ export default function App() {
     // Mirror the active workout into an ongoing Android notification (elapsed
     // chronometer + sets done/remaining). No-op off Android.
     initWorkoutNotifications();
+  }, []);
+
+  // Freeze the sleep habits' verdicts whenever the set of readable nights
+  // changes — a new night, or a deeper read that reached further back. A night's
+  // onset is only in the snapshot while the platform's window still covers it,
+  // so a verdict we don't write down while we can see it is lost to the 12-week
+  // grid for good. Keying on the nights themselves keeps this to the reads that
+  // actually brought something new.
+  useEffect(() => {
+    const signature = (state: ReturnType<typeof useHealthStore.getState>) =>
+      `${state.snapshot.sleepNights?.length ?? 0}:${state.snapshot.sleep?.lastSessionStart ?? ''}`;
+    let last = signature(useHealthStore.getState());
+    return useHealthStore.subscribe(state => {
+      const next = signature(state);
+      if (next === last) return;
+      last = next;
+      void recordSleepOutcomes().catch(err =>
+        console.warn('Failed to record sleep habits', err),
+      );
+    });
   }, []);
 
   // Refresh when the app returns to the foreground so today's data + goals are

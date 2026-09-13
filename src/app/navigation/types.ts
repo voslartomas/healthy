@@ -17,7 +17,8 @@ export type ScreenName =
   | 'ExercisePicker'
   | 'WorkoutRun'
   | 'WorkoutSummary'
-  | 'WorkoutsLibrary';
+  | 'WorkoutsLibrary'
+  | 'HabitDefine';
 
 /**
  * Minimal navigation surface the screens depend on. React Navigation's own
@@ -25,7 +26,7 @@ export type ScreenName =
  * mock — screens never need the full typed param list.
  */
 export interface AppNav {
-  navigate: (screen: ScreenName) => void;
+  navigate: (screen: ScreenName, params?: ScreenParams) => void;
   goBack: () => void;
   /** Replace the current screen in the stack (used to swap the runner for the
    * summary so "Done" returns to the list, not the finished run). The real
@@ -44,16 +45,31 @@ export interface AppNav {
   ) => () => void;
 }
 
+/** Route params a screen may be pushed with. Deliberately narrow — the two
+ * screens that take any are the coach (pre-armed action, from the FAB's
+ * long-press menu) and the habit sheet (the habit being edited). */
+export interface ScreenParams {
+  /** Coach: pre-select an action chip, so the FAB menu's "LOG FOOD" / "NEW
+   * WORKOUT" lands in the chat with that action already armed. */
+  intent?: string;
+  /** HabitDefine: the habit to edit; omitted when creating a new one. */
+  habitId?: string;
+}
+
 export interface ScreenProps {
   navigation: AppNav;
+  /** Present when the navigator pushed the screen with params; absent in tests
+   * that render a screen bare. */
+  route?: { params?: ScreenParams };
 }
 
 /**
  * Adapt a screen written against the minimal {@link ScreenProps} to the
  * component type React Navigation expects. At runtime the navigator injects a
  * full `navigation` object (a structural superset of {@link AppNav}) plus
- * `route`, which the screen ignores. This keeps screens testable with a tiny
- * navigation mock while satisfying the navigator's generics.
+ * `route`, both of which {@link ScreenProps} types minimally. This keeps screens
+ * testable with a tiny navigation mock while satisfying the navigator's
+ * generics.
  */
 export function asScreen(
   C: React.ComponentType<ScreenProps>,
@@ -74,9 +90,10 @@ export type RootStackParamList = {
   WorkoutSummary: undefined;
   WorkoutsLibrary: undefined;
   /** Native modal screens. */
-  Coach: undefined;
+  Coach: ScreenParams | undefined;
   DefineGoal: undefined;
   FoodsLibrary: undefined;
+  HabitDefine: ScreenParams | undefined;
 };
 
 /** The five numbered tabs of the v3 brief (Coach moved to a global FAB). */

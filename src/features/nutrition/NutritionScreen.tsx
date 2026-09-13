@@ -32,6 +32,9 @@ import {
   NewCommonFood,
   removeCommonFood,
 } from '../../state/commonFoodsService';
+import { FoodTagRow } from '../../db/foodTagsRepository';
+import { FOOD_TAGS, FoodTagKey, foodTagsLabel } from '../../state/foodTags';
+import { tagLoggedFood, untagFood } from '../../state/foodTagsService';
 import { ScaledEntry } from '../../state/portion';
 import {
   activeCalorieGoal,
@@ -41,6 +44,8 @@ import {
   CommonFood,
   useCommonFoodsStore,
 } from '../../state/useCommonFoodsStore';
+import { tagsForEntry, useFoodTagsStore } from '../../state/useFoodTagsStore';
+import { useHabitsStore } from '../../state/useHabitsStore';
 import { useHealthStore } from '../../state/useHealthStore';
 import { useTheme } from '../../theme/theme';
 import { MealLogger } from './MealLogger';
@@ -68,14 +73,22 @@ function titleCase(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 }
 
-function buildMeals(live: NutritionSummary | null) {
+function buildMeals(live: NutritionSummary | null, tagRows: FoodTagRow[]) {
   return live
-    ? live.meals.map(m => ({
-        id: m.id ?? null,
-        name: m.name,
-        tag: (m.mealType ? titleCase(m.mealType) : 'Logged').toUpperCase(),
-        kcal: m.kcal,
-      }))
+    ? live.meals.map(m => {
+        const tags = tagsForEntry(tagRows, m.id);
+        return {
+          id: m.id ?? null,
+          name: m.name,
+          // A tagged entry shows what it was tagged as instead of its meal slot
+          // — "JUNK FOOD" is the fact the user chose to record about it.
+          tag: tags.length
+            ? foodTagsLabel(tags)
+            : (m.mealType ? titleCase(m.mealType) : 'Logged').toUpperCase(),
+          tagged: tags.length > 0,
+          kcal: m.kcal,
+        };
+      })
     : [];
 }
 
@@ -97,6 +110,7 @@ export function NutritionScreen({ navigation }: ScreenProps) {
   const t = useTheme();
   const c = t.colors;
   const snap = useHealthStore(s => s.snapshot);
+  const logFoodEntry = useHealthStore(s => s.logFoodEntry);
   const logFood = useHealthStore(s => s.logFood);
   const removeFoodEntry = useHealthStore(s => s.removeFoodEntry);
   const commonFoods = useCommonFoodsStore(s => s.foods);
@@ -106,7 +120,9 @@ export function NutritionScreen({ navigation }: ScreenProps) {
   const burned = snap.energyBurnedToday;
   const hasNet = eaten != null || burned > 0;
   const net = (eaten ?? 0) - burned;
-  const meals = buildMeals(snap.nutrition);
+  const tagRows = useFoodTagsStore(s => s.rows);
+  const meals = buildMeals(snap.nutrition, tagRows);
+  const habits = useHabitsStore(s => s.habits);
 
   // The active calorie goal drives the hero + target quad here; setting/editing
   // goals lives on the Setup tab (CalorieGoalSection).
@@ -136,6 +152,9 @@ export function NutritionScreen({ navigation }: ScreenProps) {
   const [protein, setProtein] = React.useState('');
   const [carbs, setCarbs] = React.useState('');
   const [fat, setFat] = React.useState('');
+  /** Tags on the entry being typed — junk / alcohol / sweets. The food habits
+   * read these, so tagging is how "no junk food" ever breaks. */
+  const [tags, setTags] = React.useState<FoodTagKey[]>([]);
   const [busy, setBusy] = React.useState(false);
   const [commonBusy, setCommonBusy] = React.useState(false);
   // The common food whose portion is being chosen for a quick log (null = none).
@@ -253,14 +272,24 @@ export function NutritionScreen({ navigation }: ScreenProps) {
     if (cb != null) entry.carbsG = cb;
     if (f != null) entry.fatG = f;
     setBusy(true);
-    const ok = await logFood(entry);
+    // Go through logFoodEntry (not logFood) so we get the platform's record id
+    // back and can hang the tags off that exact entry.
+    const res = await logFoodEntry(entry);
+    if (res.ok && tags.length > 0) {
+      await tagLoggedFood({
+        name: entry.name,
+        tags,
+        entryId: res.name ?? null,
+      }).catch(err => console.warn('Failed to save food tags', err));
+    }
     setBusy(false);
-    if (ok) {
+    if (res.ok) {
       setName('');
       setKcal('');
       setProtein('');
       setCarbs('');
       setFat('');
+      setTags([]);
       setAdding(false);
     } else {
       Alert.alert(
@@ -301,6 +330,13 @@ export function NutritionScreen({ navigation }: ScreenProps) {
           onPress: async () => {
             setRemovingId(id);
             const ok = await removeFoodEntry(id);
+            // Drop the tags with the entry, so a deleted junk meal stops
+            // breaking the day's food habits.
+            if (ok) {
+              await untagFood(id).catch(err =>
+                console.warn('Failed to clear food tags', err),
+              );
+            }
             setRemovingId(null);
             if (!ok) {
               Alert.alert(
@@ -340,6 +376,23 @@ export function NutritionScreen({ navigation }: ScreenProps) {
     });
   };
 
+  // Naming the habits a tag is about to break is the whole point of the note —
+  // it turns an abstract label into a consequence the user can weigh.
+  const breaks = React.useMemo(
+    () =>
+      tags.length === 0
+        ? []
+        : habits
+            .filter(
+              h => h.type === 'food' && h.auto && h.tag && tags.includes(h.tag),
+            )
+            .map(h => h.name.toUpperCase()),
+    [habits, tags],
+  );
+  const tagNote = breaks.length
+    ? `THIS BREAKS TODAY FOR: ${breaks.join(' · ')}`
+    : 'TAG IT IF IT WAS JUNK, ALCOHOL OR SWEETS — YOUR FOOD HABITS READ THESE';
+
   const inputStyle = {
     ...S(600, 14, { color: c.ink }),
     borderWidth: 1,
@@ -363,7 +416,12 @@ export function NutritionScreen({ navigation }: ScreenProps) {
       </InkBand>
 
       {/* ── Balance ───────────────────────────────────────────────── */}
-      <View style={[styles.energyCard, { backgroundColor: c.card, borderColor: c.hair }]}>
+      <View
+        style={[
+          styles.energyCard,
+          { backgroundColor: c.card, borderColor: c.hair },
+        ]}
+      >
         <View style={styles.energyHead}>
           <Text style={cardTitleStyle(c.ink)}>Energy</Text>
         </View>
@@ -439,7 +497,9 @@ export function NutritionScreen({ navigation }: ScreenProps) {
                 accessibilityRole="button"
                 accessibilityLabel="Browse all common foods"
               >
-                <Text style={M(700, 10.5, { ls: 1, color: c.acc })}>MORE →</Text>
+                <Text style={M(700, 10.5, { ls: 1, color: c.acc })}>
+                  MORE →
+                </Text>
               </Pressable>
             ) : null}
             <Pressable
@@ -780,6 +840,49 @@ export function NutritionScreen({ navigation }: ScreenProps) {
                 ]}
               />
             </View>
+            {/* Tag it if it was junk, alcohol or sweets — the food habits read
+                these, and nothing else in the app does. */}
+            <View style={styles.tagRow}>
+              {FOOD_TAGS.map(t => {
+                const on = tags.includes(t.key);
+                return (
+                  <Pressable
+                    key={t.key}
+                    onPress={() =>
+                      setTags(cur =>
+                        cur.includes(t.key)
+                          ? cur.filter(x => x !== t.key)
+                          : [...cur, t.key],
+                      )
+                    }
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: on }}
+                    accessibilityLabel={t.label}
+                    style={[
+                      styles.tagPill,
+                      {
+                        backgroundColor: on ? c.red : 'transparent',
+                        borderColor: on ? c.red : c.hair,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={M(700, 10, {
+                        ls: 0.8,
+                        color: on ? c.onAccent : c.mut,
+                      })}
+                    >
+                      {t.label}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            <Text
+              style={[M(600, 9.5, { ls: 0.6, color: c.fnt }), styles.tagNote]}
+            >
+              {tagNote}
+            </Text>
           </View>
         ) : null}
 
@@ -799,7 +902,9 @@ export function NutritionScreen({ navigation }: ScreenProps) {
               style={[S(600, 13.5, { color: c.ink }), styles.mealName]}
             >
               {m.name}
-              <Text style={M(600, 10, { ls: 1, color: c.fnt })}>
+              <Text
+                style={M(600, 10, { ls: 1, color: m.tagged ? c.red : c.fnt })}
+              >
                 {' '}
                 · {m.tag}
               </Text>
@@ -849,6 +954,14 @@ const styles = StyleSheet.create({
   },
   chipName: { flexShrink: 1 },
   formWrap: { marginTop: 14, gap: 8 },
+  tagRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  tagPill: {
+    paddingVertical: 9,
+    paddingHorizontal: 13,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  tagNote: { lineHeight: 15 },
   form: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   formName: { flex: 1 },
   formKcal: { width: 78 },

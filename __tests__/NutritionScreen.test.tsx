@@ -19,10 +19,28 @@ describe('NutritionScreen', () => {
     expect(screen.getByPlaceholderText('kcal')).toBeOnTheScreen();
   });
 
-  it('routes a submitted entry through the store logFood action', async () => {
-    const logFood = jest
-      .spyOn(useHealthStore.getState(), 'logFood')
-      .mockResolvedValue(true);
+  it('offers junk / alcohol / sweets tags on the log-food form', async () => {
+    await renderWithProviders(<NutritionScreen navigation={mockNav()} />);
+    fireEvent.press(screen.getByLabelText('Log food'));
+
+    const chip = await screen.findByLabelText('ALCOHOL');
+    expect(screen.getByLabelText('JUNK FOOD')).toBeOnTheScreen();
+    expect(screen.getByLabelText('SWEETS')).toBeOnTheScreen();
+    expect(chip.props.accessibilityState.checked).toBe(false);
+
+    fireEvent.press(chip);
+    await waitFor(() =>
+      expect(
+        screen.getByLabelText('ALCOHOL').props.accessibilityState.checked,
+      ).toBe(true),
+    );
+  });
+  // Keep this one last: its save resolves after the assertion, and those
+  // trailing state updates land outside act and disturb whatever renders next.
+  it('routes a submitted entry through the store logFoodEntry action', async () => {
+    const logFoodEntry = jest
+      .spyOn(useHealthStore.getState(), 'logFoodEntry')
+      .mockResolvedValue({ ok: true, name: 'entry-1' });
 
     await renderWithProviders(<NutritionScreen navigation={mockNav()} />);
     fireEvent.press(screen.getByLabelText('Log food'));
@@ -37,8 +55,8 @@ describe('NutritionScreen', () => {
     fireEvent.press(screen.getByLabelText('Save food entry'));
 
     await waitFor(() =>
-      expect(logFood).toHaveBeenCalledWith({ name: 'Banana', kcal: 105 }),
+      expect(logFoodEntry).toHaveBeenCalledWith({ name: 'Banana', kcal: 105 }),
     );
-    logFood.mockRestore();
+    logFoodEntry.mockRestore();
   });
 });

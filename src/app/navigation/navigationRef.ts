@@ -6,6 +6,13 @@ import { RootStackParamList } from './types';
  * e.g. the global Coach FAB overlay — can still push modal screens. */
 export const navigationRef = createNavigationContainerRef<RootStackParamList>();
 
-export function navigate(name: keyof RootStackParamList): void {
-  if (navigationRef.isReady()) navigationRef.navigate(name as never);
+export function navigate<Name extends keyof RootStackParamList>(
+  name: Name,
+  params?: RootStackParamList[Name],
+): void {
+  if (!navigationRef.isReady()) return;
+  // The ref's overloads can't be satisfied generically (the param type depends
+  // on the name), so the call is widened here — the signature above is what
+  // callers are actually checked against.
+  (navigationRef.navigate as (n: string, p?: unknown) => void)(name, params);
 }

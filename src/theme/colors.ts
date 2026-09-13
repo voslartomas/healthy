@@ -36,6 +36,10 @@ export interface Palette {
   scrim: string; // modal backdrop
   pillBg: string; // status-pill fill
   pillText: string; // status-pill text
+  warnBg: string; // soft amber panel behind an "unfinished / needs you" notice
+  warnLine: string; // its hairline
+  amb: string; // amber text/icon on `warnBg`
+  gold: string; // the perfect-week marker (stars, gold history cells)
   /** Text/icon colour on an `accSolid` fill — white in both schemes. */
   onAccent: string;
   /** Categorical data-series colours (the prototype's `--c1…--c5`), cycled by
@@ -87,6 +91,10 @@ export const light: Palette = {
   scrim: 'rgba(14,23,38,0.45)',
   pillBg: 'rgba(47,125,94,0.10)',
   pillText: '#2F7D5E',
+  warnBg: '#FBF6EC',
+  warnLine: '#EADDC2',
+  amb: '#9A6C16',
+  gold: '#B8860B',
   onAccent: '#FFFFFF',
   goalSeries: ['#336699', '#3F8F9C', '#2F7D5E', '#C08A2E', '#A8524A'],
 
@@ -135,6 +143,10 @@ export const dark: Palette = {
   scrim: 'rgba(3,8,16,0.62)',
   pillBg: 'rgba(95,174,139,0.15)',
   pillText: '#5FAE8B',
+  warnBg: 'rgba(217,169,78,0.10)',
+  warnLine: 'rgba(217,169,78,0.32)',
+  amb: '#D9A94E',
+  gold: '#E0B44F',
   onAccent: '#FFFFFF',
   goalSeries: ['#6FA3D6', '#5FB3C0', '#5FAE8B', '#D9A94E', '#D18076'],
 
