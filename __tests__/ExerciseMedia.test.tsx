@@ -22,5 +22,5 @@ it('falls back to the placeholder for an exercise without photos', async () => {
   // (core) fallback and renders the placeholder figure, not a photo.
   await renderWithProviders(<ExerciseMedia exerciseId="ex_no_such_exercise" />);
   expect(screen.queryByTestId('exercise-frame')).toBeNull();
-  expect(screen.getByText('CORE')).toBeOnTheScreen();
+  expect(screen.getByText('Core')).toBeOnTheScreen();
 });

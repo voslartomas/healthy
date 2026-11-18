@@ -5,6 +5,17 @@ import { syncGoalHistory } from '../src/state/goalHistoryService';
 import { useGoalsStore } from '../src/state/useGoalsStore';
 import { useHealthStore } from '../src/state/useHealthStore';
 
+/** The ActivitySummary fields these goal tests don't exercise. */
+const SESSION_EXTRAS = {
+  end: 0,
+  key: 'k',
+  source: 'test',
+  hrZones: null,
+  load: null,
+  loadEstimated: false,
+  zone2PlusMin: 0,
+};
+
 jest.mock('../src/db/goalHistoryRepository');
 const mockedRepo = repo as jest.Mocked<typeof repo>;
 
@@ -24,6 +35,7 @@ function weekData(): GoalWeekData[] {
           durationMin: 40,
           energyKcal: null,
           start: 0,
+          ...SESSION_EXTRAS,
         },
       ],
       tracked: {},

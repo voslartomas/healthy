@@ -1,94 +1,118 @@
 import React from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import Svg, { Line, Path } from 'react-native-svg';
 
 import { ScreenProps } from '../../app/navigation/types';
 import {
   BriefScreen,
   Card,
-  HeroRow,
+  GroupLabel,
   InkBand,
-  M,
   S,
 } from '../../components/brief';
+import { Icon } from '../../components/Icon';
 import { SleepStages } from '../../health';
 import { useHealthStore } from '../../state/useHealthStore';
 import { useTheme } from '../../theme/theme';
 
-/** Decimal hours → "7:42". */
+/**
+ * Sleep detail (ADR-007 "friendly" layout): last night's duration on a soft
+ * indigo hero (with % of need and bed → wake times), the stage breakdown as a
+ * stacked bar over four stage tiles, and the last 30 nights as bars.
+ */
+
+/** Decimal hours → "7h 42m". */
 function hoursToHm(hours: number): string {
-  const total = Math.round(hours * 60);
-  return `${Math.floor(total / 60)}:${(total % 60).toString().padStart(2, '0')}`;
+  return minToHm(hours * 60);
 }
 
-/** Minutes → "1:24". */
+/** Minutes → "1h 24m", or "22m" under an hour. */
 function minToHm(min: number): string {
   const m = Math.round(min);
-  return `${Math.floor(m / 60)}:${(m % 60).toString().padStart(2, '0')}`;
+  const h = Math.floor(m / 60);
+  const rest = (m % 60).toString().padStart(2, '0');
+  return h > 0 ? `${h}h ${rest}m` : `${m % 60}m`;
 }
 
-/** Stage rows, deepest first — the order the design's stacked bar reads in. */
+/** "23:12" in local time. */
+function clock(t: number): string {
+  const d = new Date(t);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+/** Stage rows, deepest first — the order the stacked bar reads in. Deep is
+ * the darkest indigo, light the palest wash; awake is amber so it reads as
+ * "not sleep" at a glance. */
 function stageRows(s: SleepStages) {
   return [
-    { key: 'Deep', min: s.deepMin, tone: 'accSolid' as const },
-    { key: 'REM', min: s.remMin, tone: 'acc' as const },
+    { key: 'Deep', min: s.deepMin, tone: 'sleepText' as const },
+    { key: 'REM', min: s.remMin, tone: 'sleepSolid' as const },
     { key: 'Light', min: s.lightMin, tone: 'sand' as const },
-    { key: 'Awake', min: s.awakeMin, tone: 'track' as const },
+    { key: 'Awake', min: s.awakeMin, tone: 'streak' as const },
   ];
 }
 
-/** Map a series onto an SVG polyline path inside `w`×`h` with `pad` inset. */
-function linePath(pts: number[], w: number, h: number, pad: number): string {
-  if (pts.length < 2) return '';
-  let min = Math.min(...pts);
-  let max = Math.max(...pts);
-  if (min === max) {
-    min -= 1;
-    max += 1;
-  }
-  return pts
-    .map((p, i) => {
-      const x = pad + (i * (w - 2 * pad)) / (pts.length - 1);
-      const y = h - pad - ((p - min) / (max - min)) * (h - 2 * pad);
-      return `${i === 0 ? 'M' : 'L'}${x.toFixed(1)},${y.toFixed(1)}`;
-    })
-    .join(' ');
-}
-
-/** Sleep detail: duration vs need, the stage breakdown, and a 30-day line. */
+/** Sleep detail: duration vs need, the stage breakdown, and 30 nights. */
 export function SleepScreen(_props: ScreenProps) {
   const c = useTheme().colors;
   const sleep = useHealthStore(s => s.snapshot.sleep);
+  const live = useHealthStore(s => s.snapshot.live);
   const series = useHealthStore(s => s.snapshot.trends.sleepHours);
 
   const stages = sleep?.stages ?? null;
   const rows = stages ? stageRows(stages) : [];
   const stageTotal = rows.reduce((sum, r) => sum + r.min, 0);
 
-  const pts = series.slice(-30).map(p => p.value);
-  const W = 354;
-  const H = 120;
-  const path = linePath(pts, W, H, 14);
-  const avg = pts.length
-    ? (pts.reduce((a, b) => a + b, 0) / pts.length).toFixed(1)
+  const nights = series.slice(-30).map(p => p.value);
+  const maxNight = Math.max(1, ...nights);
+  const avg = nights.length
+    ? (nights.reduce((a, b) => a + b, 0) / nights.length).toFixed(1)
     : null;
+
+  // Connected but empty is the usual early-morning state (the wearable hasn't
+  // pushed last night yet) — never call that "not connected".
+  const pillText = sleep
+    ? `${sleep.performancePct}% of your 8h need`
+    : live
+      ? 'Not synced yet'
+      : 'No sleep data';
+  const caption = sleep
+    ? sleep.lastSessionStart != null
+      ? `${clock(sleep.lastSessionStart)} → ${clock(sleep.lastSessionEnd)}`
+      : `Woke at ${clock(sleep.lastSessionEnd)}`
+    : live
+      ? 'Last night hasn’t synced yet'
+      : 'Connect a source in Me';
 
   return (
     <BriefScreen>
-      <InkBand>
-        <HeroRow
-          value={sleep ? hoursToHm(sleep.hours) : '—'}
-          pillText={sleep ? `${sleep.performancePct}% OF NEED` : 'NO SLEEP DATA'}
-          caption={
-            sleep ? 'OF YOUR 8H SLEEP NEED' : 'CONNECT A SOURCE IN SETUP'
-          }
-        />
+      {/* ── Hero: last night ─────────────────────────────────────────── */}
+      <InkBand tone="sleep" paddingTop={24} paddingBottom={24}>
+        <View style={styles.hero}>
+          <Icon name="moon" size={44} color={c.sleepSolid} strokeWidth={2.4} />
+          <Text style={S(900, 52, { lh: 58, color: c.ink })}>
+            {sleep ? hoursToHm(sleep.hours) : '—'}
+          </Text>
+          <View style={[styles.heroPill, { backgroundColor: c.card }]}>
+            <Text style={S(900, 15, { color: c.sleepText })}>{pillText}</Text>
+          </View>
+          <Text style={S(700, 15, { color: c.mut, align: 'center' })}>
+            {caption}
+          </Text>
+        </View>
       </InkBand>
 
-      <Card title="Stages" style={styles.gap16}>
+      {/* ── Stages ───────────────────────────────────────────────────── */}
+      <GroupLabel>Stages</GroupLabel>
+      <Card style={styles.groupCard}>
         {stages && stageTotal > 0 ? (
           <>
-            <View style={styles.stackBar}>
+            <View
+              style={styles.stackBar}
+              accessible
+              accessibilityLabel={rows
+                .map(r => `${r.key} ${Math.round((r.min / stageTotal) * 100)}%`)
+                .join(', ')}
+            >
               {rows.map(r =>
                 r.min > 0 ? (
                   <View
@@ -98,30 +122,30 @@ export function SleepScreen(_props: ScreenProps) {
                 ) : null,
               )}
             </View>
-            <View style={styles.rows}>
+            <View style={styles.tiles}>
               {rows.map(r => (
                 <View
                   key={r.key}
-                  style={[styles.row, { borderTopColor: c.hair }]}
+                  style={[styles.tile, { backgroundColor: c.soft }]}
                 >
-                  <View style={[styles.dot, { backgroundColor: c[r.tone] }]} />
-                  <Text
-                    style={[S(700, 14, { lh: 17, color: c.ink }), styles.name]}
-                  >
-                    {r.key}
-                  </Text>
-                  <Text style={[M(700, 12, { color: c.mut }), styles.pct]}>
-                    {Math.round((r.min / stageTotal) * 100)}%
-                  </Text>
-                  <Text style={[M(700, 13, { color: c.ink }), styles.dur]}>
+                  <View style={styles.tileHead}>
+                    <View
+                      style={[styles.swatch, { backgroundColor: c[r.tone] }]}
+                    />
+                    <Text style={S(900, 14, { color: c.ink })}>{r.key}</Text>
+                  </View>
+                  <Text style={S(900, 20, { lh: 25, color: c.ink })}>
                     {minToHm(r.min)}
+                  </Text>
+                  <Text style={S(800, 13, { color: c.mut })}>
+                    {Math.round((r.min / stageTotal) * 100)}%
                   </Text>
                 </View>
               ))}
             </View>
           </>
         ) : (
-          <Text style={[S(600, 13, { lh: 19, color: c.mut }), styles.empty]}>
+          <Text style={S(700, 15, { lh: 21, color: c.mut })}>
             {sleep
               ? 'This sleep session has no stage breakdown.'
               : 'No sleep recorded.'}
@@ -129,61 +153,54 @@ export function SleepScreen(_props: ScreenProps) {
         )}
       </Card>
 
-      <Card
-        title="Sleep · 30 days"
-        right={
-          avg ? (
-            <Text style={M(700, 10.5, { color: c.fnt })}>AVG {avg} H</Text>
-          ) : undefined
-        }
-      >
-        {path ? (
+      {/* ── Last 30 nights ───────────────────────────────────────────── */}
+      <View style={styles.groupRow}>
+        <GroupLabel style={styles.groupLabel}>Last 30 nights</GroupLabel>
+        {avg ? (
+          <Text style={S(800, 14, { color: c.fnt })}>Avg {avg} h</Text>
+        ) : null}
+      </View>
+      <Card style={styles.groupCard}>
+        {nights.length > 1 ? (
           <>
-            <Svg
-              width="100%"
-              height={H}
-              viewBox={`0 0 ${W} ${H}`}
-              style={styles.chart}
+            <View
+              style={styles.bars}
+              accessible
+              accessibilityLabel={`Sleep per night over the last ${nights.length} nights, averaging ${avg} hours`}
             >
-              <Line
-                x1={0}
-                y1={104}
-                x2={W}
-                y2={104}
-                stroke={c.hair}
-                strokeWidth={1}
-              />
-              <Line
-                x1={0}
-                y1={56}
-                x2={W}
-                y2={56}
-                stroke={c.fnt}
-                strokeWidth={1}
-                strokeDasharray="3 4"
-              />
-              <Path
-                d={path}
-                fill="none"
-                stroke={c.acc}
-                strokeWidth={2.5}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </Svg>
+              {nights.map((h, i) => (
+                <View
+                  key={i}
+                  style={[
+                    styles.bar,
+                    {
+                      height: `${Math.max(4, (h / maxNight) * 100)}%`,
+                      // The latest night in full indigo; the rest a lighter
+                      // wash of it. The palette has no mid indigo, and the
+                      // `sleepTint` fill all but vanishes on a card, so the
+                      // solid is faded instead (works in both schemes).
+                      backgroundColor: c.sleepSolid,
+                      opacity: i === nights.length - 1 ? 1 : 0.4,
+                    },
+                  ]}
+                />
+              ))}
+            </View>
             <View style={styles.axis}>
-              <Text style={M(600, 9.5, { color: c.fnt })}>30 DAYS AGO</Text>
-              <Text style={M(600, 9.5, { color: c.fnt })}>LAST NIGHT</Text>
+              <Text style={S(800, 13, { color: c.fnt })}>
+                {nights.length} nights ago
+              </Text>
+              <Text style={S(800, 13, { color: c.fnt })}>Last night</Text>
             </View>
           </>
         ) : (
           <Text
             style={[
-              M(600, 12, { color: c.fnt, align: 'center' }),
+              S(800, 15, { color: c.fnt, align: 'center' }),
               styles.emptyChart,
             ]}
           >
-            NO SLEEP HISTORY YET
+            No sleep history yet
           </Text>
         )}
       </Card>
@@ -192,28 +209,34 @@ export function SleepScreen(_props: ScreenProps) {
 }
 
 const styles = StyleSheet.create({
-  gap16: { marginTop: 16 },
+  hero: { alignItems: 'center', gap: 6 },
+  heroPill: { paddingVertical: 5, paddingHorizontal: 14, borderRadius: 999 },
+  groupRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginTop: 26,
+  },
+  groupLabel: { marginTop: 0, marginBottom: 0, flexShrink: 1 },
+  groupCard: { marginTop: 12 },
   stackBar: {
     flexDirection: 'row',
-    height: 16,
-    borderRadius: 8,
+    height: 22,
+    borderRadius: 11,
     overflow: 'hidden',
-    marginTop: 14,
   },
-  rows: { marginTop: 6 },
-  row: {
+  tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 14 },
+  tile: { flexBasis: '47%', flexGrow: 1, padding: 12, borderRadius: 14 },
+  tileHead: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  swatch: { width: 12, height: 12, borderRadius: 4 },
+  bars: {
+    height: 120,
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 13,
-    borderTopWidth: 1,
+    alignItems: 'flex-end',
+    gap: 3,
   },
-  dot: { width: 10, height: 10, borderRadius: 5 },
-  name: { flex: 1, minWidth: 0 },
-  pct: { width: 44, textAlign: 'right' },
-  dur: { width: 68, textAlign: 'right' },
-  empty: { marginTop: 12 },
-  chart: { marginTop: 10 },
-  axis: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
+  bar: { flex: 1, borderRadius: 4 },
+  axis: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 },
   emptyChart: { paddingVertical: 40 },
 });

@@ -3,7 +3,6 @@ import {
   GestureResponderEvent,
   LayoutChangeEvent,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
@@ -11,7 +10,15 @@ import {
 import Svg, { Circle, Line, Path, Text as SvgText } from 'react-native-svg';
 
 import { ScreenProps } from '../../app/navigation/types';
-import { BAND, BriefScreen, Card, InkBand, M, S } from '../../components/brief';
+import {
+  BriefScreen,
+  Card,
+  chunky,
+  GroupLabel,
+  pageTitleStyle,
+  Pill,
+  S,
+} from '../../components/brief';
 import { Icon } from '../../components/Icon';
 import { useFoodTagsStore } from '../../state/useFoodTagsStore';
 import { useGoalHistoryStore } from '../../state/useGoalHistoryStore';
@@ -73,12 +80,12 @@ function movingAverage(pts: number[], window: number): number[] {
 }
 
 /**
- * The v3 trend line: an accent median line over baselines, an optional shaded
- * min–max band (HRV's nightly spread), and a rolling-average reference curve.
- * TAP or drag anywhere on the chart to inspect any day — a guide line + marker
- * snap to the nearest point and the readout above shows that day's date, value,
- * and (when banded) its min–max range. Static labels still mark min / max /
- * latest so the extremes read at a glance.
+ * The trend line: a blue value line over faint gridlines, an optional shaded
+ * min–max band (HRV / RHR nightly spread), and a dotted orange rolling-average
+ * curve. TAP or drag anywhere on the chart to inspect any day — a guide line +
+ * marker snap to the nearest point and the readout above shows that day's
+ * date, value, and (when banded) its min–max range. Static labels still mark
+ * min / max / latest so the extremes read at a glance.
  */
 function TrendChart({
   points,
@@ -98,9 +105,9 @@ function TrendChart({
   smoothDays: number;
 }) {
   const c = useTheme().colors;
-  const W = 386,
+  const W = 320,
     H = 170,
-    PAD = 16;
+    PAD = 18;
   const n = points.length;
   const hasBand = !!band && band.length === n;
 
@@ -142,15 +149,15 @@ function TrendChart({
   const minIdx = points.indexOf(Math.min(...points));
   const maxIdx = points.indexOf(Math.max(...points));
   const labelled = [...new Set([minIdx, maxIdx, lastIdx])];
-  const family = M(700, 10).fontFamily;
+  const family = S(900, 12).fontFamily;
 
   const rolling = movingAverage(points, smoothDays);
   const rollPath =
     'M' +
     rolling.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' L');
   const mean = points.reduce((s, v) => s + v, 0) / points.length;
-  const avgText = `AVG ${fmt(mean, decimals)}`;
-  const yAvgLabel = Math.min(Math.max(y(mean) - 5, 10), H - 4);
+  const avgText = `avg ${fmt(mean, decimals)}`;
+  const yAvgLabel = Math.min(Math.max(y(mean) - 5, 12), H - 4);
 
   // Map a touch x (View pixels) to the nearest data index and select it.
   const onTouch = (e: GestureResponderEvent) => {
@@ -171,22 +178,22 @@ function TrendChart({
       <View style={styles.readout}>
         {sel != null ? (
           <>
-            <Text style={M(700, 10, { ls: 1, color: c.fnt })}>
-              {times[sel] != null ? shortDate(times[sel]).toUpperCase() : '—'}
+            <Text style={S(800, 14, { color: c.fnt })}>
+              {times[sel] != null ? shortDate(times[sel]) : '—'}
             </Text>
-            <Text style={M(700, 13, { color: c.ink })}>
+            <Text style={S(900, 16, { color: c.ink })}>
               {fmt(points[sel], decimals)}
-              <Text style={M(700, 10, { color: c.fnt })}> {unit}</Text>
+              <Text style={S(800, 13, { color: c.fnt })}> {unit}</Text>
               {selBand ? (
-                <Text style={M(700, 10, { color: c.fnt })}>
+                <Text style={S(800, 13, { color: c.fnt })}>
                   {`   ${fmt(selBand.lo, decimals)}–${fmt(selBand.hi, decimals)}`}
                 </Text>
               ) : null}
             </Text>
           </>
         ) : (
-          <Text style={M(700, 9.5, { ls: 1, color: c.fnt })}>
-            TAP CHART FOR DAILY VALUES
+          <Text style={S(800, 14, { color: c.fnt })}>
+            Tap the chart to read any day
           </Text>
         )}
       </View>
@@ -206,41 +213,39 @@ function TrendChart({
         >
           <Line
             x1={0}
-            y1={150}
+            y1={H - PAD}
             x2={W}
-            y2={150}
+            y2={H - PAD}
             stroke={c.hair}
-            strokeWidth={1}
+            strokeWidth={2}
           />
           <Line
             x1={0}
-            y1={90}
+            y1={H / 2}
             x2={W}
-            y2={90}
+            y2={H / 2}
             stroke={c.hair}
-            strokeWidth={1}
-            strokeDasharray="3 4"
+            strokeWidth={1.5}
+            strokeDasharray="4 6"
           />
           <Line
             x1={0}
-            y1={30}
+            y1={PAD}
             x2={W}
-            y2={30}
+            y2={PAD}
             stroke={c.hair}
-            strokeWidth={1}
-            strokeDasharray="3 4"
+            strokeWidth={1.5}
+            strokeDasharray="4 6"
           />
-          {/* Min–max range band (HRV) */}
-          {bandPath ? (
-            <Path d={bandPath} fill={c.acc} fillOpacity={0.12} />
-          ) : null}
+          {/* Min–max range band (HRV / RHR) */}
+          {bandPath ? <Path d={bandPath} fill={c.accTint} /> : null}
           {/* Rolling-average curve */}
           <Path
             d={rollPath}
             fill="none"
-            stroke={c.mut}
-            strokeWidth={1.5}
-            strokeDasharray="2 4"
+            stroke={c.food}
+            strokeWidth={3}
+            strokeDasharray="2 6"
             strokeLinecap="round"
             strokeLinejoin="round"
           />
@@ -248,8 +253,8 @@ function TrendChart({
           <Path
             d={line}
             fill="none"
-            stroke={c.acc}
-            strokeWidth={2.5}
+            stroke={c.accSolid}
+            strokeWidth={3}
             strokeLinecap="round"
             strokeLinejoin="round"
           />
@@ -271,7 +276,14 @@ function TrendChart({
                   <Circle cx={x(sel)} cy={y(selBand.lo)} r={2.5} fill={c.fnt} />
                 </>
               ) : null}
-              <Circle cx={x(sel)} cy={y(points[sel])} r={4.5} fill={c.acc} />
+              <Circle
+                cx={x(sel)}
+                cy={y(points[sel])}
+                r={6}
+                fill={c.accSolid}
+                stroke={c.card}
+                strokeWidth={3}
+              />
             </>
           ) : null}
           {labelled.map(i => {
@@ -281,8 +293,10 @@ function TrendChart({
                 key={`d${i}`}
                 cx={x(i)}
                 cy={y(points[i])}
-                r={last ? 4 : 3}
-                fill={c.ink}
+                r={last ? 6 : 4}
+                fill={last ? c.accSolid : c.ink}
+                stroke={c.card}
+                strokeWidth={last ? 3 : 2}
               />
             );
           })}
@@ -292,9 +306,9 @@ function TrendChart({
             const above =
               i > 0 ? points[i] <= points[i - 1] : points[i] <= points[i + 1];
             const lx = Math.min(Math.max(x(i), 16), W - 16);
-            const ly = above ? py - 11 : py + 17;
+            const ly = above ? py - 12 : py + 20;
             const label = fmt(points[i], decimals);
-            const size = last ? 12 : 10;
+            const size = last ? 14 : 12;
             return (
               <React.Fragment key={`l${i}`}>
                 <SvgText
@@ -302,8 +316,8 @@ function TrendChart({
                   y={ly}
                   fontSize={size}
                   fontFamily={family}
-                  fill={c.bg}
-                  stroke={c.bg}
+                  fill={c.card}
+                  stroke={c.card}
                   strokeWidth={4}
                   textAnchor="middle"
                 >
@@ -325,10 +339,10 @@ function TrendChart({
           <SvgText
             x={2}
             y={yAvgLabel}
-            fontSize={8.5}
+            fontSize={12}
             fontFamily={family}
-            fill={c.bg}
-            stroke={c.bg}
+            fill={c.card}
+            stroke={c.card}
             strokeWidth={3}
             textAnchor="start"
           >
@@ -337,9 +351,9 @@ function TrendChart({
           <SvgText
             x={2}
             y={yAvgLabel}
-            fontSize={8.5}
+            fontSize={12}
             fontFamily={family}
-            fill={c.mut}
+            fill={c.foodText}
             textAnchor="start"
           >
             {avgText}
@@ -371,7 +385,7 @@ interface HistRow {
 /** The grid always shows this many week columns (design frame). */
 const HIST_WEEKS = 12;
 
-/** A legend swatch: filled, dashed-outline (NOW) or hairline-outline (NO DATA). */
+/** A legend swatch: filled, dashed-outline (Now) or hairline-outline (No data). */
 function Legend({
   color,
   dashed,
@@ -390,13 +404,13 @@ function Legend({
         style={[
           styles.legendSq,
           dashed
-            ? { borderWidth: 1, borderColor: c.fnt, borderStyle: 'dashed' }
+            ? { borderWidth: 2, borderColor: c.fnt, borderStyle: 'dashed' }
             : empty
-              ? { borderWidth: 1, borderColor: c.hair }
+              ? { borderWidth: 2, borderColor: c.hair }
               : { backgroundColor: color },
         ]}
       />
-      <Text style={M(600, 9, { ls: 1, color: c.fnt })}>{label}</Text>
+      <Text style={S(800, 13, { color: c.mut })}>{label}</Text>
     </View>
   );
 }
@@ -420,7 +434,7 @@ function padCells(cells: HistCell[], keyPrefix: string): HistCell[] {
 /**
  * Attainment over the last 12 weeks for everything the user committed to — the
  * weekly goals and the daily habits — plus the row that only lights up when both
- * held: the PERFECT WEEK.
+ * held: the perfect week.
  *
  * Goals and habits are two different clocks (a weekly total vs. a daily streak),
  * but they share the frame: 12 right-aligned columns ending at the week in
@@ -510,7 +524,7 @@ function GoalsHistorySection() {
       const done = cells.filter(w => !w.noData && !w.current);
       return {
         id: v.habit.id,
-        name: v.habit.name.toUpperCase(),
+        name: v.habit.name,
         cells,
         hit: done.filter(w => w.met).length,
         completed: done.length,
@@ -547,141 +561,156 @@ function GoalsHistorySection() {
 
   if (goals.length === 0 && habitRows.length === 0) {
     return (
-      <Card title="Goals & habits" style={styles.section}>
-        <Text style={[S(600, 13, { color: c.mut }), styles.emptyGoals]}>
-          Define goals and habits on Today to track your weekly hit-rate here.
-        </Text>
-      </Card>
+      <>
+        <GroupLabel>12 weeks of goals</GroupLabel>
+        <Card style={styles.groupCard}>
+          <Text style={S(700, 15, { lh: 21, color: c.mut })}>
+            Define goals and habits on Today to track your weekly hit-rate here.
+          </Text>
+        </Card>
+      </>
     );
   }
 
+  // Colours of one week cell. Close is the soft sky so a near-miss reads as
+  // "almost" next to the green hit, and missed is the plain outline grey.
+  const cellStyle = (w: HistCell, i: number) => {
+    if (w.noData) return [styles.histEmpty, { borderColor: c.hair }];
+    const fill =
+      // A perfect week outranks its own row's colour — the whole column goes
+      // gold so the run reads at a glance.
+      perfect[i] === true
+        ? c.gold
+        : w.met
+          ? c.grnSolid
+          : w.frac >= 0.8
+            ? c.sand
+            : c.hair;
+    return [
+      { backgroundColor: fill },
+      w.current && [
+        styles.histNow,
+        { backgroundColor: c.card, borderColor: c.fnt },
+      ],
+    ];
+  };
+
   const renderRow = (r: HistRow) => (
-    <View key={r.id}>
+    <View key={r.id} style={styles.histRow}>
       <View style={styles.histHead}>
         <Text
           numberOfLines={1}
-          style={[M(700, 9.5, { ls: 0.6, color: c.mut }), styles.histName]}
+          style={[S(900, 14, { color: c.ink }), styles.histName]}
         >
           {r.name}
         </Text>
-        <Text style={M(700, 9.5, { color: c.fnt })}>
-          {r.hit}/{r.completed}
+        <Text style={S(900, 14, { color: c.mut })}>
+          {r.hit} of {r.completed}
         </Text>
       </View>
       <View style={styles.histBars}>
-        {r.cells.map((w, i) => {
-          if (w.noData) {
-            return (
-              <View
-                key={w.key}
-                style={[
-                  styles.histBar,
-                  styles.histBarEmpty,
-                  { borderColor: c.hair },
-                ]}
-              />
-            );
-          }
-          const color = w.met ? c.grn : w.frac >= 0.8 ? c.acc : c.track;
-          return (
-            <View
-              key={w.key}
-              style={[
-                styles.histBar,
-                { backgroundColor: color },
-                // A perfect week outranks its own row's colour — the whole
-                // column goes gold so the run reads at a glance.
-                perfect[i] === true && {
-                  backgroundColor: c.gold,
-                },
-                w.current && {
-                  opacity: 0.45,
-                  borderWidth: 1,
-                  borderColor: c.fnt,
-                  borderStyle: 'dashed',
-                },
-              ]}
-            />
-          );
-        })}
+        {r.cells.map((w, i) => (
+          <View key={w.key} style={[styles.histBar, cellStyle(w, i)]} />
+        ))}
       </View>
     </View>
   );
 
   return (
-    <Card
-      title="Goals & habits · 12 weeks"
-      style={styles.section}
-      right={
-        <Text style={M(700, 10.5, { color: c.grn })}>
-          {totalHit} OF {totalDone} HIT
+    <>
+      <View style={styles.groupRow}>
+        <GroupLabel style={styles.groupLabel}>12 weeks of goals</GroupLabel>
+        <Pill
+          spec={{
+            text: `${perfectHit} perfect week${perfectHit === 1 ? '' : 's'}`,
+            bg: c.streakTint,
+            textColor: c.streakText,
+          }}
+        />
+      </View>
+      <Card style={styles.groupCard}>
+        <Text style={S(900, 15, { color: c.grn })}>
+          {totalHit} of {totalDone} weeks hit
         </Text>
-      }
-    >
-      {/* Stars sit above the grid, one per column, so a perfect week is visible
-          before you read a single row. */}
-      <View style={styles.starRow}>
-        {perfect.map((p, i) => (
-          <View key={i} style={styles.starCell}>
-            {p === true ? <Icon name="star" size={12} color={c.gold} /> : null}
-          </View>
-        ))}
-      </View>
 
-      <View style={styles.histList}>{rows.map(renderRow)}</View>
-
-      {habitRows.length > 0 ? (
-        <View style={[styles.habitList, { borderTopColor: c.hair }]}>
-          {habitRows.map(renderRow)}
-          <View>
-            <View style={styles.histHead}>
-              <Text
-                style={[
-                  M(700, 9.5, { ls: 0.6, color: c.ink }),
-                  styles.histName,
-                ]}
-              >
-                PERFECT WEEK
-              </Text>
-              <Text style={M(700, 9.5, { color: c.grn })}>
-                {perfectHit}/{perfectDone}
-              </Text>
+        {/* Stars sit above the grid, one per column, so a perfect week is
+            visible before you read a single row. */}
+        <View style={styles.starRow}>
+          {perfect.map((p, i) => (
+            <View key={i} style={styles.starCell}>
+              {p === true ? (
+                <Icon name="star" size={13} color={c.gold} />
+              ) : null}
             </View>
-            <View style={styles.histBars}>
-              {perfect.map((p, i) => (
-                <View
-                  key={i}
-                  style={[
-                    styles.histBar,
-                    p == null
-                      ? [styles.histBarEmpty, { borderColor: c.hair }]
-                      : { backgroundColor: p ? c.gold : c.track },
-                  ]}
-                />
-              ))}
-            </View>
-          </View>
+          ))}
         </View>
-      ) : null}
 
-      <View style={styles.histAxis}>
-        <Text style={M(600, 9, { ls: 1, color: c.fnt })}>12 WKS AGO</Text>
-        <Text style={M(600, 9, { ls: 1, color: c.fnt })}>THIS WK</Text>
-      </View>
-      <View style={styles.legendRow}>
-        <Legend color={c.gold} label="PERFECT WEEK" />
-        <Legend color={c.grn} label="HIT" />
-        <Legend color={c.acc} label="CLOSE" />
-        <Legend color={c.track} label="MISSED" />
-        <Legend dashed label="NOW" />
-        <Legend empty label="NO DATA" />
-      </View>
-    </Card>
+        <View style={styles.histList}>{rows.map(renderRow)}</View>
+
+        {habitRows.length > 0 ? (
+          <View
+            style={[
+              styles.histList,
+              styles.habitList,
+              { borderTopColor: c.hair },
+            ]}
+          >
+            {habitRows.map(renderRow)}
+            <View style={styles.histRow}>
+              <View style={styles.histHead}>
+                <Text style={[S(900, 14, { color: c.ink }), styles.histName]}>
+                  Perfect week
+                </Text>
+                <Text style={S(900, 14, { color: c.streakText })}>
+                  {perfectHit} of {perfectDone}
+                </Text>
+              </View>
+              <View style={styles.histBars}>
+                {perfect.map((p, i) => (
+                  <View
+                    key={i}
+                    style={[
+                      styles.histBar,
+                      p == null
+                        ? [styles.histEmpty, { borderColor: c.hair }]
+                        : { backgroundColor: p ? c.gold : c.hair },
+                    ]}
+                  />
+                ))}
+              </View>
+            </View>
+          </View>
+        ) : null}
+
+        <View style={styles.histAxis}>
+          <Text style={S(800, 13, { color: c.fnt })}>12 wks ago</Text>
+          <Text style={S(800, 13, { color: c.fnt })}>This week</Text>
+        </View>
+        <View style={styles.legendRow}>
+          <Legend color={c.grnSolid} label="Hit" />
+          <Legend color={c.sand} label="Close" />
+          <Legend color={c.hair} label="Missed" />
+          <Legend color={c.gold} label="Perfect week" />
+          <Legend dashed label="Now" />
+          <Legend empty label="No data" />
+        </View>
+      </Card>
+    </>
   );
 }
 
-/** Trends: the design's metric explorer — big value, segment picker, dotted line
- * chart, a 12-week weekly-goal grid and a body-metric snapshot quad. */
+/** Rolling-average window, widened with the span so the dotted curve keeps
+ * reading as a trend instead of shadowing the line. */
+function smoothDaysFor(rangeDays: number): number {
+  return rangeDays >= 180 ? 21 : rangeDays >= 90 ? 14 : 7;
+}
+
+/**
+ * Progress (ADR-007 "friendly" layout; route name stays `Trends`): a wrapping
+ * row of metric pills, one chunky card holding the chosen metric's value,
+ * delta, tappable chart and average/range chips, the 30/90/180-day range
+ * tiles, and the 12-week goals & habits grid with its perfect weeks.
+ */
 export function TrendsScreen(_props: ScreenProps) {
   const c = useTheme().colors;
   const series = useHealthStore(s => s.snapshot.trends);
@@ -691,73 +720,32 @@ export function TrendsScreen(_props: ScreenProps) {
   const setRangeDays = useTrendsStore(s => s.setRangeDays);
   const metrics = buildMetrics(series, rangeDays);
   const active = metrics.find(m => m.key === activeKey) ?? metrics[0];
-  const decimals = METRIC_CONFIG.find(m => m.key === active.key)?.decimals ?? 0;
+  const cfg = METRIC_CONFIG.find(m => m.key === active.key);
+  const decimals = cfg?.decimals ?? 0;
+  const smoothDays = smoothDaysFor(rangeDays);
+
+  // The delta pill is green when the metric moved the good way for it (HRV up,
+  // resting HR down), red when it moved the other way, neutral when flat.
+  const pts = active.points;
+  const moved = pts.length > 1 ? pts[pts.length - 1] - pts[0] : 0;
+  const flat = Math.abs(moved) < (decimals > 0 ? 0.05 : 0.5);
+  const good = cfg ? (cfg.goodUp ? moved > 0 : moved < 0) : true;
+  const deltaPill = !active.delta
+    ? null
+    : flat
+      ? { text: active.delta, bg: c.soft, textColor: c.mut }
+      : good
+        ? { text: active.delta, bg: c.grnTint, textColor: c.grn }
+        : { text: active.delta, bg: c.redTint, textColor: c.red };
+  const withUnit = (v: string) =>
+    v === '—' ? v : active.unit === '%' ? `${v}%` : `${v} ${active.unit}`;
 
   return (
     <BriefScreen>
-      {/* Hero value + summary line, in the ink band */}
-      <InkBand paddingBottom={16}>
-        <View style={styles.heroRow}>
-          <Text style={[M(700, 70, { ls: -1, color: BAND.ink }), styles.hero]}>
-            {active.value}
-            {active.value !== '—' ? (
-              <Text style={M(700, 26, { ls: -0.2, color: BAND.fnt })}>
-                {' '}
-                {active.unit}
-              </Text>
-            ) : null}
-          </Text>
-        </View>
-        <Text
-          style={[
-            M(700, 10, { ls: 1, upper: true, color: BAND.fnt }),
-            styles.avgLine,
-          ]}
-        >
-          AVG {active.avg} · RANGE {active.range}
-        </Text>
-      </InkBand>
+      <Text style={[pageTitleStyle(c.ink), styles.title]}>Progress</Text>
 
-      <View style={styles.rangeRow}>
-        <View style={styles.rangeSwitch}>
-          {TREND_RANGES.map(d => {
-            const on = d === rangeDays;
-            return (
-              <Pressable
-                key={d}
-                onPress={() => setRangeDays(d as TrendRange)}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: on }}
-                accessibilityLabel={`Show ${d} days`}
-                style={[
-                  styles.rangeBtn,
-                  {
-                    borderColor: on ? c.ink : c.hair,
-                    backgroundColor: on ? c.ink : 'transparent',
-                  },
-                ]}
-              >
-                <Text
-                  style={M(700, 9.5, { ls: 0.6, color: on ? c.inv : c.mut })}
-                >
-                  {d}D
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-      </View>
-
-      {/* Segment picker */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.segRow}
-        style={[
-          styles.segScroll,
-          { borderTopColor: c.hair, borderBottomColor: c.hair },
-        ]}
-      >
+      {/* ── Metric picker ────────────────────────────────────────────── */}
+      <View style={styles.metricRow}>
         {metrics.map(m => {
           const on = m.key === active.key;
           return (
@@ -766,120 +754,205 @@ export function TrendsScreen(_props: ScreenProps) {
               onPress={() => setActiveKey(m.key)}
               accessibilityRole="button"
               accessibilityState={{ selected: on }}
+              accessibilityLabel={m.label}
               style={[
-                styles.seg,
-                { borderBottomColor: on ? c.acc : 'transparent' },
+                styles.metricPill,
+                {
+                  backgroundColor: on ? c.accTint : c.card,
+                  borderColor: on ? c.accSolid : c.hair,
+                },
               ]}
             >
-              <Text style={M(700, 10.5, { ls: 1, color: on ? c.ink : c.fnt })}>
+              <Text style={S(900, 15, { color: on ? c.acc : c.ink })}>
                 {m.label}
               </Text>
             </Pressable>
           );
         })}
-      </ScrollView>
-
-      {/* Chart */}
-      {active.points.length > 1 ? (
-        <TrendChart
-          key={`${active.key}-${rangeDays}`}
-          points={active.points}
-          times={active.times}
-          decimals={decimals}
-          unit={active.unit}
-          band={active.band}
-          smoothDays={rangeDays >= 180 ? 21 : rangeDays >= 90 ? 14 : 7}
-        />
-      ) : (
-        <Text
-          style={[
-            M(600, 12, { color: c.fnt, align: 'center' }),
-            styles.emptyChart,
-          ]}
-        >
-          NO DATA YET
-        </Text>
-      )}
-      <View style={styles.axis}>
-        {/* The oldest point actually plotted, not the nominal span: HRV history
-            only reaches back as far as the cache has accumulated (see
-            FULL_HRV_DAYS), so a 180D selection can legitimately show less. */}
-        <Text style={M(600, 9.5, { color: c.fnt })}>
-          {active.times.length
-            ? shortDate(active.times[0]).toUpperCase()
-            : `${rangeDays} DAYS AGO`}
-        </Text>
-        <Text style={M(600, 9.5, { color: c.fnt })}>NOW</Text>
       </View>
 
-      {/* Weekly-goal 12-week attainment */}
+      {/* ── Value + chart ────────────────────────────────────────────── */}
+      <View style={[chunky(c), styles.valueCard]}>
+        <View style={styles.valueHead}>
+          <View style={styles.valueText}>
+            <Text style={S(800, 15, { color: c.mut })}>
+              {cfg?.name ?? active.label}
+            </Text>
+            <Text style={S(900, 44, { lh: 50, color: c.ink })}>
+              {active.value}
+              {active.value !== '—' ? (
+                <Text style={S(900, 20, { color: c.fnt })}> {active.unit}</Text>
+              ) : null}
+            </Text>
+          </View>
+          {deltaPill ? <Pill spec={deltaPill} /> : null}
+        </View>
+
+        {active.points.length > 1 ? (
+          <TrendChart
+            key={`${active.key}-${rangeDays}`}
+            points={active.points}
+            times={active.times}
+            decimals={decimals}
+            unit={active.unit}
+            band={active.band}
+            smoothDays={smoothDays}
+          />
+        ) : (
+          <Text
+            style={[
+              S(800, 15, { color: c.fnt, align: 'center' }),
+              styles.emptyChart,
+            ]}
+          >
+            No data yet
+          </Text>
+        )}
+        <View style={styles.axis}>
+          {/* The oldest point actually plotted, not the nominal span: HRV
+              history only reaches back as far as the cache has accumulated
+              (see FULL_HRV_DAYS), so a 180-day selection can legitimately show
+              less. */}
+          <Text style={S(800, 13, { color: c.fnt })}>
+            {active.times.length
+              ? shortDate(active.times[0])
+              : `${rangeDays} days ago`}
+          </Text>
+          <Text style={S(800, 13, { color: c.fnt })}>Now</Text>
+        </View>
+
+        <View style={styles.statRow}>
+          <View style={[styles.stat, { backgroundColor: c.soft }]}>
+            <Text style={S(800, 12, { color: c.fnt })}>AVERAGE</Text>
+            <Text style={S(900, 18, { color: c.ink })}>
+              {withUnit(active.avg)}
+            </Text>
+          </View>
+          <View style={[styles.stat, { backgroundColor: c.soft }]}>
+            <Text style={S(800, 12, { color: c.fnt })}>RANGE</Text>
+            <Text style={S(900, 18, { color: c.ink })}>
+              {withUnit(active.range)}
+            </Text>
+          </View>
+        </View>
+        {active.points.length > 1 ? (
+          <Text style={S(700, 14, { lh: 19, color: c.fnt })}>
+            Dotted line is the {smoothDays}-day average
+            {active.band ? ' · shading is each day’s low–high range' : ''}
+          </Text>
+        ) : null}
+      </View>
+
+      {/* ── Range ────────────────────────────────────────────────────── */}
+      <View style={styles.rangeRow}>
+        {TREND_RANGES.map(d => {
+          const on = d === rangeDays;
+          return (
+            <Pressable
+              key={d}
+              onPress={() => setRangeDays(d as TrendRange)}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: on }}
+              accessibilityLabel={`Show ${d} days`}
+              style={[
+                styles.rangeBtn,
+                {
+                  backgroundColor: on ? c.accTint : c.card,
+                  borderColor: on ? c.accSolid : c.hair,
+                },
+              ]}
+            >
+              <Text style={S(900, 16, { color: on ? c.acc : c.ink })}>
+                {d} days
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {/* ── Goals & habits, 12 weeks ─────────────────────────────────── */}
       <GoalsHistorySection />
     </BriefScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  heroRow: { flexDirection: 'row', alignItems: 'flex-end', marginTop: 2 },
-  hero: { lineHeight: 74 }, // >= the 70px fontSize so iOS doesn't clip digit tops
-  avgLine: { lineHeight: 16, marginTop: 6 },
-  rangeRow: { flexDirection: 'row', justifyContent: 'flex-end', marginTop: 14 },
-  rangeSwitch: { flexDirection: 'row', gap: 6 },
-  rangeBtn: {
-    paddingVertical: 6,
-    paddingHorizontal: 10,
+  title: { marginTop: 4 },
+  metricRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 },
+  metricPill: {
+    minHeight: 44,
+    paddingHorizontal: 14,
     borderRadius: 999,
-    borderWidth: 1,
+    borderWidth: 2,
+    borderBottomWidth: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  segScroll: {
-    marginTop: 20,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    flexGrow: 0,
+  valueCard: { marginTop: 16, padding: 18, gap: 12 },
+  valueHead: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
   },
-  segRow: { gap: 18, paddingVertical: 12 },
-  seg: { borderBottomWidth: 2, paddingBottom: 8, paddingTop: 2 },
+  valueText: { flexShrink: 1 },
   readout: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'baseline',
-    marginTop: 12,
-    minHeight: 18,
+    minHeight: 22,
   },
   chart: { marginTop: 6 },
   emptyChart: { paddingVertical: 50 },
-  axis: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 },
-  section: { marginTop: 12 },
-  rowBetween: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'baseline',
+  axis: { flexDirection: 'row', justifyContent: 'space-between' },
+  statRow: { flexDirection: 'row', gap: 8 },
+  stat: { flex: 1, minWidth: 0, padding: 10, borderRadius: 14 },
+  rangeRow: { flexDirection: 'row', gap: 8, marginTop: 16 },
+  rangeBtn: {
+    flex: 1,
+    height: 48,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderBottomWidth: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  emptyGoals: { marginTop: 12 },
-  histList: { gap: 9, marginTop: 10 },
-  habitList: { gap: 9, marginTop: 14, paddingTop: 12, borderTopWidth: 1 },
-  starRow: { flexDirection: 'row', gap: 3, marginTop: 14, height: 14 },
+  groupRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginTop: 26,
+  },
+  groupLabel: { marginTop: 0, marginBottom: 0, flexShrink: 1 },
+  groupCard: { marginTop: 12 },
+  starRow: { flexDirection: 'row', gap: 4, marginTop: 12, height: 16 },
   starCell: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  histList: { gap: 10, marginTop: 6 },
+  habitList: { marginTop: 14, paddingTop: 14, borderTopWidth: 2 },
+  histRow: { gap: 5 },
   histHead: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'baseline',
-    marginBottom: 5,
   },
   histName: { flex: 1, minWidth: 0, paddingRight: 8 },
-  histBars: { flexDirection: 'row', gap: 3 },
-  histBar: { flex: 1, height: 22, borderRadius: 3 },
-  histBarEmpty: { backgroundColor: 'transparent', borderWidth: 1 },
+  histBars: { flexDirection: 'row', gap: 4 },
+  histBar: { flex: 1, height: 18, borderRadius: 5 },
+  histEmpty: { backgroundColor: 'transparent', borderWidth: 2 },
+  histNow: { borderWidth: 2, borderStyle: 'dashed' },
   histAxis: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 9,
+    marginTop: 10,
   },
   legendRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 14,
-    marginTop: 12,
+    columnGap: 12,
+    rowGap: 6,
+    marginTop: 10,
   },
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  legendSq: { width: 9, height: 9, borderRadius: 2 },
+  legendSq: { width: 12, height: 12, borderRadius: 4 },
 });

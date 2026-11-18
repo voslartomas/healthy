@@ -2,15 +2,10 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { AppNav } from '../../app/navigation/types';
-import { Card, M, S } from '../../components/brief';
+import { chunky, Pill, S } from '../../components/brief';
 import { Icon } from '../../components/Icon';
 import { foodTagLabel } from '../../state/foodTags';
-import {
-  allowanceShort,
-  Habit,
-  HabitDayStatus,
-  isHeld,
-} from '../../state/habits';
+import { allowanceShort, Habit, HabitDayStatus } from '../../state/habits';
 import { setHabitChecked, toggleHabitDay } from '../../state/habitsService';
 import { useFoodTagsStore } from '../../state/useFoodTagsStore';
 import {
@@ -25,8 +20,6 @@ import {
 import { useHealthStore } from '../../state/useHealthStore';
 import { useNow } from '../../state/useNow';
 import { useTheme } from '../../theme/theme';
-
-const DAY_NAMES = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 
 /**
  * The line under a habit's name: what decided today, and how much allowance is
@@ -46,41 +39,40 @@ function detailLine(
   let detail: string;
   if (status === 'auto') {
     detail = sleep
-      ? 'AUTO · ASLEEP IN TIME'
-      : 'AUTO · NOTHING FLAGGED IN TODAY’S FOOD LOG';
+      ? 'Auto · asleep in time'
+      : 'Auto · nothing flagged in today’s food';
   } else if (status === 'held') {
-    detail = 'CHECKED · TAP TO UNDO';
+    detail = 'Checked · tap to undo';
   } else if (status === 'miss') {
     detail = sleep
-      ? 'MISSED · ASLEEP TOO LATE'
-      : `MISSED · LOGGED ${habit.tag ? foodTagLabel(habit.tag) : 'IT'}`;
+      ? 'Missed · asleep too late'
+      : `Missed · logged ${habit.tag ? foodTagLabel(habit.tag).toLowerCase() : 'it'}`;
   } else if (status === 'allowed') {
-    detail = 'ALLOWED MISS · WEEK STILL COUNTS';
+    detail = 'Allowed miss · the week still counts';
   } else if (status === 'open' && habit.auto) {
     detail = sleep
-      ? 'AUTO · SETTLES TOMORROW FROM TONIGHT’S SLEEP'
-      : 'AUTO · PASSES AT MIDNIGHT UNLESS YOU LOG IT';
+      ? 'Auto · settles tomorrow from tonight’s sleep'
+      : 'Auto · passes at midnight unless you log it';
   } else if (status === 'none') {
-    detail = 'NO DATA YET';
+    detail = 'No data yet';
   } else {
-    detail = 'TAP TO CHECK · ENDS AT MIDNIGHT';
+    detail = 'Tap to check · ends at midnight';
   }
   if (habit.allowance === 'never') return detail;
-  return `${detail} · ${allowanceUsed ? 'ALLOWANCE USED' : allowanceShort(habit.allowance)}`;
+  return `${detail} · ${allowanceUsed ? 'allowance used' : allowanceShort(habit.allowance).toLowerCase()}`;
 }
 
 /** Whether the allowance for the period covering today has already been spent. */
 function allowanceSpentThisWeek(view: HabitView): boolean {
-  // The last seven evaluated days cover the current week at worst partially,
-  // which is the window the row's copy is talking about.
   return view.statuses.slice(-7).includes('allowed');
 }
 
 /**
- * The Today "Habits" card: one row per daily habit with its check, the line that
- * says what decided today, and the streak. A habit whose YESTERDAY is still open
- * (a manual one, before the noon cut-off) surfaces a catch-up strip so it can be
- * fixed without digging.
+ * The Today "habits" card (ADR-007): a big tappable check per habit, the line
+ * that says what decided today, the streak with its flame, and the week strip.
+ * A habit whose YESTERDAY is still open (a manual one, before the noon cut-off)
+ * surfaces an amber catch-up banner above the list so it can be fixed without
+ * digging.
  */
 export function HabitsCard({ navigation }: { navigation: AppNav }) {
   const c = useTheme().colors;
@@ -88,8 +80,6 @@ export function HabitsCard({ navigation }: { navigation: AppNav }) {
   const days = useHabitsStore(s => s.days);
   const tagRows = useFoodTagsStore(s => s.rows);
   const sleep = useHealthStore(s => s.snapshot.sleep);
-  // A minute is fine: what changes with time here is the noon catch-up cut-off
-  // and the midnight rollover.
   const now = useNow();
 
   const views = React.useMemo(
@@ -107,38 +97,21 @@ export function HabitsCard({ navigation }: { navigation: AppNav }) {
     [habits, days, tagRows, sleep, now],
   );
 
-  const todayName = DAY_NAMES[(new Date(now).getDay() + 6) % 7];
   const catchup = openYesterday(views);
 
   return (
-    <Card
-      title="Habits"
-      right={
-        habits.length > 0 ? (
-          <Text style={M(700, 9.5, { color: c.fnt })}>
-            {todayName} · {heldTodayCount(views)} OF {views.length}
-          </Text>
-        ) : null
-      }
-    >
-      {views.length === 0 ? (
-        <Text style={[S(600, 13, { color: c.mut }), styles.empty]}>
-          No habits yet. Add one — “no junk food”, “asleep before 23:00” — and
-          the app holds you to it every day.
-        </Text>
-      ) : null}
-
-      <View style={styles.rows}>
-        {views.map((v, i) => (
-          <HabitRow
-            key={v.habit.id}
-            view={v}
-            first={i === 0}
-            onEdit={() =>
-              navigation.navigate('HabitDefine', { habitId: v.habit.id })
-            }
+    <>
+      <View style={styles.head}>
+        <Text style={S(900, 22, { lh: 28, color: c.ink })}>Today’s habits</Text>
+        {views.length > 0 ? (
+          <Pill
+            spec={{
+              text: `${heldTodayCount(views)} of ${views.length} done`,
+              bg: c.streakTint,
+              textColor: c.streakText,
+            }}
           />
-        ))}
+        ) : null}
       </View>
 
       {catchup ? (
@@ -149,16 +122,11 @@ export function HabitsCard({ navigation }: { navigation: AppNav }) {
           ]}
         >
           <View style={styles.catchupText}>
-            <Text style={S(600, 12, { lh: 16, color: c.ink })}>
+            <Text style={S(900, 16, { color: c.ink })}>
               Yesterday is still open
             </Text>
-            <Text
-              style={[
-                M(600, 9.5, { ls: 0.6, color: c.fnt }),
-                styles.catchupSub,
-              ]}
-            >
-              {catchup.habit.name.toUpperCase()} · UNCHECKED
+            <Text style={S(700, 14, { color: c.amb })}>
+              {catchup.habit.name} · not checked
             </Text>
           </View>
           <Pressable
@@ -171,30 +139,51 @@ export function HabitsCard({ navigation }: { navigation: AppNav }) {
             }
             accessibilityRole="button"
             accessibilityLabel={`Check ${catchup.habit.name} for yesterday`}
-            style={[styles.catchupBtn, { backgroundColor: c.accSolid }]}
+            style={[
+              styles.catchupBtn,
+              { backgroundColor: c.streak, borderBottomColor: c.streakText },
+            ]}
           >
-            <Text style={M(700, 10, { ls: 0.8, color: c.onAccent })}>
-              CHECK IT
-            </Text>
+            <Text style={S(900, 15, { color: '#3D2A00' })}>Check it</Text>
           </Pressable>
         </View>
       ) : null}
 
+      <View style={[chunky(c), styles.list]}>
+        {views.length === 0 ? (
+          <Text style={[S(700, 15, { lh: 21, color: c.mut }), styles.empty]}>
+            No habits yet. Add one — “no junk food”, “asleep before 23:00” — and
+            the app holds you to it every day.
+          </Text>
+        ) : null}
+        {views.map((v, i) => (
+          <HabitRow
+            key={v.habit.id}
+            view={v}
+            first={i === 0}
+            onEdit={() =>
+              navigation.navigate('HabitDefine', { habitId: v.habit.id })
+            }
+          />
+        ))}
+      </View>
+
       <View style={styles.foot}>
-        <Text style={M(700, 8.5, { ls: 1, color: c.fnt })}>
-          {views.length > 0 ? 'MON → SUN · TAP ANY PAST DAY TO FIX IT' : ''}
-        </Text>
         <Pressable
           onPress={() => navigation.navigate('HabitDefine')}
           accessibilityRole="button"
           accessibilityLabel="Add a habit"
+          hitSlop={10}
         >
-          <Text style={M(700, 9.5, { ls: 1.6, color: c.acc })}>
-            + NEW HABIT
-          </Text>
+          <Text style={S(900, 16, { color: c.acc })}>+ New habit</Text>
         </Pressable>
+        {views.length > 0 ? (
+          <Text style={S(700, 13, { color: c.fnt })}>
+            Tap any past day to fix it
+          </Text>
+        ) : null}
       </View>
-    </Card>
+    </>
   );
 }
 
@@ -210,44 +199,37 @@ function HabitRow({
   const c = useTheme().colors;
   const { habit, today: status } = view;
   const on = status === 'auto' || status === 'held';
-  // `days` runs past today to the end of the week (so the strip can show
-  // Mon→Sun), so today is at `todayIndex`, NOT at the end of the array.
   const todayStart = view.days[view.todayIndex];
 
-  // 'auto' is the app's own verdict, so there is nothing to undo — only a check
-  // the user placed (or can place) is toggleable.
   const toggle = () => void toggleHabitDay(habit.id, todayStart, status);
 
-  // A day that held is a day that held — the app reading your log and you
-  // checking it off get the same green, because the difference is bookkeeping,
-  // not something you need to look at. Only the outcomes differ: held, forgiven,
-  // broken, undecided.
-  const border = isHeld(status)
-    ? status === 'allowed'
-      ? c.gold
-      : c.grn
-    : status === 'miss'
-      ? c.red
-      : c.hair;
+  // The check: a solid green disc when today holds, an amber dashed ring for
+  // an allowed slip, red ring for a miss, an empty grey ring when still open.
+  const ring = on
+    ? { backgroundColor: c.grnSolid, borderColor: c.grnSolid }
+    : status === 'allowed'
+      ? { borderColor: c.streak, borderStyle: 'dashed' as const }
+      : status === 'miss'
+        ? { borderColor: c.redSolid, backgroundColor: c.redTint }
+        : { borderColor: c.hair };
 
   return (
-    <View style={first ? null : { borderTopWidth: 1, borderTopColor: c.hair }}>
+    <View
+      style={[
+        styles.rowWrap,
+        first ? null : { borderTopWidth: 2, borderTopColor: c.hair },
+      ]}
+    >
       <View style={styles.row}>
         <Pressable
           onPress={toggle}
           accessibilityRole="checkbox"
           accessibilityState={{ checked: on }}
           accessibilityLabel={habit.name}
-          style={[
-            styles.check,
-            {
-              borderColor: border,
-              borderStyle: status === 'allowed' ? 'dashed' : 'solid',
-            },
-          ]}
+          style={[styles.check, ring]}
         >
           {on ? (
-            <Icon name="check" size={18} strokeWidth={2.4} color={c.grn} />
+            <Icon name="check" size={22} strokeWidth={3} color={c.onAccent} />
           ) : null}
         </Pressable>
         <Pressable
@@ -256,18 +238,19 @@ function HabitRow({
           accessibilityLabel={`Edit ${habit.name}`}
           style={styles.rowText}
         >
-          <Text style={S(600, 13.5, { lh: 17, color: c.ink })}>
-            {habit.name}
-          </Text>
-          <Text
-            style={[M(600, 9.5, { ls: 0.6, color: c.fnt }), styles.rowDetail]}
-          >
+          <Text style={S(900, 17, { lh: 22, color: c.ink })}>{habit.name}</Text>
+          <Text style={S(700, 14, { lh: 19, color: c.mut })}>
             {detailLine(habit, status, allowanceSpentThisWeek(view))}
           </Text>
         </Pressable>
-        <Text style={M(700, 11, { color: isHeld(status) ? c.grn : c.fnt })}>
-          {view.streak}d
-        </Text>
+        <View
+          style={styles.streak}
+          accessible
+          accessibilityLabel={`${view.streak} day streak`}
+        >
+          <Icon name="flame" size={20} color={c.streak} />
+          <Text style={S(900, 17, { color: c.streakText })}>{view.streak}</Text>
+        </View>
       </View>
       {/* The week, Monday → Sunday — the same seven-column read the weekly
           goals give, indented to line up under the habit's name. */}
@@ -286,10 +269,8 @@ function HabitRow({
 }
 
 /** Marks a day carries in the week strip. An allowed slip gets its own glyph so
- * it never reads as either a clean day or a miss. */
+ * it never reads as either a clean day or a miss; other days show their letter. */
 const DAY_MARK: Partial<Record<HabitDay['status'], string>> = {
-  auto: '✓',
-  held: '✓',
   allowed: '~',
   miss: '×',
 };
@@ -307,38 +288,33 @@ function WeekCell({
 }) {
   const c = useTheme().colors;
   const { status } = day;
-  // Held is held, however it was decided (see HabitRow) — 'auto' and 'held'
-  // deliberately share one fill.
-  const fill =
-    status === 'auto' || status === 'held'
-      ? c.grn
-      : status === 'miss'
-        ? c.red
-        : status === 'open'
-          ? c.track
-          : 'transparent';
-  // Every day of the week has to be visible, including the ones with nothing to
-  // say: a brand-new habit's earlier days, and the days still to come, are drawn
-  // as outlines rather than left as holes in the strip.
-  const border = day.future
-    ? { borderWidth: 1, borderColor: c.hair, borderStyle: 'dashed' as const }
-    : status === 'allowed'
-      ? { borderWidth: 1, borderColor: c.gold, borderStyle: 'dashed' as const }
-      : status === 'none'
-        ? { borderWidth: 1, borderColor: c.hair, borderStyle: 'solid' as const }
-        : status === 'open' && day.isToday
+  const held = status === 'auto' || status === 'held';
+  const look = day.future
+    ? {
+        borderWidth: 2,
+        borderColor: c.hair,
+        borderStyle: 'dashed' as const,
+        text: c.fnt,
+      }
+    : held
+      ? { backgroundColor: c.grnSolid, text: c.onAccent }
+      : status === 'allowed'
+        ? {
+            backgroundColor: c.streakTint,
+            borderWidth: 2,
+            borderColor: c.streak,
+            borderStyle: 'dashed' as const,
+            text: c.streakText,
+          }
+        : status === 'miss'
           ? {
-              borderWidth: 1,
-              borderColor: c.acc,
-              borderStyle: 'solid' as const,
+              backgroundColor: c.redTint,
+              borderWidth: 2,
+              borderColor: c.redSolid,
+              text: c.red,
             }
-          : status === 'open'
-            ? {
-                borderWidth: 1,
-                borderColor: c.hair,
-                borderStyle: 'solid' as const,
-              }
-            : null;
+          : { backgroundColor: c.soft, text: c.mut };
+  const { text, ...box } = look;
   const weekday = new Date(day.dayStart).getDay();
   const letter = WEEK_LETTERS[(weekday + 6) % 7];
   return (
@@ -349,72 +325,71 @@ function WeekCell({
       accessibilityLabel={`${habitName}, ${letter}`}
       style={[
         styles.weekCell,
-        { backgroundColor: fill, opacity: day.future ? 0.7 : 1 },
-        border,
+        box,
+        // Today gets a ring around the cell, whatever its state.
+        day.isToday ? [styles.today, { borderColor: c.ink }] : null,
       ]}
     >
-      <Text
-        style={M(700, 9, {
-          color: status === 'allowed' ? c.gold : c.onAccent,
-        })}
-      >
-        {DAY_MARK[status] ?? ''}
+      <Text style={S(900, 12, { color: text })}>
+        {DAY_MARK[status] ?? letter}
       </Text>
     </Pressable>
   );
 }
 
 const styles = StyleSheet.create({
-  empty: { marginTop: 12 },
-  rows: { marginTop: 4 },
-  row: {
+  head: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 26,
     gap: 12,
-    paddingVertical: 6,
   },
+  list: { marginTop: 12, overflow: 'hidden' },
+  empty: { padding: 16 },
+  rowWrap: { padding: 16, gap: 12 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 14 },
   check: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    borderWidth: 1,
+    borderWidth: 3,
     alignItems: 'center',
     justifyContent: 'center',
   },
   rowText: { flex: 1, minWidth: 0 },
-  rowDetail: { marginTop: 3, lineHeight: 14 },
-  // Indented past the 44px check + its 12px gap so the strip starts under the
-  // habit's name, the way the design has it.
-  week: { flexDirection: 'row', gap: 3, paddingLeft: 56, paddingBottom: 10 },
+  streak: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  week: { flexDirection: 'row', gap: 6, paddingLeft: 58 },
   weekCell: {
     flex: 1,
-    height: 22,
-    borderRadius: 3,
+    height: 28,
+    borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  today: { borderWidth: 2, borderStyle: 'solid' },
   catchup: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
     marginTop: 12,
-    paddingVertical: 11,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderRadius: 8,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderWidth: 2,
+    borderRadius: 18,
   },
   catchupText: { flex: 1, minWidth: 0 },
-  catchupSub: { marginTop: 2, lineHeight: 14 },
   catchupBtn: {
-    borderRadius: 999,
-    paddingVertical: 9,
-    paddingHorizontal: 13,
+    borderRadius: 14,
+    borderBottomWidth: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
   },
   foot: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginTop: 12,
+    marginTop: 10,
     gap: 12,
   },
 });

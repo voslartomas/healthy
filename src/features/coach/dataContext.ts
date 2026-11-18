@@ -78,7 +78,7 @@ export function buildDataContext(): string {
 
   if (!snap.live) {
     lines.push(
-      'No health data is connected yet (Health Connect is not linked in Setup), so most numbers are unavailable.',
+      'No health data is connected yet (Health Connect is not linked in the Me tab), so most numbers are unavailable.',
     );
   }
 
@@ -106,6 +106,12 @@ export function buildDataContext(): string {
   if (snap.sleep) {
     lines.push(
       `Sleep last night: ${hoursHm(snap.sleep.hours)} (${snap.sleep.performancePct}% of goal).`,
+    );
+  } else if (snap.live && !snap.hrv) {
+    // Without this the brief, seeing no sleep line, can fall back on anything —
+    // say plainly that last night just hasn't arrived from the wearable yet.
+    lines.push(
+      "Last night's sleep and HRV have not synced yet, so recovery is unknown for now.",
     );
   }
 
@@ -135,8 +141,23 @@ export function buildDataContext(): string {
     lines.push(
       `Nutrition today: ${grp(n.eaten)} kcal — ${Math.round(n.proteinG)}g protein, ${Math.round(n.carbsG)}g carbs, ${Math.round(n.fatG)}g fat.`,
     );
+    // The entries by name: the coach edits/deletes food BY NAME, and the user
+    // may say it in another language ("smaž ty vejce" for an entry stored as
+    // "Eggs") — with the stored names here, the model passes the right one.
+    const named = n.meals.slice(-8);
+    if (named.length) {
+      lines.push(
+        `Logged today: ${named.map(m => `${m.name} (${grp(m.kcal)} kcal)`).join(', ')}.`,
+      );
+    }
   } else {
     lines.push('Nutrition today: nothing logged yet.');
+  }
+
+  // Only when logged: many users don't track water, and "0 ml" would read to
+  // the coach as "drank nothing" rather than "not tracked".
+  if (snap.waterTodayMl != null) {
+    lines.push(`Water today: ${grp(snap.waterTodayMl)} ml.`);
   }
 
   const cg = activeCalorieGoal(useCalorieGoalsStore.getState().goals);

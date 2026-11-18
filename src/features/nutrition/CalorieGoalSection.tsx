@@ -8,7 +8,15 @@ import {
   View,
 } from 'react-native';
 
-import { M, S, Card } from '../../components/brief';
+import {
+  BriefButton,
+  chunky,
+  inputStyle,
+  Pill,
+  S,
+  SegmentedRow,
+} from '../../components/brief';
+import { Icon } from '../../components/Icon';
 import {
   createCalorieGoal,
   removeCalorieGoal,
@@ -20,6 +28,7 @@ import {
 } from '../../state/useCalorieGoalsStore';
 import { useHealthStore } from '../../state/useHealthStore';
 import { useTheme } from '../../theme/theme';
+import { SectionHead } from '../settings/SectionHead';
 
 const MONTHS = [
   'Jan',
@@ -78,12 +87,17 @@ function signed(n: number): string {
   return '0';
 }
 
+const MODE_OPTIONS = [
+  { key: 'deficit' as const, label: 'Deficit' },
+  { key: 'surplus' as const, label: 'Surplus' },
+];
+
 /**
- * Calorie-goal setup: the active daily net target, an editor to add a new goal
- * (deficit/surplus, effective date), and the goal history with delete. Lives on
- * the Setup tab — goals are set occasionally, not every day, so this belongs
- * with configuration rather than the daily Fuel screen (which still shows the
- * active target in its hero + quad).
+ * Calorie-goal setup: the active daily net target (with today's on-track /
+ * off-target pill), an editor to add a new goal (deficit/surplus, effective
+ * date), and the goal history with delete. Lives on the Me tab — goals are set
+ * occasionally, not every day, so this belongs with configuration rather than
+ * the daily Food screen (which still shows the active target in its hero).
  */
 export function CalorieGoalSection() {
   const t = useTheme();
@@ -136,191 +150,164 @@ export function CalorieGoalSection() {
     }
   }, [mag, date, mode]);
 
-  const inputStyle = {
-    ...S(600, 14, { color: c.ink }),
-    borderWidth: 1,
-    borderColor: c.hair,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    // The design fills fields with the page ground so they read as insets in
-    // the card rather than as another raised surface.
-    backgroundColor: c.bg,
-  } as const;
+  const field = [inputStyle(c), S(800, 17, { color: c.ink }), styles.input];
 
   return (
-    <Card
-      title="Calorie goal"
-      right={
-        <Pressable
-          onPress={() => setEditing(e => !e)}
-          accessibilityRole="button"
-          accessibilityLabel="Set calorie goal"
-        >
-          <Text style={M(700, 10.5, { ls: 1, color: c.acc })}>
-            {editing ? 'CANCEL' : '+ NEW GOAL'}
-          </Text>
-        </Pressable>
-      }
-    >
-      {activeGoal ? (
-        <View style={styles.goalHead}>
-          <Text style={M(700, 22, { ls: -0.5, color: c.ink })}>
-            {signed(activeGoal.targetNet)}
-            <Text style={M(700, 12, { color: c.fnt })}> KCAL/DAY</Text>
-          </Text>
-          {goalHit != null ? (
-            <Text
-              style={M(700, 10.5, { ls: 0.5, color: goalHit ? c.grn : c.fnt })}
-            >
-              {goalHit ? 'ON TRACK' : 'OFF TARGET'}
+    <>
+      <SectionHead
+        title="Calorie goal"
+        right={
+          <Pressable
+            onPress={() => setEditing(e => !e)}
+            accessibilityRole="button"
+            accessibilityLabel="Set calorie goal"
+            hitSlop={8}
+            style={styles.newBtn}
+          >
+            <Text style={S(900, 15, { color: c.acc })}>
+              {editing ? 'Cancel' : '+ New goal'}
             </Text>
-          ) : null}
-        </View>
-      ) : (
-        <Text style={[S(600, 13, { color: c.mut }), styles.empty]}>
-          No calorie goal set. Add one to track your daily deficit or surplus.
-        </Text>
-      )}
-
-      {editing ? (
-        <View style={styles.form}>
-          <View style={styles.modeRow}>
-            {(['deficit', 'surplus'] as const).map(mo => {
-              const on = mode === mo;
-              return (
-                <Pressable
-                  key={mo}
-                  onPress={() => setMode(mo)}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: on }}
-                  style={[
-                    styles.modeBtn,
-                    {
-                      borderColor: on ? c.ink : c.hair,
-                      backgroundColor: on ? c.ink : 'transparent',
-                    },
-                  ]}
-                >
-                  <Text
-                    style={M(700, 11, { ls: 0.5, color: on ? c.inv : c.mut })}
-                  >
-                    {mo.toUpperCase()}
-                  </Text>
-                </Pressable>
-              );
-            })}
+          </Pressable>
+        }
+      />
+      <View style={[chunky(c), styles.card]}>
+        {activeGoal ? (
+          <View style={styles.goalHead}>
+            <Text style={S(900, 24, { lh: 30, color: c.ink })}>
+              {signed(activeGoal.targetNet)}
+              <Text style={S(900, 15, { color: c.mut })}> kcal / day</Text>
+            </Text>
+            {goalHit != null ? (
+              <Pill
+                spec={
+                  goalHit
+                    ? { text: 'On track', bg: c.grnTint, textColor: c.grn }
+                    : { text: 'Off target', bg: c.soft, textColor: c.mut }
+                }
+              />
+            ) : null}
           </View>
-          <View style={styles.formRow}>
-            <TextInput
-              value={date}
-              onChangeText={setDate}
-              placeholder="YYYY-MM-DD"
-              placeholderTextColor={c.fnt}
-              autoCapitalize="none"
-              accessibilityLabel="Goal start date"
-              style={[
-                inputStyle,
-                styles.formName,
-                { fontFamily: M(600, 13).fontFamily },
-              ]}
-            />
-            <TextInput
-              value={mag}
-              onChangeText={setMag}
-              placeholder="kcal"
-              placeholderTextColor={c.fnt}
-              keyboardType="number-pad"
-              style={[
-                inputStyle,
-                styles.formKcal,
-                { fontFamily: M(600, 14).fontFamily },
-              ]}
-            />
-            <Pressable
-              onPress={submit}
-              disabled={busy}
-              accessibilityRole="button"
-              accessibilityLabel="Save calorie goal"
-              style={[
-                styles.formBtn,
-                { backgroundColor: c.accSolid, opacity: busy ? 0.5 : 1 },
-              ]}
-            >
-              <Text style={M(700, 16, { color: c.onAccent })}>+</Text>
-            </Pressable>
-          </View>
-        </View>
-      ) : null}
+        ) : (
+          <Text style={S(700, 15, { lh: 21, color: c.mut })}>
+            No calorie goal set. Add one to track your daily deficit or surplus.
+          </Text>
+        )}
 
-      {goalHistory.length > 0 ? (
-        <View style={styles.history}>
-          {goalHistory.map(g => (
-            <View
-              key={g.id}
-              style={[styles.histRow, { borderTopColor: c.hair }]}
-            >
-              <Text style={[S(600, 12.5, { color: c.ink }), styles.histDate]}>
-                {shortDate(g.effectiveFrom)}
-              </Text>
-              <Text style={M(700, 12, { color: c.mut })}>
-                {signed(g.targetNet)}
-              </Text>
-              <Pressable
-                onPress={() => removeCalorieGoal(g.id)}
-                accessibilityRole="button"
-                accessibilityLabel={`Remove goal from ${shortDate(g.effectiveFrom)}`}
-                hitSlop={8}
-              >
-                <Text style={M(700, 13, { color: c.fnt })}>×</Text>
-              </Pressable>
+        {editing ? (
+          <View style={[styles.form, { borderTopColor: c.hair }]}>
+            <SegmentedRow<'deficit' | 'surplus'>
+              options={MODE_OPTIONS}
+              value={mode}
+              onChange={next => next && setMode(next)}
+            />
+            <View style={styles.formRow}>
+              <View style={styles.dateCol}>
+                <Text style={[S(900, 14, { color: c.mut }), styles.label]}>
+                  Starts on
+                </Text>
+                <TextInput
+                  value={date}
+                  onChangeText={setDate}
+                  placeholder="YYYY-MM-DD"
+                  placeholderTextColor={c.fnt}
+                  autoCapitalize="none"
+                  accessibilityLabel="Goal start date"
+                  style={field}
+                />
+              </View>
+              <View style={styles.kcalCol}>
+                <Text style={[S(900, 14, { color: c.mut }), styles.label]}>
+                  kcal / day
+                </Text>
+                <TextInput
+                  value={mag}
+                  onChangeText={setMag}
+                  placeholder="400"
+                  placeholderTextColor={c.fnt}
+                  keyboardType="number-pad"
+                  accessibilityLabel="Calories per day"
+                  style={field}
+                />
+              </View>
             </View>
-          ))}
-        </View>
-      ) : null}
-    </Card>
+            <BriefButton
+              label="Save goal"
+              onPress={() => void submit()}
+              disabled={busy}
+              accessibilityLabel="Save calorie goal"
+              size={13}
+              style={styles.save}
+            />
+          </View>
+        ) : null}
+
+        {goalHistory.length > 0 ? (
+          <View style={styles.history}>
+            {goalHistory.map(g => (
+              <View
+                key={g.id}
+                style={[styles.histRow, { borderTopColor: c.hair }]}
+              >
+                <Text style={[S(700, 15, { color: c.mut }), styles.histDate]}>
+                  {`Since ${shortDate(g.effectiveFrom)}`}
+                </Text>
+                <Text style={S(900, 15, { color: c.ink })}>
+                  {signed(g.targetNet)}
+                </Text>
+                <Pressable
+                  onPress={() => removeCalorieGoal(g.id)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove goal from ${shortDate(g.effectiveFrom)}`}
+                  style={styles.remove}
+                >
+                  <Icon
+                    name="close"
+                    size={16}
+                    color={c.fnt}
+                    strokeWidth={2.6}
+                  />
+                </Pressable>
+              </View>
+            ))}
+          </View>
+        ) : null}
+      </View>
+    </>
   );
 }
 
 const styles = StyleSheet.create({
-  empty: { marginTop: 12 },
+  newBtn: { minHeight: 44, justifyContent: 'center' },
+  card: { marginTop: 10, padding: 16 },
   goalHead: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'baseline',
-    marginTop: 14,
-  },
-  form: { marginTop: 6 },
-  modeRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
-  modeBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 999,
-    borderWidth: 1,
     alignItems: 'center',
+    gap: 12,
   },
-  formRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginTop: 10,
-  },
-  formName: { flex: 1 },
-  formKcal: { width: 78 },
-  formBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  history: { marginTop: 16 },
+  form: { marginTop: 14, paddingTop: 14, borderTopWidth: 2 },
+  formRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  dateCol: { flex: 3, minWidth: 0 },
+  kcalCol: { flex: 2, minWidth: 0 },
+  label: { marginBottom: 6 },
+  input: { paddingVertical: 12 },
+  save: { marginTop: 12 },
+  history: { marginTop: 10 },
   histRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingVertical: 11,
-    borderTopWidth: 1,
+    paddingTop: 4,
+    marginTop: 4,
+    borderTopWidth: 2,
   },
   histDate: { flex: 1 },
+  // A 44pt tap target around the small ×, so removing a goal never needs aim.
+  remove: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: -12,
+  },
 });

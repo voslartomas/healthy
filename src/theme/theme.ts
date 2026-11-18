@@ -4,12 +4,13 @@ import { ThemePreference, useAppStore } from '../state/useAppStore';
 import { dark, light, Palette } from './colors';
 import { mono } from './fonts';
 
-/** Corner radii used across the design (card = 10, input/tile = 12, pill = 999). */
+/** Corner radii (ADR-007): chips 10, inputs/buttons 14–16, cards 22, pills 999.
+ * Rounder than v3 throughout — softness is most of the friendly look. */
 export const radii = {
-  sm: 6,
-  md: 10,
-  lg: 12,
-  xl: 14,
+  sm: 10,
+  md: 14,
+  lg: 16,
+  xl: 22,
   pill: 999,
 } as const;
 
@@ -22,15 +23,20 @@ export const spacing = {
   xl: 18,
 } as const;
 
-/** Card geometry shared by every section card in the v4 sheet. */
+/**
+ * Card geometry shared by every section card (ADR-007): a 2px outline whose
+ * bottom edge is 4px, so cards read as chunky physical tiles rather than flat
+ * panels — the same depth cue the primary buttons use.
+ */
 export const card = {
-  radius: 12,
-  borderWidth: 1,
-  paddingVertical: 16,
+  radius: 22,
+  borderWidth: 2,
+  borderBottomWidth: 4,
+  paddingVertical: 18,
   paddingHorizontal: 18,
-  /** Gap between consecutive cards; the first card after the header uses 6. */
-  gap: 12,
-  firstGap: 6,
+  /** Gap between consecutive cards; the first card after the header uses 8. */
+  gap: 14,
+  firstGap: 8,
 } as const;
 
 /** Monospace family used for numeric readouts (Oswald in the v3 design).

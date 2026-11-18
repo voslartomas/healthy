@@ -14,6 +14,17 @@ import {
 } from '../src/state/useGoalsStore';
 import { useHealthStore } from '../src/state/useHealthStore';
 
+/** The ActivitySummary fields these goal tests don't exercise. */
+const SESSION_EXTRAS = {
+  end: 0,
+  key: 'k',
+  source: 'test',
+  hrZones: null,
+  load: null,
+  loadEstimated: false,
+  zone2PlusMin: 0,
+};
+
 // Auto-tracked weekly totals the goal helpers read from the health snapshot.
 const TRACKED = {
   steps: 41200,
@@ -97,6 +108,7 @@ describe('activity goals (match by type / displayName + min duration)', () => {
       durationMin: 42,
       energyKcal: null,
       start: 0,
+      ...SESSION_EXTRAS,
     },
     {
       name: 'Posilování',
@@ -105,6 +117,7 @@ describe('activity goals (match by type / displayName + min duration)', () => {
       durationMin: 20,
       energyKcal: null,
       start: 0,
+      ...SESSION_EXTRAS,
     },
     {
       name: 'Trénink středu těla',
@@ -113,6 +126,7 @@ describe('activity goals (match by type / displayName + min duration)', () => {
       durationMin: 9,
       energyKcal: null,
       start: 0,
+      ...SESSION_EXTRAS,
     },
   ];
 
@@ -181,6 +195,7 @@ describe('goalWeekly (per-week attainment)', () => {
     durationMin: dur,
     energyKcal: null,
     start: 0,
+    ...SESSION_EXTRAS,
   });
 
   it('computes hit/miss per week for an activity goal and flags coverage', () => {
@@ -440,6 +455,7 @@ describe('goalDailySeries (Today "Week" per-day bars)', () => {
       durationMin: 45,
       energyKcal: null,
       start,
+      ...SESSION_EXTRAS,
     });
     // A session on Mon and two on Wed → those two days score 1, the rest 0.
     const week = base({ activities: [sess(0), sess(2 * DAY), sess(2 * DAY)] });

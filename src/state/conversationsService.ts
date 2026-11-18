@@ -87,11 +87,13 @@ export function appendMessage(
   from: StoredMessage['from'],
   text: string,
   ms?: number,
+  extra?: Pick<StoredMessage, 'food'>,
 ): void {
   const store = useConversationsStore.getState();
   const conv = currentConversation(store) ?? ensureConversation();
   const message: StoredMessage = { id: newId('m'), from, text };
   if (ms != null) message.ms = ms;
+  if (extra?.food) message.food = extra.food;
   const title =
     conv.title === 'New chat' && from === 'me' ? deriveTitle(text) : conv.title;
   const updated: Conversation = {
@@ -99,6 +101,26 @@ export function appendMessage(
     title,
     messages: [...conv.messages, message],
     updatedAt: Date.now(),
+  };
+  store.upsertLocal(updated);
+  persist(updated);
+}
+
+/** Patch one message in place (e.g. a "Logged: …" note after the food was
+ * edited, so it shows the new values and the new entry id) and persist. */
+export function updateMessage(
+  conversationId: string,
+  messageId: string,
+  patch: Partial<Pick<StoredMessage, 'text' | 'food'>>,
+): void {
+  const store = useConversationsStore.getState();
+  const conv = store.conversations.find(c => c.id === conversationId);
+  if (!conv) return;
+  const updated: Conversation = {
+    ...conv,
+    messages: conv.messages.map(m =>
+      m.id === messageId ? { ...m, ...patch } : m,
+    ),
   };
   store.upsertLocal(updated);
   persist(updated);

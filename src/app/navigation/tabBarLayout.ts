@@ -9,7 +9,7 @@ import { Platform } from 'react-native';
  * own copy of the numbers, which is how the two used to drift apart.
  */
 export const TAB_PILL = {
-  height: 58,
+  height: 64,
   /**
    * Inset from the left and right screen edges. Matches the brief column's own
    * gutter (`BRIEF_GUTTER`) so the pill's edges line up with the cards above it

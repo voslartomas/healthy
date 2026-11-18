@@ -6,43 +6,38 @@ import {
   Text,
   View,
 } from 'react-native';
+import Svg, { Circle } from 'react-native-svg';
 
 import { ScreenProps } from '../../app/navigation/types';
 import {
-  BAND,
   BriefScreen,
   cardTitleStyle,
-  GridBox,
-  GridCell,
-  GridRow,
-  HeroRow,
-  InkBand,
-  M,
+  chunky,
   MacroBar,
+  pageTitleStyle,
+  Pill,
   S,
+  toneColors,
+  Tone,
 } from '../../components/brief';
 import { Icon } from '../../components/Icon';
-import {
-  HealthSnapshot,
-  healthSourceName,
-  ReadinessContribution,
-} from '../../health';
+import { HealthSnapshot, healthSourceName } from '../../health';
 import { useHealthStore } from '../../state/useHealthStore';
 import { useTheme } from '../../theme/theme';
 import { WeeklyGoalsCard } from '../goals/WeeklyGoalsCard';
 import { HabitsCard } from '../habits/HabitsCard';
 import { useDailyBriefStore } from './useDailyBriefStore';
 
-/** Decimal hours → "7:42". */
+/** Decimal hours → "7h 42m". */
 function hoursToHm(hours: number): string {
   const total = Math.round(hours * 60);
-  return `${Math.floor(total / 60)}:${(total % 60).toString().padStart(2, '0')}`;
+  return `${Math.floor(total / 60)}h ${(total % 60).toString().padStart(2, '0')}m`;
 }
 
-/** Minutes → "1:10". */
+/** Minutes → "1h 10m". */
 function minToHm(min: number): string {
   const m = Math.round(min);
-  return `${Math.floor(m / 60)}:${(m % 60).toString().padStart(2, '0')}`;
+  return `${Math.floor(m / 60)}h ${(m % 60).toString().padStart(2, '0')}m`;
 }
 
 function grp(n: number): string {
@@ -58,65 +53,63 @@ function signed(n: number): string {
   return '0';
 }
 
-/** Recovery status: pill text + whether to show the green dot. */
-function recoveryPill(snap: HealthSnapshot): {
-  text: string;
-  dot: boolean;
+/** "Good morning" / "Good afternoon" / "Good evening" by the local hour. */
+function greeting(now: Date = new Date()): string {
+  const h = now.getHours();
+  if (h < 12) return 'Good morning';
+  if (h < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
+/**
+ * What the recovery card says. With a score: the state and what it means for
+ * today. Without one, WHY there is none — the three cases need different
+ * things from the user, so they never share a message:
+ *  - stale: the cache from yesterday is showing and today's read is on its way;
+ *  - live: connected and reading fine, the wearable just hasn't pushed last
+ *    night yet (the usual state early in the morning — not a setup problem);
+ *  - neither: nothing is connected.
+ */
+function recoveryCopy(snap: HealthSnapshot): {
+  title: string;
+  sub: string;
+  tone: Tone;
 } {
-  if (snap.readiness)
-    return { text: snap.readiness.state.toUpperCase(), dot: true };
-  // A stale snapshot (the cache, before the day's first live read) has its
-  // readiness suppressed on purpose — the HRV and sleep it would be computed
-  // from are yesterday's. Say we're still updating rather than "NOT CONNECTED",
-  // which would read as a broken setup.
-  if (snap.stale) return { text: 'UPDATING', dot: false };
-  return { text: 'NOT CONNECTED', dot: false };
-}
-
-/** The fallback hint under the hero number when there is nothing to explain. */
-const READINESS_CAPTION: Record<string, string> = {
-  Recovered: 'READY TO ADD LOAD',
-  Balanced: 'HOLD YOUR USUAL LOAD',
-  Strained: 'KEEP IT EASY TODAY',
-};
-
-/** Short label for each readiness input in the hero's "counted from" line. */
-const CONTRIBUTOR_SHORT: Record<ReadinessContribution['key'], string> = {
-  hrv: 'HRV',
-  rhr: 'RHR',
-  sleep: 'SLEEP',
-};
-
-/** What the score was counted from, e.g. "HRV 62 · RHR 54 · SLEEP 96% →". */
-function readinessCaption(snap: HealthSnapshot): string {
-  const parts = snap.readiness?.contributors ?? [];
-  if (parts.length === 0) {
-    if (snap.readiness) {
-      return READINESS_CAPTION[snap.readiness.state] ?? 'TAP FOR DETAIL';
-    }
-    return snap.stale
-      ? 'WAITING FOR TODAY’S DATA'
-      : 'CONNECT A SOURCE TO START';
+  const r = snap.readiness;
+  if (r) {
+    if (r.state === 'Recovered')
+      return {
+        title: 'Recovered',
+        sub: 'Ready to add load today',
+        tone: 'green',
+      };
+    if (r.state === 'Balanced')
+      return { title: 'Balanced', sub: 'Hold your usual load', tone: 'accent' };
+    return { title: 'Strained', sub: 'Keep it easy today', tone: 'red' };
   }
-  return (
-    parts
-      .map(cont => {
-        const label = CONTRIBUTOR_SHORT[cont.key];
-        const value =
-          cont.key === 'sleep'
-            ? `${Math.round(cont.score)}%`
-            : String(Math.round(cont.value));
-        return `${label} ${value}`;
-      })
-      .join(' · ') + ' →'
-  );
+  if (snap.stale)
+    return {
+      title: 'Updating…',
+      sub: 'Waiting for today’s data',
+      tone: 'accent',
+    };
+  if (snap.live)
+    return {
+      title: 'Not synced yet',
+      sub: 'Last night hasn’t arrived — pull to refresh',
+      tone: 'accent',
+    };
+  return {
+    title: 'Not connected',
+    sub: 'Connect a source in Me to start',
+    tone: 'accent',
+  };
 }
 
-/** A signed delta sub-label for a grid cell ("▲ 7 MS"), coloured good/bad. */
+/** A signed delta ("▲5"), coloured by whether that direction is good. */
 function deltaSub(
   delta: number | null | undefined,
   goodUp: boolean,
-  unit: string,
   decimals = 0,
 ): { text: string; good: boolean } | null {
   if (delta == null) return null;
@@ -124,16 +117,118 @@ function deltaSub(
   if (rounded === 0) return null;
   const up = rounded > 0;
   return {
-    text: `${up ? '▲' : '▼'} ${Math.abs(rounded).toFixed(decimals)} ${unit}`.trim(),
+    text: `${up ? '▲' : '▼'}${Math.abs(rounded).toFixed(decimals)}`,
     good: goodUp ? up : !up,
   };
 }
 
+/** The recovery ring: the score as a filled arc on its tone's soft track. */
+function RecoveryRing({
+  pct,
+  tone,
+  size = 96,
+  stroke = 12,
+}: {
+  pct: number | null;
+  tone: Tone;
+  size?: number;
+  stroke?: number;
+}) {
+  const c = useTheme().colors;
+  const tc = toneColors(c, tone);
+  const r = (size - stroke) / 2;
+  const circ = 2 * Math.PI * r;
+  const frac = pct != null ? Math.max(0, Math.min(1, pct / 100)) : 0;
+  return (
+    <View style={{ width: size, height: size }}>
+      <Svg width={size} height={size}>
+        <Circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          stroke={tc.tint}
+          strokeWidth={stroke}
+          fill="none"
+        />
+        {frac > 0 ? (
+          <Circle
+            cx={size / 2}
+            cy={size / 2}
+            r={r}
+            stroke={tc.solid}
+            strokeWidth={stroke}
+            fill="none"
+            strokeLinecap="round"
+            strokeDasharray={`${circ * frac} ${circ}`}
+            transform={`rotate(-90 ${size / 2} ${size / 2})`}
+          />
+        ) : null}
+      </Svg>
+      <View style={[StyleSheet.absoluteFill, styles.ringLabel]}>
+        <Text style={S(900, 26, { color: c.ink })}>
+          {pct != null ? `${pct}%` : '—'}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
+/** One soft stat chip in the recovery card; a button into its detail. */
+function StatChip({
+  label,
+  value,
+  sub,
+  onPress,
+  accessibilityLabel,
+}: {
+  label: string;
+  value: string;
+  sub?: { text: string; good: boolean } | string | null;
+  onPress: () => void;
+  accessibilityLabel: string;
+}) {
+  const c = useTheme().colors;
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      style={[styles.chip, { backgroundColor: c.soft }]}
+    >
+      <Text style={S(800, 12, { color: c.fnt })} numberOfLines={1}>
+        {label}
+      </Text>
+      {/* Four chips share ~350pt, so "7h 42m" / "100% need" can outgrow a
+          chip on a narrow phone — shrink to fit rather than truncate to "9h 1…". */}
+      <Text
+        style={S(900, 19, { lh: 23, color: c.ink })}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.7}
+      >
+        {value}
+      </Text>
+      {sub ? (
+        <Text
+          style={S(900, 12, {
+            color: typeof sub === 'string' ? c.mut : sub.good ? c.grn : c.red,
+          })}
+          numberOfLines={1}
+          adjustsFontSizeToFit
+          minimumFontScale={0.75}
+        >
+          {typeof sub === 'string' ? sub : sub.text}
+        </Text>
+      ) : null}
+    </Pressable>
+  );
+}
+
 /**
- * The "Today" data brief (v4 "ink band" layout): the recovery hero and the
- * daily brief share a full-bleed dark band that continues the native header;
- * below it a four-up metric grid (sleep, HRV, RHR, load) with the overnight
- * stage bar, then the "Body & fuel" card and the week's goals.
+ * Today (ADR-007 "friendly" layout): a greeting, the recovery card (ring +
+ * the four overnight numbers, each a door into its detail), the coach's daily
+ * brief as a chat bubble, today's habits, the week's goals, and body & food.
+ * One idea per card, big readable numbers.
  */
 export function DashboardScreen({ navigation }: ScreenProps) {
   const c = useTheme().colors;
@@ -146,13 +241,16 @@ export function DashboardScreen({ navigation }: ScreenProps) {
   const ensureBrief = useDailyBriefStore(s => s.ensure);
   const regenerateBrief = useDailyBriefStore(s => s.regenerate);
 
+  // Re-checked when last night lands: a brief written before the wearable
+  // synced is rewritten once there is a night to talk about.
+  const hasNight = snap.sleep != null || snap.hrv != null;
   React.useEffect(() => {
     void ensureBrief();
-  }, [ensureBrief]);
+  }, [ensureBrief, hasNight]);
 
   const recoveryPct = snap.readiness?.pct ?? null;
-  const pill = recoveryPill(snap);
-  const caption = readinessCaption(snap);
+  const rec = recoveryCopy(snap);
+  const recTone = toneColors(c, rec.tone);
 
   const briefSyncing = briefStatus === 'syncing';
   const briefWorking = briefSyncing || briefStatus === 'loading';
@@ -161,7 +259,7 @@ export function DashboardScreen({ navigation }: ScreenProps) {
       ? 'Waiting for today’s health data…'
       : 'Writing today’s brief…'
     : briefText ||
-      (briefError ?? 'No brief yet — set up the coach in Setup, then refresh.');
+      (briefError ?? 'No brief yet — set up the coach in Me, then refresh.');
 
   const eaten = snap.nutrition?.eaten ?? null;
   const burned = snap.energyBurnedToday;
@@ -179,8 +277,8 @@ export function DashboardScreen({ navigation }: ScreenProps) {
     ? stages.deepMin + stages.remMin + stages.lightMin + stages.awakeMin
     : 0;
 
-  const hrvSub = deltaSub(snap.hrv?.delta, true, 'MS');
-  const rhrSub = deltaSub(snap.restingHr?.delta, false, 'BPM');
+  const hrvSub = deltaSub(snap.hrv?.delta, true);
+  const rhrSub = deltaSub(snap.restingHr?.delta, false);
 
   const wPts = snap.trends.weight;
   const latestWeight = wPts.length ? wPts[wPts.length - 1].value : null;
@@ -190,7 +288,6 @@ export function DashboardScreen({ navigation }: ScreenProps) {
       ? latestWeight - prevWeight
       : null,
     false,
-    '',
     1,
   );
   const fPts = snap.trends.bodyFat;
@@ -199,186 +296,160 @@ export function DashboardScreen({ navigation }: ScreenProps) {
   const fSub = deltaSub(
     latestFat != null && prevFat != null ? latestFat - prevFat : null,
     false,
-    '',
     1,
   );
 
-  // Never claim "SYNCED" over data we know is not current. A cache-derived
+  // Never claim "synced" over data we know is not current. A cache-derived
   // snapshot is flagged `stale` until the day's first live read lands, and saying
   // so is the difference between the user trusting a number and being misled by
   // it. `refreshing` takes precedence so a pull always visibly does something.
   const syncNote = refreshing
-    ? 'UPDATING…'
+    ? 'Updating…'
     : !snap.live
-      ? 'NO HEALTH DATA YET — CONNECT IN SETUP'
+      ? 'No health data yet — connect a source in Me'
       : snap.stale
-        ? 'SHOWING SAVED DATA — PULL TO REFRESH'
-        : `SYNCED · ${healthSourceName().toUpperCase()} · ${snap.sources.length} SOURCE${snap.sources.length === 1 ? '' : 'S'}`;
+        ? 'Showing saved data — pull down to refresh'
+        : `Synced from ${healthSourceName()} · ${snap.sources.length} source${snap.sources.length === 1 ? '' : 's'}\nPull down to refresh`;
+
+  const livePill = refreshing
+    ? { text: 'Updating', bg: c.soft, textColor: c.mut }
+    : snap.live && !snap.stale
+      ? { text: 'Live', dot: c.grnSolid }
+      : { text: 'No data', bg: c.soft, textColor: c.mut };
 
   return (
     <BriefScreen refreshing={refreshing} onRefresh={() => void refreshHealth()}>
-      {/* ── Recovery hero + daily brief, in the ink band ─────────────── */}
-      <InkBand paddingBottom={20}>
-        <HeroRow
-          value={recoveryPct != null ? String(recoveryPct) : '—'}
-          suffix={recoveryPct != null ? '%' : undefined}
-          pillText={pill.text}
-          pillDot={pill.dot}
-          caption={caption}
+      {/* ── Greeting ─────────────────────────────────────────────────── */}
+      <View style={styles.greet}>
+        <Text style={pageTitleStyle(c.ink)}>{greeting()}</Text>
+        <Pill spec={livePill} />
+      </View>
+
+      {/* ── Recovery ─────────────────────────────────────────────────── */}
+      <View style={[chunky(c), styles.card]}>
+        <Pressable
           onPress={() => navigation.navigate('Recovery')}
+          accessibilityRole="button"
           accessibilityLabel={
             recoveryPct != null
               ? `Open recovery detail, ${recoveryPct} percent recovered`
               : 'Open recovery detail, no recovery data'
           }
-        />
-
-        <View style={styles.brief}>
-          <View style={styles.briefBar}>
-            <View
-              style={{
-                width: `${recoveryPct ?? 0}%`,
-                height: '100%',
-                backgroundColor: BAND.grn,
-              }}
-            />
-          </View>
-          <View style={styles.briefHead}>
-            <Icon name="gemini" size={13} color={BAND.acc} />
-            <Text style={M(700, 9, { ls: 1.4, color: BAND.fnt })}>
-              DAILY BRIEF
+          style={styles.recTop}
+        >
+          <RecoveryRing pct={recoveryPct} tone={rec.tone} />
+          <View style={styles.recText}>
+            <Text style={S(900, 13, { color: c.fnt })}>RECOVERY</Text>
+            <Text style={S(900, 24, { lh: 29, color: recTone.text })}>
+              {rec.title}
             </Text>
-            <View style={styles.spacer} />
-            {briefWorking ? (
-              <ActivityIndicator size="small" color={BAND.acc} />
-            ) : (
-              <Pressable
-                onPress={() => void regenerateBrief()}
-                accessibilityRole="button"
-                accessibilityLabel="Regenerate today's brief"
-                hitSlop={8}
-              >
-                <Text style={M(700, 9, { ls: 1, color: BAND.acc })}>
-                  REFRESH
-                </Text>
-              </Pressable>
-            )}
+            <Text style={S(700, 15, { lh: 20, color: c.mut })}>{rec.sub}</Text>
           </View>
-          <Text
-            style={S(500, 12.5, {
-              lh: 17,
-              color: briefWorking || !briefText ? BAND.mut : BAND.ink,
-            })}
-          >
-            {briefBody}
-          </Text>
-        </View>
-      </InkBand>
+          <Icon name="chevronRight" size={22} color={c.fnt} />
+        </Pressable>
 
-      {/* ── Overnight metrics grid ───────────────────────────────────── */}
-      <GridBox style={styles.gridGap}>
-        <GridRow>
-          <GridCell
-            first
+        <View style={styles.chips}>
+          <StatChip
             label="SLEEP"
+            value={sleep ? hoursToHm(sleep.hours) : '—'}
+            sub={sleep ? `${sleep.performancePct}% need` : null}
             onPress={() => navigation.navigate('Sleep')}
             accessibilityLabel="Open sleep detail"
-          >
-            <Text style={M(700, 19, { ls: -0.3, color: c.ink })}>
-              {sleep ? hoursToHm(sleep.hours) : '——'}
-            </Text>
-            {sleep ? (
-              <Text style={M(700, 9, { color: c.grn })}>
-                {sleep.performancePct} % NEED
-              </Text>
-            ) : null}
-          </GridCell>
-          <GridCell
+          />
+          <StatChip
             label="HRV"
+            value={snap.hrv ? String(Math.round(snap.hrv.value)) : '—'}
+            sub={hrvSub}
             onPress={() => navigation.navigate('Recovery')}
             accessibilityLabel="Open recovery detail"
-          >
-            <Text style={M(700, 19, { ls: -0.3, color: c.ink })}>
-              {snap.hrv ? String(Math.round(snap.hrv.value)) : '——'}
-            </Text>
-            {hrvSub ? (
-              <Text style={M(700, 9, { color: hrvSub.good ? c.grn : c.red })}>
-                {hrvSub.text}
-              </Text>
-            ) : null}
-          </GridCell>
-          <GridCell
-            label="RHR"
+          />
+          <StatChip
+            label="REST HR"
+            value={
+              snap.restingHr ? String(Math.round(snap.restingHr.value)) : '—'
+            }
+            sub={rhrSub}
             onPress={() => navigation.navigate('Recovery')}
             accessibilityLabel="Open recovery detail"
-          >
-            <Text style={M(700, 19, { ls: -0.3, color: c.ink })}>
-              {snap.restingHr ? String(Math.round(snap.restingHr.value)) : '——'}
-            </Text>
-            {rhrSub ? (
-              <Text style={M(700, 9, { color: rhrSub.good ? c.grn : c.red })}>
-                {rhrSub.text}
-              </Text>
-            ) : null}
-          </GridCell>
-          <GridCell
+          />
+          <StatChip
             label="LOAD"
+            value={
+              snap.cardio.hasLoadData ? String(snap.cardio.todayLoad) : '—'
+            }
+            sub={snap.cardio.hasLoadData ? `wk ${snap.cardio.weekLoad}` : null}
             onPress={() => navigation.navigate('Cardio')}
             accessibilityLabel="Open cardio load detail"
-          >
-            <Text style={M(700, 19, { ls: -0.3, color: c.ink })}>
-              {snap.cardio.hasLoadData ? String(snap.cardio.todayLoad) : '——'}
-            </Text>
-            {snap.cardio.hasLoadData ? (
-              <Text style={M(700, 9, { color: c.grn })}>
-                WK {snap.cardio.weekLoad}
-              </Text>
-            ) : null}
-          </GridCell>
-        </GridRow>
+          />
+        </View>
 
         {stages && stageTotal > 0 ? (
           <Pressable
             onPress={() => navigation.navigate('Sleep')}
             accessibilityRole="button"
-            accessibilityLabel="Open sleep detail"
-            style={[styles.stagesRow, { borderTopColor: c.hair }]}
+            accessibilityLabel="Open sleep stages"
+            style={styles.stages}
           >
-            <Text
-              style={[
-                M(700, 8.5, { ls: 1.2, color: c.fnt }),
-                styles.stagesLabel,
-              ]}
-            >
-              STAGES
-            </Text>
             <View style={styles.stageBar}>
               <View
-                style={{ flex: stages.deepMin, backgroundColor: c.accSolid }}
+                style={{ flex: stages.deepMin, backgroundColor: c.sleepText }}
               />
-              <View style={{ flex: stages.remMin, backgroundColor: c.acc }} />
+              <View
+                style={{ flex: stages.remMin, backgroundColor: c.sleepSolid }}
+              />
               <View
                 style={{ flex: stages.lightMin, backgroundColor: c.sand }}
               />
               <View
-                style={{ flex: stages.awakeMin, backgroundColor: c.track }}
+                style={{ flex: stages.awakeMin, backgroundColor: c.streak }}
               />
             </View>
-            <Text style={M(600, 8.5, { color: c.fnt })}>
-              DEEP {minToHm(stages.deepMin)} · REM {minToHm(stages.remMin)} ·
-              LGT {minToHm(stages.lightMin)}
+            <Text style={S(700, 13, { color: c.mut })}>
+              Deep {minToHm(stages.deepMin)} · REM {minToHm(stages.remMin)} ·
+              Light {minToHm(stages.lightMin)}
             </Text>
           </Pressable>
         ) : null}
-      </GridBox>
+      </View>
 
-      {/* ── Body & fuel ──────────────────────────────────────────────── */}
-      <View
-        style={[
-          styles.bfCard,
-          { backgroundColor: c.card, borderColor: c.hair },
-        ]}
-      >
+      {/* ── The coach's daily brief ──────────────────────────────────── */}
+      <View style={styles.brief}>
+        <View style={[styles.avatar, { backgroundColor: c.accSolid }]}>
+          <Icon name="sparkles" size={22} color={c.onAccent} />
+        </View>
+        <View style={[styles.bubble, { backgroundColor: c.accTint }]}>
+          <View style={styles.bubbleHead}>
+            <Text style={S(900, 13, { color: c.acc })}>YOUR COACH</Text>
+            {briefWorking ? (
+              <ActivityIndicator size="small" color={c.acc} />
+            ) : (
+              <Pressable
+                onPress={() => void regenerateBrief()}
+                accessibilityRole="button"
+                accessibilityLabel="Regenerate today's brief"
+                hitSlop={10}
+              >
+                <Text style={S(900, 14, { color: c.acc })}>Refresh</Text>
+              </Pressable>
+            )}
+          </View>
+          <Text
+            style={S(700, 16, {
+              lh: 22,
+              color: briefWorking || !briefText ? c.mut : c.ink,
+            })}
+          >
+            {briefBody}
+          </Text>
+        </View>
+      </View>
+
+      {/* ── Habits, then the week's goals ────────────────────────────── */}
+      <HabitsCard navigation={navigation} />
+      <WeeklyGoalsCard navigation={navigation} />
+
+      {/* ── Body & food ──────────────────────────────────────────────── */}
+      <View style={[chunky(c), styles.card, styles.cardGap]}>
         <Pressable
           onPress={() => navigation.navigate('Nutrition')}
           accessibilityRole="button"
@@ -386,100 +457,84 @@ export function DashboardScreen({ navigation }: ScreenProps) {
           style={styles.bfTop}
         >
           <View style={styles.bfTitleRow}>
-            <Text style={cardTitleStyle(c.ink)}>Body &amp; fuel →</Text>
-            <View style={styles.spacer} />
-            <Text style={M(700, 13, { color: net < 0 ? c.grn : c.ink })}>
-              {hasNet ? signed(net) : '——'}
-              <Text style={M(700, 9.5, { color: c.fnt })}> NET KCAL</Text>
-            </Text>
+            <Text style={cardTitleStyle(c.ink)}>Body & food</Text>
+            <Pill
+              spec={
+                hasNet
+                  ? {
+                      text: `${signed(net)} kcal net`,
+                      bg: net < 0 ? c.grnTint : c.soft,
+                      textColor: net < 0 ? c.grn : c.ink,
+                    }
+                  : { text: 'Nothing logged', bg: c.soft, textColor: c.mut }
+              }
+            />
           </View>
           <View style={styles.macroCols}>
             <MacroBar
               compact
               style={styles.macroCol}
-              label="PROTEIN"
+              label="Protein"
               right={
                 <>
                   {protein != null ? Math.round(protein) : '—'}
-                  {protein != null && protein < PROTEIN_MIN ? (
-                    <Text style={{ color: c.acc }}>
-                      {' '}
-                      · {Math.round(PROTEIN_MIN - protein)}▲
-                    </Text>
-                  ) : null}
+                  <Text style={{ color: c.fnt }}> / {PROTEIN_MIN} g</Text>
                 </>
               }
               fill={protein != null ? protein / PROTEIN_MIN : 0}
-              fillColor={c.ink}
-              marker={c.ink}
+              fillColor={c.food}
             />
             <MacroBar
               compact
               style={styles.macroCol}
-              label="FAT"
+              label="Fat"
               right={
                 <>
                   {fat != null ? Math.round(fat) : '—'}
-                  {fat != null && fat < FAT_MAX ? (
-                    <Text style={{ color: c.acc }}>
-                      {' '}
-                      · {Math.round(FAT_MAX - fat)}▽
-                    </Text>
-                  ) : null}
+                  <Text style={{ color: c.fnt }}> / max {FAT_MAX} g</Text>
                 </>
               }
               fill={fat != null ? fat / FAT_MAX : 0}
-              fillColor={c.acc}
-              marker={fat != null && fat > FAT_MAX ? c.red : c.ink}
+              fillColor={fat != null && fat > FAT_MAX ? c.redSolid : c.streak}
             />
           </View>
         </Pressable>
-        <GridRow borderTop>
-          <GridCell first label="WEIGHT">
-            <Text style={M(700, 16, { color: c.ink })}>
-              {latestWeight != null ? latestWeight.toFixed(1) : '——'}
-              <Text style={M(700, 9.5, { color: c.fnt })}> KG</Text>
-              {wSub ? (
-                <Text style={M(700, 9.5, { color: wSub.good ? c.grn : c.red })}>
-                  {'  '}
-                  {wSub.text}
-                </Text>
-              ) : null}
+        <View style={styles.bodyRow}>
+          <View style={[styles.bodyCell, { backgroundColor: c.soft }]}>
+            <Text style={S(800, 12, { color: c.fnt })}>WEIGHT</Text>
+            <Text style={S(900, 18, { color: c.ink })}>
+              {latestWeight != null ? `${latestWeight.toFixed(1)} kg` : '—'}
             </Text>
-          </GridCell>
-          <GridCell label="BODY FAT">
-            <Text style={M(700, 16, { color: c.ink })}>
-              {latestFat != null ? latestFat.toFixed(1) : '——'}
-              <Text style={M(700, 9.5, { color: c.fnt })}> %</Text>
-              {fSub ? (
-                <Text style={M(700, 9.5, { color: fSub.good ? c.grn : c.red })}>
-                  {'  '}
-                  {fSub.text}
-                </Text>
-              ) : null}
-            </Text>
-          </GridCell>
-          <GridCell label="IN / OUT">
-            <Text style={M(700, 16, { color: c.ink })}>
-              {eaten != null ? grp(eaten) : '——'}
-              <Text style={M(700, 9.5, { color: c.fnt })}>
-                {' '}
-                / {grp(burned)}
+            {wSub ? (
+              <Text style={S(900, 13, { color: wSub.good ? c.grn : c.red })}>
+                {wSub.text}
               </Text>
+            ) : null}
+          </View>
+          <View style={[styles.bodyCell, { backgroundColor: c.soft }]}>
+            <Text style={S(800, 12, { color: c.fnt })}>BODY FAT</Text>
+            <Text style={S(900, 18, { color: c.ink })}>
+              {latestFat != null ? `${latestFat.toFixed(1)}%` : '—'}
             </Text>
-          </GridCell>
-        </GridRow>
+            {fSub ? (
+              <Text style={S(900, 13, { color: fSub.good ? c.grn : c.red })}>
+                {fSub.text}
+              </Text>
+            ) : null}
+          </View>
+          <View style={[styles.bodyCell, { backgroundColor: c.soft }]}>
+            <Text style={S(800, 12, { color: c.fnt })}>IN / OUT</Text>
+            <Text style={S(900, 18, { color: c.ink })}>
+              {eaten != null ? grp(eaten) : '—'}
+            </Text>
+            <Text style={S(800, 13, { color: c.mut })}>
+              / {grp(burned)} kcal
+            </Text>
+          </View>
+        </View>
       </View>
 
-      {/* ── Week ─────────────────────────────────────────────────────── */}
-      <WeeklyGoalsCard navigation={navigation} />
-
-      {/* ── Habits ───────────────────────────────────────────────────── */}
-      <HabitsCard navigation={navigation} />
-
-      <Text
-        style={[M(600, 9.5, { ls: 1, upper: true, color: c.fnt }), styles.sync]}
-      >
+      <Text style={[S(700, 14, { lh: 20, color: c.fnt }), styles.sync]}>
         {syncNote}
       </Text>
     </BriefScreen>
@@ -487,42 +542,59 @@ export function DashboardScreen({ navigation }: ScreenProps) {
 }
 
 const styles = StyleSheet.create({
-  spacer: { flex: 1 },
-  brief: { marginTop: 14, gap: 10 },
-  briefBar: {
-    height: 4,
-    borderRadius: 2,
-    overflow: 'hidden',
-    backgroundColor: BAND.track,
-    marginBottom: 4,
-  },
-  briefHead: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  gridGap: { marginTop: 14 },
-  stagesRow: {
+  greet: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderTopWidth: 1,
+    justifyContent: 'space-between',
+    gap: 12,
+    marginTop: 4,
   },
-  stagesLabel: { width: 44 },
+  card: { padding: 18, marginTop: 14 },
+  cardGap: { marginTop: 14 },
+  recTop: { flexDirection: 'row', alignItems: 'center', gap: 16 },
+  recText: { flex: 1, minWidth: 0, gap: 2 },
+  ringLabel: { alignItems: 'center', justifyContent: 'center' },
+  chips: { flexDirection: 'row', gap: 6, marginTop: 14 },
+  chip: { flex: 1, minWidth: 0, padding: 9, borderRadius: 14, gap: 1 },
+  stages: { marginTop: 12, gap: 6 },
   stageBar: {
-    flex: 1,
     flexDirection: 'row',
-    height: 5,
-    borderRadius: 3,
+    height: 10,
+    borderRadius: 5,
     overflow: 'hidden',
   },
-  bfCard: {
-    borderWidth: 1,
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginTop: 12,
+  brief: { flexDirection: 'row', gap: 12, marginTop: 16 },
+  avatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  bfTop: { paddingHorizontal: 16, paddingTop: 13, paddingBottom: 14 },
-  bfTitleRow: { flexDirection: 'row', alignItems: 'center' },
-  macroCols: { flexDirection: 'row', gap: 16, marginTop: 12 },
+  bubble: {
+    flex: 1,
+    minWidth: 0,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    borderTopLeftRadius: 4,
+    gap: 6,
+  },
+  bubbleHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  bfTop: { gap: 14 },
+  bfTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  macroCols: { flexDirection: 'row', gap: 14 },
   macroCol: { flex: 1 },
-  sync: { marginTop: 16, lineHeight: 15, textAlign: 'center' },
+  bodyRow: { flexDirection: 'row', gap: 8, marginTop: 14 },
+  bodyCell: { flex: 1, minWidth: 0, padding: 10, borderRadius: 14 },
+  sync: { marginTop: 18, textAlign: 'center' },
 });

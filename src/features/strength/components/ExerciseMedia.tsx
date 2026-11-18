@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Animated, StyleSheet, Text, View, ViewStyle } from 'react-native';
 import Svg, { Circle, Line, Rect } from 'react-native-svg';
 
-import { M } from '../../../components/brief';
+import { S } from '../../../components/brief';
 import {
   exerciseOrUnknown,
   MUSCLE_LABELS,
@@ -22,12 +22,13 @@ import { GENERATED_FRAMES } from './frames.generated';
  *     (translateY loop) so every exercise shows motion even without bundled
  *     photos.
  *
- * The v3 Lift screens use three shapes of the same surface, chosen with
- * `variant`:
- *  - `hero`   — full-bleed banner at the top of a `flush` card (no border/radius
- *               of its own; the card clips it), with a mono caption overlay.
- *  - `panel`  — the standalone rounded block used inside a padded card.
- *  - `thumb`  — a square list thumbnail (62 / 76 / 64 / 56 px in the design).
+ * The Lift screens (ADR-007) use three shapes of the same surface, chosen with
+ * `variant`, all on the lift tint so a photo or placeholder reads as part of
+ * the violet "lift" area rather than a grey hole:
+ *  - `hero`   — the big rounded block at the top of the runner, with a white
+ *               caption pill in its bottom-left corner.
+ *  - `panel`  — a smaller rounded block for use inside a padded card.
+ *  - `thumb`  — a square list tile (the design's 52–64 px icon tiles).
  *
  * A future video/Rive upgrade is just a third branch in the render paths.
  */
@@ -56,8 +57,8 @@ export function ExerciseMedia({
   /** Height for hero/panel; also the side length for a `thumb`. */
   height?: number;
   variant?: MediaVariant;
-  /** Mono caption shown over hero/panel media ("LOOP · FORM"). Defaults to the
-   * exercise's muscle group; pass `''` to hide it. */
+  /** Caption pill shown over hero/panel media ("Form loop · chest"). Defaults
+   * to the exercise's muscle group; pass `''` to hide it. */
   sub?: string;
   style?: ViewStyle;
 }) {
@@ -92,22 +93,19 @@ export function ExerciseMedia({
     return () => loop.stop();
   }, [anim, playing, exerciseId]);
 
+  // Thumbs round at roughly a quarter of their side (16px at 64) like the
+  // design's icon tiles; the hero is the runner's 24px block.
   const shape: ViewStyle = isThumb
-    ? { width: height, height, borderRadius: 8, borderWidth: 1 }
+    ? { width: height, height, borderRadius: Math.round(height / 4) }
     : variant === 'hero'
-      ? { width: '100%', height, borderRadius: 0, borderWidth: 0 }
-      : { width: '100%', height, borderRadius: 12, borderWidth: 1 };
+      ? { width: '100%', height, borderRadius: 24 }
+      : { width: '100%', height, borderRadius: 20 };
 
-  const caption = sub ?? MUSCLE_LABELS[def.muscleGroup].toUpperCase();
+  const caption = sub ?? MUSCLE_LABELS[def.muscleGroup];
 
   return (
     <View
-      style={[
-        styles.panel,
-        shape,
-        { backgroundColor: c.track, borderColor: c.hair },
-        style,
-      ]}
+      style={[styles.panel, shape, { backgroundColor: c.liftTint }, style]}
       accessibilityRole="image"
       accessibilityLabel={`${def.name} demonstration`}
     >
@@ -136,15 +134,17 @@ export function ExerciseMedia({
           />
         </>
       ) : isThumb ? (
-        <Text style={M(700, 13, { color: c.fnt })}>
+        <Text
+          style={S(900, Math.max(14, height * 0.32), { color: c.liftText })}
+        >
           {MUSCLE_LABELS[def.muscleGroup][0]}
         </Text>
       ) : (
-        <Placeholder anim={anim} color={c.acc} faint={c.fnt} />
+        <Placeholder anim={anim} color={c.lift} faint={c.liftEdge} />
       )}
       {!isThumb && caption ? (
-        <View style={styles.badge}>
-          <Text style={M(700, 9, { ls: 1.4, color: '#FFFFFF' })}>{caption}</Text>
+        <View style={[styles.badge, { backgroundColor: c.card }]}>
+          <Text style={S(900, 13, { color: c.liftText })}>{caption}</Text>
         </View>
       ) : null}
     </View>
@@ -204,15 +204,15 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
-  // A caption pill over the animation: white text on a translucent brand-blue
-  // fill (#336699) so it stays legible against the light/dark exercise frames.
+  // A caption pill over the animation: lift-violet text on an opaque card-
+  // coloured pill, so it stays legible over both the light exercise photos and
+  // the tinted placeholder in either scheme.
   badge: {
     position: 'absolute',
-    top: 10,
-    left: 12,
+    left: 14,
+    bottom: 12,
     paddingVertical: 4,
-    paddingHorizontal: 8,
-    borderRadius: 6,
-    backgroundColor: 'rgba(51,102,153,0.85)',
+    paddingHorizontal: 10,
+    borderRadius: 999,
   },
 });

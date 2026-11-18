@@ -12,8 +12,14 @@ import {
 } from 'react-native';
 
 import { ScreenProps } from '../../app/navigation/types';
-import { BRIEF_GUTTER, BRIEF_MAX_WIDTH, M, S } from '../../components/brief';
-import { Icon } from '../../components/Icon';
+import {
+  BRIEF_GUTTER,
+  BRIEF_MAX_WIDTH,
+  BriefButton,
+  inputStyle,
+  S,
+} from '../../components/brief';
+import { Icon, IconName } from '../../components/Icon';
 import { FOOD_TAGS, FoodTagKey } from '../../state/foodTags';
 import {
   ALLOWANCES,
@@ -25,24 +31,49 @@ import {
 } from '../../state/habits';
 import { createHabit, editHabit, removeHabit } from '../../state/habitsService';
 import { useHabitsStore } from '../../state/useHabitsStore';
+import { Palette } from '../../theme/colors';
 import { useTheme } from '../../theme/theme';
 
-/** The explainer under the "how it's checked" row, which depends on both the
- * kind of habit and (for food) whether the user let the log decide. */
-function checkNote(type: HabitType, auto: boolean): string {
-  if (type === 'sleep') return HABIT_TYPES[1].note;
-  if (type === 'other') return HABIT_TYPES[2].note;
-  return auto
-    ? HABIT_TYPES[0].note
-    : 'YOU CHECK IT OFF — YESTERDAY STAYS EDITABLE UNTIL NOON';
+/** "READS THE TAGS ON…" → "Reads the tags on…". The option catalogs in
+ * `state/habits` and `state/foodTags` keep the v3 uppercase copy (other screens
+ * still read them); this editor shows them in the friendly sentence case. */
+function sentence(text: string): string {
+  const lower = text.toLowerCase();
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
 }
 
+/** The explainer under the type picker, which depends on both the kind of
+ * habit and (for food) whether the user let the log decide. */
+function checkNote(type: HabitType, auto: boolean): string {
+  if (type === 'sleep') return sentence(HABIT_TYPES[1].note);
+  if (type === 'other') return sentence(HABIT_TYPES[2].note);
+  return auto
+    ? sentence(HABIT_TYPES[0].note)
+    : 'You check it off — yesterday stays editable until noon';
+}
+
+/** The glyph on each habit-type tile. */
+const TYPE_ICON: Record<HabitType, IconName> = {
+  food: 'nutrition',
+  sleep: 'moon',
+  other: 'check',
+};
+
+const CHECK_MODES = [
+  { key: 'auto' as const, label: 'From my food log' },
+  { key: 'hand' as const, label: 'By hand' },
+];
+
 /**
- * Create or edit a daily habit, presented as a native modal sheet.
+ * Create or edit a daily habit, presented as a native modal sheet (the header
+ * — "New habit" / "Edit habit" with its close button — comes from RootStack).
  *
  * Pushed with `{ habitId }` to edit an existing habit — editing keeps the id, so
  * the habit's streak and 12-week history survive a rename or a change of
  * allowance.
+ *
+ * Every choice is a grid of chunky tiles ({@link Tiles}), green when picked —
+ * green is the habits colour (ADR-007).
  */
 export function HabitDefineScreen({ navigation, route }: ScreenProps) {
   const c = useTheme().colors;
@@ -114,27 +145,6 @@ export function HabitDefineScreen({ navigation, route }: ScreenProps) {
     ]);
   }
 
-  const seg = (on: boolean) => [
-    styles.seg,
-    {
-      borderColor: on ? c.accSolid : c.hair,
-      backgroundColor: on ? c.accSolid : 'transparent',
-    },
-  ];
-  const pill = (on: boolean) => [
-    styles.pill,
-    {
-      borderColor: on ? c.accSolid : c.hair,
-      backgroundColor: on ? c.accSolid : 'transparent',
-    },
-  ];
-  const onLabel = (on: boolean) => (on ? c.onAccent : c.mut);
-  const label = (text: string) => (
-    <Text style={[M(700, 10, { ls: 1.6, color: c.fnt }), styles.label]}>
-      {text}
-    </Text>
-  );
-
   return (
     <KeyboardAvoidingView
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -145,89 +155,68 @@ export function HabitDefineScreen({ navigation, route }: ScreenProps) {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.column}>
-          {label('NAME')}
+          <Label first>What’s the habit?</Label>
           <TextInput
             value={name}
             onChangeText={setName}
             placeholder="e.g. No junk food"
             placeholderTextColor={c.fnt}
             accessibilityLabel="Habit name"
-            style={[
-              S(600, 14, { color: c.ink }),
-              styles.input,
-              { borderColor: c.hair, backgroundColor: c.bg },
-            ]}
+            style={[inputStyle(c), S(800, 18, { color: c.ink }), styles.input]}
           />
 
-          {label('TYPE')}
+          <Label>Type</Label>
           <View style={styles.row}>
             {HABIT_TYPES.map(t => {
               const on = type === t.key;
+              const tc = tileColors(c, on);
+              const label = sentence(t.label);
               return (
                 <Pressable
                   key={t.key}
                   onPress={() => pickType(t.key)}
                   accessibilityRole="radio"
                   accessibilityState={{ selected: on }}
-                  style={seg(on)}
+                  accessibilityLabel={label}
+                  style={[styles.tile, styles.typeTile, tc.box]}
                 >
-                  <Text style={M(700, 10, { ls: 0.8, color: onLabel(on) })}>
-                    {t.label}
-                  </Text>
+                  <Icon
+                    name={TYPE_ICON[t.key]}
+                    size={28}
+                    color={tc.text}
+                    strokeWidth={2.4}
+                  />
+                  <Text style={S(900, 16, { color: tc.text })}>{label}</Text>
                 </Pressable>
               );
             })}
           </View>
+          <Text style={[S(700, 14, { lh: 19, color: c.mut }), styles.note]}>
+            {checkNote(type, auto)}
+          </Text>
 
           {type === 'food' ? (
             <>
-              {label("HOW IT'S CHECKED")}
-              <View style={styles.row}>
-                <Pressable
-                  onPress={() => setAuto(true)}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: auto }}
-                  style={seg(auto)}
-                >
-                  <Text style={M(700, 10, { ls: 0.8, color: onLabel(auto) })}>
-                    AUTO FROM MY LOG
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={() => setAuto(false)}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: !auto }}
-                  style={seg(!auto)}
-                >
-                  <Text style={M(700, 10, { ls: 0.8, color: onLabel(!auto) })}>
-                    BY HAND
-                  </Text>
-                </Pressable>
-              </View>
+              <Label>How is it checked?</Label>
+              <Tiles
+                options={CHECK_MODES}
+                value={auto ? 'auto' : 'hand'}
+                onPick={k => setAuto(k === 'auto')}
+                columns={2}
+              />
 
               {auto ? (
                 <>
-                  {label('BREAKS THE DAY WHEN I LOG')}
-                  <View style={styles.wrapRow}>
-                    {FOOD_TAGS.map(t => {
-                      const on = tag === t.key;
-                      return (
-                        <Pressable
-                          key={t.key}
-                          onPress={() => setTag(t.key)}
-                          accessibilityRole="radio"
-                          accessibilityState={{ selected: on }}
-                          style={pill(on)}
-                        >
-                          <Text
-                            style={M(700, 10, { ls: 0.8, color: onLabel(on) })}
-                          >
-                            {t.label}
-                          </Text>
-                        </Pressable>
-                      );
-                    })}
-                  </View>
+                  <Label>Breaks the day when I log</Label>
+                  <Tiles
+                    options={FOOD_TAGS.map(t => ({
+                      key: t.key,
+                      label: sentence(t.label),
+                    }))}
+                    value={tag}
+                    onPick={setTag}
+                    columns={3}
+                  />
                 </>
               ) : null}
             </>
@@ -235,155 +224,189 @@ export function HabitDefineScreen({ navigation, route }: ScreenProps) {
 
           {type === 'sleep' ? (
             <>
-              {label('ASLEEP BEFORE')}
-              <View style={styles.wrapRow}>
-                {BEDTIMES.map(b => {
-                  const on = before === b;
-                  return (
-                    <Pressable
-                      key={b}
-                      onPress={() => pickBedtime(b)}
-                      accessibilityRole="radio"
-                      accessibilityState={{ selected: on }}
-                      style={pill(on)}
-                    >
-                      <Text style={M(700, 11, { ls: 0.8, color: onLabel(on) })}>
-                        {b}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
+              <Label>Asleep before</Label>
+              <Tiles
+                options={BEDTIMES.map(b => ({ key: b, label: b }))}
+                value={before}
+                onPick={pickBedtime}
+                columns={4}
+              />
             </>
           ) : null}
 
-          <Text style={[M(600, 9.5, { ls: 0.6, color: c.fnt }), styles.note]}>
-            {checkNote(type, auto)}
-          </Text>
-
-          {label('ALLOWED MISSES')}
-          <View style={styles.wrapRow}>
-            {ALLOWANCES.map(a => {
-              const on = allowance === a.key;
-              return (
-                <Pressable
-                  key={a.key}
-                  onPress={() => setAllowance(a.key)}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: on }}
-                  style={pill(on)}
-                >
-                  <Text style={M(700, 10, { ls: 0.8, color: onLabel(on) })}>
-                    {a.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <View
-            style={[
-              styles.explainer,
-              { backgroundColor: c.pillBg, borderColor: c.hair },
-            ]}
-          >
-            <Icon name="check" size={16} color={c.grn} strokeWidth={2.2} />
-            <Text
-              style={[
-                S(600, 12, { lh: 17, color: c.ink }),
-                styles.explainerText,
-              ]}
-            >
+          <Label>Allowed misses</Label>
+          <Tiles
+            options={ALLOWANCES.map(a => ({
+              key: a.key,
+              label: sentence(a.label),
+            }))}
+            value={allowance}
+            onPick={setAllowance}
+            columns={2}
+          />
+          <View style={[styles.explainer, { backgroundColor: c.warnBg }]}>
+            <Text style={S(700, 14, { lh: 19, color: c.amb })}>
               {allowanceWord(allowance)}
             </Text>
           </View>
 
-          <View style={styles.actions}>
+          <BriefButton
+            label={editingId ? 'Save changes' : 'Save habit'}
+            onPress={() => void save()}
+            tone="green"
+            disabled={busy}
+            accessibilityLabel={editingId ? 'Save changes' : 'Save habit'}
+            style={styles.save}
+          />
+          {editingId ? (
             <Pressable
-              onPress={save}
-              disabled={busy}
+              onPress={confirmDelete}
               accessibilityRole="button"
-              accessibilityLabel={editingId ? 'Save changes' : 'Save habit'}
+              accessibilityLabel="Delete habit"
               style={[
-                styles.saveBtn,
-                { backgroundColor: c.ink, opacity: busy ? 0.5 : 1 },
+                styles.deleteBtn,
+                { borderColor: c.hair, backgroundColor: c.card },
               ]}
             >
-              <Text style={M(700, 11, { ls: 1, color: c.inv })}>
-                {editingId ? 'SAVE CHANGES' : 'SAVE HABIT'}
-              </Text>
+              <Text style={S(900, 16, { color: c.red })}>Delete habit</Text>
             </Pressable>
-            {editingId ? (
-              <Pressable
-                onPress={confirmDelete}
-                accessibilityRole="button"
-                accessibilityLabel="Delete habit"
-                style={[styles.deleteBtn, { borderColor: c.hair }]}
-              >
-                <Text style={M(700, 11, { ls: 1, color: c.red })}>DELETE</Text>
-              </Pressable>
-            ) : null}
-          </View>
+          ) : null}
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
+/** A tile's look: green fill + edge when picked, the plain chunky card when not. */
+function tileColors(c: Palette, on: boolean) {
+  return {
+    box: {
+      backgroundColor: on ? c.grnTint : c.card,
+      borderColor: on ? c.grnSolid : c.hair,
+    },
+    text: on ? c.grn : c.ink,
+  };
+}
+
+/** A field label above its control — Nunito Black 16, sentence case. */
+function Label({
+  children,
+  first,
+}: {
+  children: React.ReactNode;
+  first?: boolean;
+}) {
+  const c = useTheme().colors;
+  return (
+    <Text
+      style={[
+        S(900, 16, { color: c.ink }),
+        styles.label,
+        first ? styles.labelFirst : null,
+      ]}
+    >
+      {children}
+    </Text>
+  );
+}
+
+/**
+ * One "pick one" question as a grid of equal chunky tiles, `columns` per row.
+ * Rows are laid out explicitly (rather than flex-wrap with percentage widths)
+ * so the gaps stay exact; a short last row is padded with empty cells so its
+ * tiles keep the same width as the ones above.
+ */
+function Tiles<K extends string>({
+  options,
+  value,
+  onPick,
+  columns,
+}: {
+  options: readonly { key: K; label: string }[];
+  value: K;
+  onPick: (key: K) => void;
+  columns: number;
+}) {
+  const c = useTheme().colors;
+  const rows: { key: K; label: string }[][] = [];
+  for (let i = 0; i < options.length; i += columns) {
+    rows.push(options.slice(i, i + columns));
+  }
+  return (
+    <View style={styles.grid}>
+      {rows.map((row, r) => (
+        <View key={r} style={styles.row}>
+          {row.map(o => {
+            const on = value === o.key;
+            const tc = tileColors(c, on);
+            return (
+              <Pressable
+                key={o.key}
+                onPress={() => onPick(o.key)}
+                accessibilityRole="radio"
+                accessibilityState={{ selected: on }}
+                accessibilityLabel={o.label}
+                style={[styles.tile, tc.box]}
+              >
+                <Text
+                  style={S(900, 15, { color: tc.text, align: 'center' })}
+                  numberOfLines={2}
+                >
+                  {o.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+          {Array.from({ length: columns - row.length }).map((_, i) => (
+            <View key={`pad${i}`} style={styles.pad} />
+          ))}
+        </View>
+      ))}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  scroll: { alignItems: 'center', paddingVertical: 20, paddingBottom: 48 },
+  scroll: { alignItems: 'center', paddingTop: 8, paddingBottom: 48 },
   column: {
     width: '100%',
     maxWidth: BRIEF_MAX_WIDTH,
     paddingHorizontal: BRIEF_GUTTER,
   },
-  label: { marginTop: 18, marginBottom: 8 },
-  input: {
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  row: { flexDirection: 'row', gap: 8 },
-  wrapRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  seg: {
+  label: { marginTop: 22, marginBottom: 8 },
+  labelFirst: { marginTop: 12 },
+  input: { paddingVertical: 14 },
+  grid: { gap: 10 },
+  row: { flexDirection: 'row', gap: 10 },
+  tile: {
     flex: 1,
+    minWidth: 0,
+    minHeight: 50,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 11,
-    paddingHorizontal: 6,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  pill: {
     paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    borderWidth: 1,
+    paddingHorizontal: 6,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderBottomWidth: 4,
   },
-  note: { marginTop: 10, lineHeight: 15 },
+  typeTile: { minHeight: 92, borderRadius: 18, gap: 6 },
+  pad: { flex: 1 },
+  note: { marginTop: 10 },
   explainer: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    marginTop: 16,
-    padding: 12,
-    borderWidth: 1,
-    borderRadius: 8,
+    marginTop: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
   },
-  explainerText: { flex: 1, minWidth: 0 },
-  actions: { flexDirection: 'row', gap: 10, marginTop: 18 },
-  saveBtn: {
-    flex: 1,
-    alignItems: 'center',
-    borderRadius: 999,
-    paddingVertical: 15,
-  },
+  save: { marginTop: 28 },
   deleteBtn: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingVertical: 15,
-    paddingHorizontal: 18,
+    marginTop: 12,
+    alignItems: 'center',
+    paddingVertical: 13,
+    borderRadius: 16,
+    borderWidth: 2,
+    borderBottomWidth: 4,
   },
 });

@@ -11,7 +11,13 @@ import {
 } from 'react-native';
 
 import { ScreenProps } from '../../app/navigation/types';
-import { BRIEF_GUTTER, BRIEF_MAX_WIDTH, M, S } from '../../components/brief';
+import {
+  BRIEF_GUTTER,
+  BRIEF_MAX_WIDTH,
+  BriefButton,
+  inputStyle,
+  S,
+} from '../../components/brief';
 import {
   ENERGY_METRICS,
   GOAL_SOURCES,
@@ -20,6 +26,7 @@ import {
 import { ActivityOption } from '../../health';
 import { createGoal } from '../../state/goalsService';
 import { useHealthStore } from '../../state/useHealthStore';
+import { Palette } from '../../theme/colors';
 import { useTheme } from '../../theme/theme';
 
 /** Aggregate-metric choices offered alongside the user's real activities. */
@@ -52,14 +59,18 @@ function firstSelection(options: ActivityOption[]): Selection {
 }
 
 /**
- * Define a weekly goal, presented as a native modal screen. The picker is driven
- * by the user's REAL recent activities (last ~2 weeks, from
- * `snapshot.activityOptions`) plus a few aggregate metrics; saving writes through
- * to SQLite via {@link createGoal}.
+ * Define a weekly goal, presented as a native modal screen (header + close come
+ * from RootStack). The picker is driven by the user's REAL recent activities
+ * (last ~2 weeks, from `snapshot.activityOptions`, each with how often it was
+ * done) plus a few aggregate metrics; saving writes through to SQLite via
+ * {@link createGoal}.
+ *
+ * Layout per the friendly "GoalDefine" artboard: activities as full-width rows,
+ * "or a number" as a two-column grid of tiles, then the name / target / minimum
+ * length fields and one blue "Add goal" slab.
  */
 export function GoalDefineScreen({ navigation }: ScreenProps) {
-  const t = useTheme();
-  const c = t.colors;
+  const c = useTheme().colors;
   const options = useHealthStore(s => s.snapshot.activityOptions);
 
   const [selection, setSelection] = useState<Selection>(() =>
@@ -109,27 +120,23 @@ export function GoalDefineScreen({ navigation }: ScreenProps) {
     navigation.goBack();
   }
 
-  const pillStyle = (on: boolean) => [
-    styles.pill,
+  const field = [inputStyle(c), S(800, 17, { color: c.ink }), styles.input];
+
+  // "Or a number": the aggregate metrics plus the calorie deficit, as tiles.
+  const metricTiles: { key: string; label: string; sel: Selection }[] = [
+    ...METRIC_SOURCES.map(source => ({
+      key: `metric:${source}`,
+      label: GOAL_SOURCES[source].label,
+      sel: { kind: 'metric', source } as Selection,
+    })),
     {
-      borderColor: on ? c.ink : c.hair,
-      backgroundColor: on ? c.ink : 'transparent',
+      key: 'deficit',
+      label: ENERGY_METRICS.deficit.label,
+      sel: { kind: 'deficit' },
     },
   ];
-  const pillText = (on: boolean) =>
-    M(700, 10.5, { ls: 0.6, color: on ? c.inv : c.mut });
-
-  const input = {
-    ...S(600, 14, { color: c.ink }),
-    borderWidth: 1,
-    borderColor: c.hair,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    // The design fills fields with the page ground so they read as insets in
-    // the card rather than as another raised surface.
-    backgroundColor: c.bg,
-  } as const;
+  const metricRows = [metricTiles.slice(0, 2), metricTiles.slice(2, 4)];
+  const selected = selectionKey(selection);
 
   return (
     <KeyboardAvoidingView
@@ -141,183 +148,199 @@ export function GoalDefineScreen({ navigation }: ScreenProps) {
         keyboardShouldPersistTaps="handled"
       >
         <View style={styles.column}>
-          <Text style={[M(600, 10.5, { color: c.fnt }), styles.sub]}>
-            AUTO-TRACKED FROM STEPS &amp; ACTIVITIES
+          <Text style={S(700, 15, { lh: 21, color: c.mut })}>
+            Tracked automatically from your steps and workouts.
           </Text>
 
           {options.length > 0 ? (
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.pillRow}
-            >
-              {options.map(o => {
-                const key = `activity:${o.field}:${o.value}`;
-                const on = selectionKey(selection) === key;
-                return (
-                  <Pressable
-                    key={key}
-                    onPress={() => pick({ kind: 'activity', option: o })}
-                    accessibilityRole="radio"
-                    accessibilityState={{ selected: on }}
-                    style={pillStyle(on)}
-                  >
-                    <Text style={pillText(on)}>
-                      {o.label.toUpperCase()}
-                      <Text style={{ color: on ? c.inv : c.fnt }}>
-                        {' '}
-                        {o.count}×
+            <>
+              <Label>Your activities</Label>
+              <View style={styles.list}>
+                {options.map(o => {
+                  const key = `activity:${o.field}:${o.value}`;
+                  const on = selected === key;
+                  const tc = tileColors(c, on);
+                  return (
+                    <Pressable
+                      key={key}
+                      onPress={() => pick({ kind: 'activity', option: o })}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: on }}
+                      accessibilityLabel={`${o.label}, ${o.count} times lately`}
+                      style={[styles.tile, styles.actTile, tc.box]}
+                    >
+                      <Text
+                        style={[S(900, 16, { color: tc.text }), styles.actName]}
+                        numberOfLines={1}
+                      >
+                        {o.label}
                       </Text>
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </ScrollView>
+                      <Text style={S(800, 14, { color: c.mut })}>
+                        {`${o.count}× lately`}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            </>
           ) : null}
 
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.pillRow}
-          >
-            {METRIC_SOURCES.map(key => {
-              const on =
-                selection.kind === 'metric' && selection.source === key;
-              return (
-                <Pressable
-                  key={key}
-                  onPress={() => pick({ kind: 'metric', source: key })}
-                  accessibilityRole="radio"
-                  accessibilityState={{ selected: on }}
-                  style={pillStyle(on)}
-                >
-                  <Text style={pillText(on)}>
-                    {GOAL_SOURCES[key].label.toUpperCase()}
-                  </Text>
-                </Pressable>
-              );
-            })}
-            <Pressable
-              key="deficit"
-              onPress={() => pick({ kind: 'deficit' })}
-              accessibilityRole="radio"
-              accessibilityState={{ selected: selection.kind === 'deficit' }}
-              style={pillStyle(selection.kind === 'deficit')}
-            >
-              <Text style={pillText(selection.kind === 'deficit')}>
-                {ENERGY_METRICS.deficit.label.toUpperCase()}
-              </Text>
-            </Pressable>
-          </ScrollView>
+          <Label>{options.length > 0 ? 'Or a number' : 'Pick a number'}</Label>
+          <View style={styles.list}>
+            {metricRows.map((row, r) => (
+              <View key={r} style={styles.row}>
+                {row.map(m => {
+                  const on = selected === m.key;
+                  const tc = tileColors(c, on);
+                  return (
+                    <Pressable
+                      key={m.key}
+                      onPress={() => pick(m.sel)}
+                      accessibilityRole="radio"
+                      accessibilityState={{ selected: on }}
+                      accessibilityLabel={m.label}
+                      style={[styles.tile, styles.metricTile, tc.box]}
+                    >
+                      <Text
+                        style={S(900, 15, { color: tc.text, align: 'center' })}
+                      >
+                        {m.label}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            ))}
+          </View>
 
           {selection.kind === 'deficit' ? (
-            <Text style={[S(600, 12, { color: c.mut }), styles.hint]}>
-              Weekly average of daily deficit (burned − eaten), over days with
-              both food logged and energy burned. Target is avg kcal/day.
-            </Text>
+            <View style={[styles.hint, { backgroundColor: c.accTint }]}>
+              <Text style={S(700, 14, { lh: 19, color: c.acc })}>
+                Weekly average of your daily deficit (burned − eaten), over days
+                with both food logged and energy burned. The target is kcal per
+                day.
+              </Text>
+            </View>
           ) : null}
 
-          <View style={styles.fieldRow}>
-            <View style={styles.nameCol}>
-              <Text
-                style={[
-                  M(700, 10, { ls: 1.6, color: c.fnt }),
-                  styles.fieldLabel,
-                ]}
-              >
-                NAME
-              </Text>
-              <TextInput
-                value={name}
-                onChangeText={setName}
-                placeholder={selectionLabel(selection)}
-                placeholderTextColor={c.fnt}
-                style={input}
-              />
-            </View>
-            <View style={styles.targetCol}>
-              <Text
-                style={[
-                  M(700, 10, { ls: 1.6, color: c.fnt }),
-                  styles.fieldLabel,
-                ]}
-              >
-                TARGET
-              </Text>
+          <Label>Name</Label>
+          <TextInput
+            value={name}
+            onChangeText={setName}
+            placeholder={selectionLabel(selection)}
+            placeholderTextColor={c.fnt}
+            accessibilityLabel="Goal name"
+            style={field}
+          />
+
+          <View style={styles.row}>
+            <View style={styles.half}>
+              <Label>
+                {selection.kind === 'deficit'
+                  ? 'Target / day'
+                  : 'Target / week'}
+              </Label>
               <TextInput
                 value={target}
                 onChangeText={setTarget}
                 keyboardType="number-pad"
                 placeholder={String(defaultTarget)}
                 placeholderTextColor={c.fnt}
-                style={[input, { fontFamily: M(600, 14).fontFamily }]}
+                accessibilityLabel="Goal target"
+                style={field}
               />
             </View>
+            {isActivity ? (
+              <View style={styles.half}>
+                <Label>Min. length (min)</Label>
+                <TextInput
+                  value={minMinutes}
+                  onChangeText={setMinMinutes}
+                  keyboardType="number-pad"
+                  placeholder="Any length"
+                  placeholderTextColor={c.fnt}
+                  accessibilityLabel="Minimum session length in minutes"
+                  style={field}
+                />
+              </View>
+            ) : (
+              <View style={styles.half} />
+            )}
           </View>
 
-          {isActivity ? (
-            <View style={styles.minRow}>
-              <Text
-                style={[
-                  M(700, 10, { ls: 1.6, color: c.fnt }),
-                  styles.fieldLabel,
-                ]}
-              >
-                MIN SESSION LENGTH (MIN)
-              </Text>
-              <TextInput
-                value={minMinutes}
-                onChangeText={setMinMinutes}
-                keyboardType="number-pad"
-                placeholder="Any length"
-                placeholderTextColor={c.fnt}
-                style={input}
-              />
-            </View>
-          ) : null}
-
-          <Pressable
-            onPress={save}
-            accessibilityRole="button"
+          <BriefButton
+            label="Add goal"
+            onPress={() => void save()}
             accessibilityLabel="Add goal"
-            style={[styles.addBtn, { backgroundColor: c.accSolid }]}
-          >
-            <Text style={M(700, 12, { ls: 1, color: c.onAccent })}>
-              ADD GOAL
-            </Text>
-          </Pressable>
+            style={styles.add}
+          />
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
   );
 }
 
+/** A choice tile's look: blue tint + edge when picked, the plain card when not. */
+function tileColors(c: Palette, on: boolean) {
+  return {
+    box: {
+      backgroundColor: on ? c.accTint : c.card,
+      borderColor: on ? c.accSolid : c.hair,
+    },
+    text: on ? c.acc : c.ink,
+  };
+}
+
+/** A field label above its control — Nunito Black 16, sentence case. */
+function Label({ children }: { children: React.ReactNode }) {
+  const c = useTheme().colors;
+  return (
+    <Text style={[S(900, 16, { color: c.ink }), styles.label]}>{children}</Text>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  scroll: { alignItems: 'center', paddingVertical: 20 },
+  scroll: { alignItems: 'center', paddingTop: 12, paddingBottom: 48 },
   column: {
     width: '100%',
     maxWidth: BRIEF_MAX_WIDTH,
     paddingHorizontal: BRIEF_GUTTER,
   },
-  sub: {},
-  hint: { marginTop: 2, marginBottom: 4, lineHeight: 17 },
-  pillRow: { gap: 8, paddingVertical: 16 },
-  pill: {
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    borderRadius: 999,
-    borderWidth: 1,
+  label: { marginTop: 20, marginBottom: 8 },
+  list: { gap: 8 },
+  row: { flexDirection: 'row', gap: 10 },
+  half: { flex: 1, minWidth: 0 },
+  tile: {
+    borderRadius: 16,
+    borderWidth: 2,
+    borderBottomWidth: 4,
   },
-  fieldRow: { flexDirection: 'row', gap: 12, marginTop: 4 },
-  nameCol: { flex: 2, minWidth: 0 },
-  targetCol: { flex: 1, minWidth: 0 },
-  fieldLabel: { marginBottom: 8 },
-  minRow: { marginTop: 14 },
-  addBtn: {
-    borderRadius: 999,
-    paddingVertical: 15,
+  actTile: {
+    flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 22,
+    justifyContent: 'space-between',
+    gap: 12,
+    minHeight: 54,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
   },
+  actName: { flex: 1, minWidth: 0 },
+  metricTile: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 54,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+  },
+  hint: {
+    marginTop: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+  },
+  input: { paddingVertical: 13 },
+  add: { marginTop: 28 },
 });

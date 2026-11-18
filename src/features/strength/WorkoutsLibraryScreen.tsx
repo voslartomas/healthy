@@ -3,7 +3,6 @@ import {
   Alert,
   KeyboardAvoidingView,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,27 +12,28 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ScreenProps } from '../../app/navigation/types';
-import { inputStyle, M, S } from '../../components/brief';
-import { removeWorkout, startWorkoutSession } from '../../state/strengthService';
+import {
+  BRIEF_GUTTER,
+  BRIEF_MAX_WIDTH,
+  chunky,
+  inputStyle,
+  S,
+} from '../../components/brief';
+import {
+  removeWorkout,
+  startWorkoutSession,
+} from '../../state/strengthService';
 import { SavedWorkout, useStrengthStore } from '../../state/useStrengthStore';
 import { useTheme } from '../../theme/theme';
-import { ExerciseMedia } from './components/ExerciseMedia';
-
-/** "3 EXERCISES · 9 SETS · ~28 MIN" — the mono meta line under a workout name. */
-function summarize(w: SavedWorkout): string {
-  const sets = w.exercises.reduce((n, e) => n + e.targetSets, 0);
-  const ex = w.exercises.length;
-  const mins = Math.round(
-    w.exercises.reduce((t, e) => t + e.targetSets * (e.restSec + 40), 0) / 60,
-  );
-  return `${ex} ${ex === 1 ? 'EXERCISE' : 'EXERCISES'} · ${sets} SETS · ~${mins} MIN`;
-}
+import { WorkoutCard } from './components/WorkoutCard';
 
 /**
  * The full saved-workouts library, presented as a native modal from the Lift
- * screen's "MORE" affordance. Search across every saved workout and start, edit
- * or delete one — the same actions the inline Lift list offers, over the whole
- * set instead of the five shown there. Start/edit replace this modal so the
+ * tab's "Search all". There is no artboard for it; it reuses the Lift tab's
+ * chunky {@link WorkoutCard} under a search well, so the two lists match.
+ * Search across every saved workout and start, edit or delete one — the same
+ * actions the inline Lift list offers, over the whole set instead of the five
+ * shown there. Start/edit replace this modal so the
  * runner or builder returns straight to the Lift tab when finished.
  */
 export function WorkoutsLibraryScreen({ navigation }: ScreenProps) {
@@ -76,77 +76,48 @@ export function WorkoutsLibraryScreen({ navigation }: ScreenProps) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       style={[styles.root, { backgroundColor: c.bg }]}
     >
-      <View style={[styles.searchWrap, { borderBottomColor: c.hair }]}>
+      <View style={styles.searchWrap}>
         <TextInput
           value={query}
           onChangeText={setQuery}
           placeholder="Search workouts"
           placeholderTextColor={c.fnt}
           autoCorrect={false}
-          style={[S(600, 15, { color: c.ink }), inputStyle(c)]}
+          accessibilityLabel="Search workouts"
+          style={[S(800, 17, { color: c.ink }), inputStyle(c), styles.search]}
         />
       </View>
 
       <ScrollView
         style={styles.list}
         contentContainerStyle={{
-          paddingHorizontal: 20,
+          width: '100%',
+          maxWidth: BRIEF_MAX_WIDTH,
+          alignSelf: 'center',
+          paddingHorizontal: BRIEF_GUTTER,
           paddingBottom: insets.bottom + 40,
         }}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
         {results.length === 0 ? (
-          <Text style={[S(600, 13, { lh: 19, color: c.mut }), styles.empty]}>
-            {workouts.length === 0
-              ? 'No saved workouts yet. Build one on the Lift screen.'
-              : 'No workouts match.'}
-          </Text>
+          <View style={[chunky(c), styles.emptyCard]}>
+            <Text style={S(700, 15, { lh: 21, color: c.mut })}>
+              {workouts.length === 0
+                ? 'No saved workouts yet. Build one on the Lift tab.'
+                : 'No workouts match.'}
+            </Text>
+          </View>
         ) : (
           results.map(w => (
-            <View
+            <WorkoutCard
               key={w.id}
-              style={[styles.row, { borderBottomColor: c.hair }]}
-            >
-              <ExerciseMedia
-                exerciseId={w.exercises[0].exerciseId}
-                variant="thumb"
-                height={56}
-                playing={false}
-              />
-              <View style={styles.main}>
-                <Pressable
-                  onPress={() => run(w)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Start ${w.name}`}
-                >
-                  <Text style={S(700, 14.5, { lh: 17, color: c.ink })} numberOfLines={1}>
-                    {w.name}
-                  </Text>
-                  <Text style={[M(700, 9, { ls: 1, color: c.acc }), styles.meta]}>
-                    {summarize(w)}
-                  </Text>
-                </Pressable>
-                <View style={styles.actions}>
-                  <Pressable
-                    onPress={() => edit(w)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Edit ${w.name}`}
-                    style={[styles.actBtn, { borderColor: c.hair, backgroundColor: c.card }]}
-                  >
-                    <Text style={M(700, 10.5, { ls: 1, color: c.ink })}>EDIT</Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => confirmDelete(w)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Delete ${w.name}`}
-                    style={[styles.actBtn, { borderColor: c.red, backgroundColor: c.card }]}
-                  >
-                    <Text style={M(700, 10.5, { ls: 1, color: c.red })}>DELETE</Text>
-                  </Pressable>
-                </View>
-              </View>
-            </View>
+              workout={w}
+              onStart={() => run(w)}
+              onEdit={() => edit(w)}
+              onDelete={() => confirmDelete(w)}
+              style={styles.cardGap}
+            />
           ))
         )}
       </ScrollView>
@@ -157,27 +128,15 @@ export function WorkoutsLibraryScreen({ navigation }: ScreenProps) {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   searchWrap: {
-    paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 12,
-    borderBottomWidth: 1,
+    width: '100%',
+    maxWidth: BRIEF_MAX_WIDTH,
+    alignSelf: 'center',
+    paddingHorizontal: BRIEF_GUTTER,
+    paddingTop: 12,
+    paddingBottom: 4,
   },
+  search: { borderRadius: 16 },
   list: { flex: 1 },
-  empty: { marginTop: 20 },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 13,
-    paddingVertical: 14,
-    borderBottomWidth: 1,
-  },
-  main: { flex: 1, minWidth: 0 },
-  meta: { marginTop: 6 },
-  actions: { flexDirection: 'row', gap: 10, marginTop: 11 },
-  actBtn: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingVertical: 7,
-    paddingHorizontal: 14,
-  },
+  emptyCard: { padding: 18, marginTop: 14 },
+  cardGap: { marginTop: 14 },
 });

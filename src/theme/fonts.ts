@@ -1,74 +1,73 @@
 /**
- * Typeface layer for the v3 "data brief" design.
+ * Typeface layer for the "friendly" design (ADR-007).
  *
- * The design uses two Google-Fonts faces: Archivo for prose/labels and Oswald
- * for every numeric readout (the design's `--mono` slot — Oswald is condensed
- * rather than strictly monospaced, but its figures are uniform width, which is
- * what the numeric columns need). React Native maps a font *weight* onto a
- * distinct family name (there is no synthetic bolding of a custom face), so each
- * weight the design uses is registered as its own family and selected through
- * {@link sans} / {@link mono} rather than via `fontWeight`.
+ * One Google-Fonts face, Nunito, for everything: its rounded terminals and
+ * generous x-height are what make the redesign read as simple and approachable,
+ * and one family keeps the type scale legible at every size. It replaced the v3
+ * pair (Archivo prose + condensed Oswald numerals).
+ *
+ * React Native maps a font *weight* onto a distinct family name (there is no
+ * synthetic bolding of a custom face), so each weight is registered as its own
+ * family and selected through {@link sans} / {@link mono} rather than via
+ * `fontWeight`.
+ *
+ * {@link mono} survives as the "number face" so the ~40 call sites that set
+ * numerals with `M(…)` did not have to change: it is the same Nunito, one step
+ * heavier, because the design's numbers are always its boldest element.
  */
 import {
-  Archivo_400Regular,
-  Archivo_500Medium,
-  Archivo_600SemiBold,
-  Archivo_700Bold,
-  Archivo_800ExtraBold,
-  useFonts as useArchivo,
-} from '@expo-google-fonts/archivo';
-import {
-  Oswald_400Regular,
-  Oswald_500Medium,
-  Oswald_600SemiBold,
-  Oswald_700Bold,
-} from '@expo-google-fonts/oswald';
+  Nunito_400Regular,
+  Nunito_500Medium,
+  Nunito_600SemiBold,
+  Nunito_700Bold,
+  Nunito_800ExtraBold,
+  Nunito_900Black,
+  useFonts,
+} from '@expo-google-fonts/nunito';
 
-/** Weights the design actually references. */
-export type Weight = 400 | 500 | 600 | 700 | 800;
+/** Weights the design references. */
+export type Weight = 400 | 500 | 600 | 700 | 800 | 900;
 
-const SANS: Record<Weight, string> = {
-  400: 'Archivo_400Regular',
-  500: 'Archivo_500Medium',
-  600: 'Archivo_600SemiBold',
-  700: 'Archivo_700Bold',
-  800: 'Archivo_800ExtraBold',
+const NUNITO: Record<Weight, string> = {
+  400: 'Nunito_400Regular',
+  500: 'Nunito_500Medium',
+  600: 'Nunito_600SemiBold',
+  700: 'Nunito_700Bold',
+  800: 'Nunito_800ExtraBold',
+  900: 'Nunito_900Black',
 };
 
-// Oswald ships no ExtraBold, so 800 resolves to its heaviest cut. Keeping the
-// key means callers can pass the same Weight union to both families.
-const MONO: Record<Weight, string> = {
-  400: 'Oswald_400Regular',
-  500: 'Oswald_500Medium',
-  600: 'Oswald_600SemiBold',
-  700: 'Oswald_700Bold',
-  800: 'Oswald_700Bold',
+/** Numbers sit one weight above the text around them. */
+const NUMBER_STEP: Record<Weight, Weight> = {
+  400: 600,
+  500: 700,
+  600: 800,
+  700: 800,
+  800: 900,
+  900: 900,
 };
 
-/** Archivo family for a given weight (`--sans` in the design). */
+/** Nunito family for a given text weight. */
 export function sans(weight: Weight = 400): string {
-  return SANS[weight];
+  return NUNITO[weight];
 }
 
-/** Oswald family for a given weight (`--mono` in the design). */
+/** The number face: Nunito, one step heavier than `weight` (see the header). */
 export function mono(weight: Weight = 400): string {
-  return MONO[weight];
+  return NUNITO[NUMBER_STEP[weight]];
 }
 
 /**
- * Load every weight both faces use. Returns `[loaded, error]`; the app renders a
+ * Load every weight the design uses. Returns `[loaded, error]`; the app renders a
  * neutral splash until `loaded` so text never flashes in a fallback face.
  */
 export function useAppFonts(): [boolean, Error | null] {
-  return useArchivo({
-    Archivo_400Regular,
-    Archivo_500Medium,
-    Archivo_600SemiBold,
-    Archivo_700Bold,
-    Archivo_800ExtraBold,
-    Oswald_400Regular,
-    Oswald_500Medium,
-    Oswald_600SemiBold,
-    Oswald_700Bold,
+  return useFonts({
+    Nunito_400Regular,
+    Nunito_500Medium,
+    Nunito_600SemiBold,
+    Nunito_700Bold,
+    Nunito_800ExtraBold,
+    Nunito_900Black,
   });
 }

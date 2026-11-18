@@ -3,6 +3,7 @@ import React from 'react';
 import { View } from 'react-native';
 
 import { CardioScreen } from '../../features/cardio/CardioScreen';
+import { WorkoutDetailScreen } from '../../features/cardio/WorkoutDetailScreen';
 import { CoachOverlay } from '../../features/coach/CoachOverlay';
 import { CoachScreen } from '../../features/coach/CoachScreen';
 import { GoalDefineScreen } from '../../features/goals/GoalDefineScreen';
@@ -24,6 +25,7 @@ import {
   WorkoutBuilderTitle,
   WorkoutRunRight,
   WorkoutRunTitle,
+  WorkoutDetailTitle,
   WorkoutSummaryTitle,
 } from './headers';
 import { HeaderClose } from './HeaderClose';
@@ -65,6 +67,11 @@ export function RootStack() {
           options={{ headerTitle: CardioTitle, headerRight: CardioRight }}
         />
         <Stack.Screen
+          name="WorkoutDetail"
+          component={asScreen(WorkoutDetailScreen)}
+          options={{ headerTitle: WorkoutDetailTitle }}
+        />
+        <Stack.Screen
           name="Sleep"
           component={asScreen(SleepScreen)}
           options={{ title: 'Sleep' }}
@@ -96,7 +103,10 @@ export function RootStack() {
         <Stack.Screen
           name="WorkoutSummary"
           component={asScreen(WorkoutSummaryScreen)}
-          options={{ headerTitle: WorkoutSummaryTitle, headerBackVisible: false }}
+          options={{
+            headerTitle: WorkoutSummaryTitle,
+            headerBackVisible: false,
+          }}
         />
         <Stack.Screen
           name="WorkoutsLibrary"

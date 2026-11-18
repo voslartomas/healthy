@@ -8,10 +8,11 @@ import {
   View,
 } from 'react-native';
 
-import { Card, M, S, SegmentedRow } from '../../components/brief';
+import { inputStyle, S, SegmentedRow } from '../../components/brief';
 import { updateProfile } from '../../state/profileService';
 import { ageFromDob, Sex, useProfileStore } from '../../state/useProfileStore';
 import { useTheme } from '../../theme/theme';
+import { SectionHead } from './SectionHead';
 
 /** Format an epoch-ms birth date as the YYYY-MM-DD the input expects. */
 function dobToInput(ms: number | null): string {
@@ -46,26 +47,26 @@ function parseNum(s: string): number | null {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-const SEX_OPTIONS = (['male', 'female', 'other'] as const).map(key => ({
-  key,
-  label: key.toUpperCase(),
-}));
+const SEX_OPTIONS = [
+  { key: 'male' as const, label: 'Male' },
+  { key: 'female' as const, label: 'Female' },
+  { key: 'other' as const, label: 'Other' },
+];
 
 /**
- * Profile inputs (Setup tab): date of birth, height, weight, and sex. Age (from
- * the birth date) is what lets the app turn workout heart-rate into training
- * zones — Health Connect can't supply it — so the copy explains why we ask. Each
- * field is optional and persisted independently to SQLite via
+ * Profile inputs ("About you" on the Me tab): date of birth, height, weight, and
+ * sex. Age (from the birth date) is what lets the app turn workout heart-rate
+ * into training zones — Health Connect can't supply it — so the copy explains
+ * why we ask. Each field is optional and persisted independently to SQLite via
  * {@link updateProfile}; a blank field clears the value.
  *
  * The text inputs are UNCONTROLLED (`defaultValue` + a `key` that changes when
  * the profile hydrates from SQLite), so we never re-seed React state inside an
  * effect — the value is read straight off the end-editing event. Sex reads the
- * store directly.
+ * store directly, and tapping the chosen tile again clears it (`allowDeselect`).
  */
 export function ProfileSection() {
-  const t = useTheme();
-  const c = t.colors;
+  const c = useTheme().colors;
   const profile = useProfileStore(s => s.profile);
   const hydrated = useProfileStore(s => s.hydrated);
   const age = ageFromDob(profile.dateOfBirth);
@@ -87,27 +88,17 @@ export function ProfileSection() {
     void updateProfile({ weightKg: text.trim() ? parseNum(text) : null });
   };
 
-  const inputStyle = {
-    ...S(600, 14, { color: c.ink }),
-    borderWidth: 1,
-    borderColor: c.hair,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    // The design fills fields with the page ground so they read as insets in
-    // the card rather than as another raised surface.
-    backgroundColor: c.bg,
-  } as const;
+  const field = [inputStyle(c), S(800, 17, { color: c.ink }), styles.input];
 
   return (
-    <Card title="Profile">
-      <Text style={[M(600, 10.5, { color: c.fnt }), styles.note]}>
-        USED TO TURN WORKOUT HEART-RATE INTO TRAINING ZONES. ALL OPTIONAL ·
-        STAYS ON YOUR PHONE.
-      </Text>
+    <>
+      <SectionHead
+        title="About you"
+        sub="Optional. Turns workout heart rate into training zones, and stays on your phone."
+      />
 
       <Field
-        label={age != null ? `DATE OF BIRTH · AGE ${age}` : 'DATE OF BIRTH'}
+        label={age != null ? `Date of birth · age ${age}` : 'Date of birth'}
       >
         <TextInput
           key={`dob:${seed}`}
@@ -117,12 +108,12 @@ export function ProfileSection() {
           placeholderTextColor={c.fnt}
           autoCapitalize="none"
           accessibilityLabel="Date of birth"
-          style={[inputStyle, { fontFamily: M(600, 14).fontFamily }]}
+          style={field}
         />
       </Field>
 
       <View style={styles.row}>
-        <Field label="HEIGHT (CM)" style={styles.half}>
+        <Field label="Height (cm)" style={styles.half}>
           <TextInput
             key={`h:${seed}`}
             defaultValue={
@@ -133,10 +124,10 @@ export function ProfileSection() {
             placeholderTextColor={c.fnt}
             keyboardType="number-pad"
             accessibilityLabel="Height in centimeters"
-            style={[inputStyle, { fontFamily: M(600, 14).fontFamily }]}
+            style={field}
           />
         </Field>
-        <Field label="WEIGHT (KG)" style={styles.half}>
+        <Field label="Weight (kg)" style={styles.half}>
           <TextInput
             key={`w:${seed}`}
             defaultValue={
@@ -147,12 +138,12 @@ export function ProfileSection() {
             placeholderTextColor={c.fnt}
             keyboardType="numeric"
             accessibilityLabel="Weight in kilograms"
-            style={[inputStyle, { fontFamily: M(600, 14).fontFamily }]}
+            style={field}
           />
         </Field>
       </View>
 
-      <Field label="SEX">
+      <Field label="Sex">
         <SegmentedRow<Sex>
           options={SEX_OPTIONS}
           value={profile.sex ?? null}
@@ -160,11 +151,11 @@ export function ProfileSection() {
           allowDeselect
         />
       </Field>
-    </Card>
+    </>
   );
 }
 
-/** One labelled field row in the brief style. */
+/** One labelled field: a bold sentence-case label over its control. */
 function Field({
   label,
   children,
@@ -174,11 +165,10 @@ function Field({
   children: React.ReactNode;
   style?: object;
 }) {
-  const t = useTheme();
-  const c = t.colors;
+  const c = useTheme().colors;
   return (
     <View style={[styles.field, style]}>
-      <Text style={[M(700, 9.5, { ls: 1, color: c.fnt }), styles.fieldLabel]}>
+      <Text style={[S(900, 14, { color: c.mut }), styles.fieldLabel]}>
         {label}
       </Text>
       {children}
@@ -187,9 +177,12 @@ function Field({
 }
 
 const styles = StyleSheet.create({
-  note: { marginTop: 12, lineHeight: 16 },
-  field: { marginTop: 14 },
+  field: { marginTop: 12 },
   fieldLabel: { marginBottom: 6 },
+  // The artboard's 50px field: the shared well's 13px padding plus the 17px
+  // type's line box lands there without a fixed height (which would clip on
+  // large accessibility text sizes).
+  input: { paddingVertical: 12 },
   row: { flexDirection: 'row', gap: 10 },
-  half: { flex: 1 },
+  half: { flex: 1, minWidth: 0 },
 });

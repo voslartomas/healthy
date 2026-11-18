@@ -12,19 +12,16 @@ import { RootTabs } from '../src/app/navigation/RootTabs';
  * can't slip through.
  */
 describe('the tab navigator', () => {
-  it('renders all five numbered tabs in the floating pill', async () => {
+  it('renders all five tabs in the floating pill', async () => {
     await renderWithProviders(
       <NavigationContainer>
         <RootTabs />
       </NavigationContainer>,
     );
 
-    for (const label of ['TODAY', 'FUEL', 'LIFT', 'TRENDS', 'SETUP']) {
+    for (const label of ['Today', 'Food', 'Lift', 'Progress', 'Me']) {
       expect(await screen.findByLabelText(label)).toBeOnTheScreen();
-    }
-    // The Oswald numerals are the design's identity — keep them.
-    for (const num of ['01', '02', '03', '04', '05']) {
-      expect(screen.getByText(num)).toBeOnTheScreen();
+      expect(screen.getByText(label)).toBeOnTheScreen();
     }
   });
 
@@ -35,17 +32,17 @@ describe('the tab navigator', () => {
       </NavigationContainer>,
     );
 
-    const today = await screen.findByLabelText('TODAY');
+    const today = await screen.findByLabelText('Today');
     expect(today.props.accessibilityState.selected).toBe(true);
     expect(
-      screen.getByLabelText('TRENDS').props.accessibilityState.selected,
+      screen.getByLabelText('Progress').props.accessibilityState.selected,
     ).toBe(false);
 
-    fireEvent.press(screen.getByLabelText('TRENDS'));
+    fireEvent.press(screen.getByLabelText('Progress'));
 
     await waitFor(() =>
       expect(
-        screen.getByLabelText('TRENDS').props.accessibilityState.selected,
+        screen.getByLabelText('Progress').props.accessibilityState.selected,
       ).toBe(true),
     );
   });

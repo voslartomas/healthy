@@ -53,7 +53,9 @@
         "expo-build-properties",
         {
           "android": {
-            "minSdkVersion": 26
+            "minSdkVersion": 26,
+            "kotlinVersion": "2.3.20",
+            "buildArchs": ["arm64-v8a"]
           }
         }
       ],
@@ -66,13 +68,7 @@
           "background": false
         }
       ],
-      [
-        "llama.rn",
-        {
-          "enableEntitlements": true
-        }
-      ],
-      "./plugins/withRnllamaGradleProps",
+      ["./plugins/withKotlinCompiler", { "version": "2.3.20" }],
       "./plugins/withNotifeeRepo",
       [
         "expo-audio",

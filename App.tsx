@@ -16,7 +16,10 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { posthog } from './src/analytics/posthog';
 import { navigationRef } from './src/app/navigation/navigationRef';
 import { RootStack } from './src/app/navigation/RootStack';
-import { useModelStore } from './src/features/coach/ondevice/useModelStore';
+import {
+  removeLegacyModelFiles,
+  useModelStore,
+} from './src/features/coach/ondevice/useModelStore';
 import { useWhisperStore } from './src/features/coach/ondevice/useWhisperStore';
 import { SplashScreen } from './src/features/onboarding/SplashScreen';
 import { WelcomeScreen } from './src/features/onboarding/WelcomeScreen';
@@ -99,10 +102,13 @@ export default function App() {
 
   // Load persisted goals from SQLite and the live health snapshot on startup.
   useEffect(() => {
-    // Initialise on-device model status from disk so a previously downloaded
-    // coach/voice model is usable immediately — the coach and daily brief gate
-    // on this status, so without it the user would have to open Settings first.
+    // Ask the OS whether its on-device model (Gemini Nano / Apple Intelligence,
+    // ADR-008) is usable, and read the voice model's status from disk — the
+    // coach and daily brief gate on these, so without it the user would have to
+    // open Settings first.
     void useModelStore.getState().check();
+    // Free the ~2.7 GB Gemma file the llama.rn build left behind (ADR-008).
+    void removeLegacyModelFiles();
     void useWhisperStore.getState().check();
     initGoals().catch(err => console.warn('Failed to load goals', err));
     initCalorieGoals().catch(err =>
@@ -175,22 +181,23 @@ export default function App() {
     return () => sub.remove();
   }, []);
 
-  // Pause any in-flight model download when the app backgrounds and resume it on
-  // return. Pausing persists the resume token, which makes continuation reliable
-  // (vs. a hard kill, which may have to restart) — a big deal for the multi-GB
-  // on-device coach model. No-ops unless a download is actually in flight.
+  // Pause an in-flight voice-model download when the app backgrounds and resume
+  // it on return. Pausing persists the resume token, which makes continuation
+  // reliable (vs. a hard kill, which may have to restart). No-ops unless a
+  // download is actually in flight. Also re-asks the OS about its coach model on
+  // return: the user may have just switched Apple Intelligence on, or AICore may
+  // have finished fetching Gemini Nano in the background.
   useEffect(() => {
     const sub = AppState.addEventListener('change', next => {
-      const model = useModelStore.getState();
       const whisper = useWhisperStore.getState();
       if (next === 'active') {
-        if (model.status === 'paused') void model.download();
         if (whisper.status === 'paused') void whisper.download();
+        if (useModelStore.getState().status !== 'ready')
+          void useModelStore.getState().check();
       } else if (next === 'background') {
         // Only on a committed background — not the transient 'inactive' iOS
         // fires for the app switcher / control center, which would otherwise
         // race a pause against the immediate 'active' on return.
-        if (model.status === 'downloading') void model.pause();
         if (whisper.status === 'downloading') void whisper.pause();
       }
     });
@@ -227,9 +234,9 @@ export default function App() {
           <WelcomeScreen />
         </View>
       )}
-      {/* The native header is the v4 dark ink band in both schemes, so the
-          status-bar glyphs above it are always light. */}
-      <StatusBar style="light" />
+      {/* The header sits on the page colour (ADR-007), so the status-bar glyphs
+          follow the scheme: dark on the white page, light on the dark one. */}
+      <StatusBar style={isDark ? 'light' : 'dark'} />
     </SafeAreaProvider>
   );
 

@@ -50,7 +50,7 @@ it('shows the current exercise and its set counter', async () => {
   await renderWithProviders(<WorkoutRunScreen navigation={mockNav()} />);
   // Appears in the header and again in the plan overview, so match either.
   expect(screen.getAllByText('Dumbbell Bench Press').length).toBeGreaterThan(0);
-  expect(screen.getByText('SET 1/3')).toBeOnTheScreen();
+  expect(screen.getByText('Exercise 1 of 1 · set 1 of 3')).toBeOnTheScreen();
   expect(screen.getByLabelText('Complete set')).toBeOnTheScreen();
 });
 
@@ -110,7 +110,7 @@ it('shows a total-time clock counting from the session start', async () => {
     .getState()
     .startSession(buildSession('wk1', 'Push', [entry({ id: 'a' })], startedAt));
   await renderWithProviders(<WorkoutRunScreen navigation={mockNav()} />);
-  expect(screen.getByText('TOTAL TIME')).toBeOnTheScreen();
+  expect(screen.getByLabelText('Total time 1:01:01')).toBeOnTheScreen();
   expect(screen.getByText('1:01:01')).toBeOnTheScreen();
 });
 

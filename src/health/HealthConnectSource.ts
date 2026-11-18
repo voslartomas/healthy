@@ -12,6 +12,7 @@ import { computeHrZones, HeartRateSample, resolveMaxHr } from './hrZones';
 import {
   EnergyRecord,
   ExerciseRecord,
+  HydrationRecord,
   InstantSample,
   NutritionEntry,
   RawHealthData,
@@ -157,6 +158,8 @@ interface RawRecord {
   protein?: MassQuantity;
   totalCarbohydrate?: MassQuantity;
   totalFat?: MassQuantity;
+  /** HydrationRecord volume. */
+  volume?: VolumeQuantity;
 }
 
 interface EnergyQuantity {
@@ -166,6 +169,10 @@ interface EnergyQuantity {
 interface MassQuantity {
   inKilograms?: number;
   inGrams?: number;
+}
+interface VolumeQuantity {
+  inMilliliters?: number;
+  inLiters?: number;
 }
 
 let moduleHandle: HealthConnectModule | null | undefined;
@@ -197,12 +204,15 @@ const READ_TYPES = [
   'ActiveCaloriesBurned',
   'TotalCaloriesBurned',
   'Nutrition',
+  'Hydration',
   'Weight',
   'BodyFat',
 ] as const;
 
 /** The core reads whose grant means "connected" (a subset that always exists on
- * any real source; nutrition/weight/bodyfat may legitimately be ungranted). */
+ * any real source; nutrition/hydration/weight/bodyfat may legitimately be
+ * ungranted — e.g. a user who connected before hydration was requested, until
+ * they re-run the permission sheet). */
 const CORE_READ_TYPES = ['Steps', 'ExerciseSession', 'SleepSession'];
 
 const PERMISSIONS: Permission[] = [
@@ -255,6 +265,19 @@ function grams(m: MassQuantity | undefined): number | null {
   if (typeof m.inGrams === 'number') return m.inGrams;
   if (typeof m.inKilograms === 'number') return m.inKilograms * 1000;
   return null;
+}
+
+/** Hydration volume → ml; null when absent or non-positive (a 0 ml record is
+ * noise, not a drink). */
+function millilitres(v: VolumeQuantity | undefined): number | null {
+  if (!v) return null;
+  const ml =
+    typeof v.inMilliliters === 'number'
+      ? v.inMilliliters
+      : typeof v.inLiters === 'number'
+        ? v.inLiters * 1000
+        : null;
+  return ml != null && Number.isFinite(ml) && ml > 0 ? ml : null;
 }
 
 /** Stage ints that mean "not asleep": AWAKE and AWAKE_IN_BED. */
@@ -546,6 +569,7 @@ export class HealthConnectSource implements HealthSource {
       activeRecs,
       totalRecs,
       nutritionRecs,
+      hydrationRecs,
       weightRecs,
       bodyFatRecs,
     ] = await Promise.all([
@@ -557,6 +581,9 @@ export class HealthConnectSource implements HealthSource {
       read('ActiveCaloriesBurned', sinceCalories, 12),
       read('TotalCaloriesBurned', sinceCalories, 12),
       read('Nutrition', sinceMetrics, 4),
+      // One record per glass, so this is the busiest of the "metrics" types for
+      // anyone who logs water diligently — give it the same headroom as food.
+      read('Hydration', sinceMetrics, 4),
       read('Weight', sinceMetrics, 3),
       read('BodyFat', sinceMetrics, 3),
     ]);
@@ -1012,6 +1039,21 @@ export class HealthConnectSource implements HealthSource {
       });
     }
 
+    const water: HydrationRecord[] = [];
+    for (const r of hydrationRecs) {
+      const start = toMs(r.startTime);
+      const end = toMs(r.endTime) ?? start;
+      const ml = millilitres(r.volume);
+      if (start == null || end == null || ml == null) continue;
+      water.push({
+        ml,
+        start,
+        end,
+        id: r.metadata?.id ?? null,
+        source: tag(r),
+      });
+    }
+
     const weight: InstantSample[] = [];
     for (const r of weightRecs) {
       const time = toMs(r.time);
@@ -1125,6 +1167,7 @@ export class HealthConnectSource implements HealthSource {
       activeEnergy,
       totalEnergy,
       nutrition,
+      water,
       weight,
       bodyFat,
       energyBurnedTodayAgg,
@@ -1194,6 +1237,34 @@ export class HealthConnectSource implements HealthSource {
       console.warn('[HealthConnect] insert Nutrition failed', err);
       return { ok: false, error: String((err as Error)?.message ?? err) };
     }
+  }
+
+  async readHeartRate(
+    start: number,
+    end: number,
+  ): Promise<HeartRateSample[] | null> {
+    const mod = await this.ensureInitialized();
+    if (!mod) return null;
+    // Same read the zone computation makes per session (HeartRate records each
+    // carry a batch of samples); `readAll` already turns a denied permission
+    // into [] rather than a throw.
+    const recs = await this.readAll(
+      mod,
+      'HeartRate',
+      new Date(start).toISOString(),
+      new Date(end).toISOString(),
+      6,
+    );
+    const out: HeartRateSample[] = [];
+    for (const rec of recs) {
+      for (const smp of rec.samples ?? []) {
+        const t = toMs(smp.time);
+        if (t != null && typeof smp.beatsPerMinute === 'number') {
+          out.push({ time: t, bpm: smp.beatsPerMinute });
+        }
+      }
+    }
+    return out.sort((a, b) => a.time - b.time);
   }
 
   async deleteFoodEntry(id: string): Promise<boolean> {

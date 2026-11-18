@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppState, Pressable, StyleSheet, Text, View } from 'react-native';
+import Svg, { Circle } from 'react-native-svg';
 
-import { M } from '../../../components/brief';
+import { S } from '../../../components/brief';
 import { useStrengthStore } from '../../../state/useStrengthStore';
 import {
   cancelRestOverNotification,
@@ -11,10 +12,12 @@ import { useTheme } from '../../../theme/theme';
 import { playRestBeep } from '../restBeep';
 
 /**
- * Between-sets rest countdown: the design's centred REST block — eyebrow, an
- * oversized mono countdown and a thin linear bar that drains as the rest runs
- * out. Beeps once at zero and calls `onDone`. "+15S" extends; the runner owns
- * the "START NEXT SET" button that skips ahead. The countdown is computed from a
+ * Between-sets rest countdown (ADR-007 "Rest" artboard): a water-blue dial that
+ * drains as the rest runs out, with REST and the m:ss countdown in its middle,
+ * and a "+15 seconds" pill under it. Beeps once at zero and calls `onDone`. The
+ * runner owns the surrounding sky-tinted panel and the "Start next set" button
+ * that skips ahead. The dial's track is the card colour because it sits on that
+ * tinted panel. The countdown is computed from a
  * target end-time (set in an effect, not during render) so it stays accurate
  * across a dropped frame or a brief background.
  *
@@ -82,58 +85,73 @@ export function RestTimer({
     setRemaining(Math.max(0, Math.ceil((endRef.current - Date.now()) / 1000)));
   }
 
-  // The bar fills as the rest elapses, matching the design's left-to-right run.
-  const elapsed = total > 0 ? 1 - remaining / total : 1;
+  // The ring drains as the rest runs out (full at the start, empty at zero),
+  // like the design's countdown dial.
+  const left = total > 0 ? Math.max(0, Math.min(1, remaining / total)) : 0;
   const mm = Math.floor(remaining / 60);
   const ss = remaining % 60;
-  const label = mm > 0 ? `${mm}:${String(ss).padStart(2, '0')}` : String(ss);
+  const label = `${mm}:${String(ss).padStart(2, '0')}`;
+  const r = (RING - RING_STROKE) / 2;
+  const circ = 2 * Math.PI * r;
 
   return (
     <View style={styles.wrap}>
-      <View style={styles.head}>
-        <Text style={M(700, 9, { ls: 1.6, color: c.fnt })}>REST</Text>
-        <Pressable
-          onPress={addTime}
-          accessibilityRole="button"
-          accessibilityLabel="Add 15 seconds"
-          hitSlop={10}
-          style={styles.add}
-        >
-          <Text style={M(700, 9, { ls: 1.6, color: c.acc })}>+15S</Text>
-        </Pressable>
+      <View style={styles.ring}>
+        <Svg width={RING} height={RING}>
+          <Circle
+            cx={RING / 2}
+            cy={RING / 2}
+            r={r}
+            stroke={c.card}
+            strokeWidth={RING_STROKE}
+            fill="none"
+          />
+          {left > 0 ? (
+            <Circle
+              cx={RING / 2}
+              cy={RING / 2}
+              r={r}
+              stroke={c.water}
+              strokeWidth={RING_STROKE}
+              fill="none"
+              strokeLinecap="round"
+              strokeDasharray={`${circ * left} ${circ}`}
+              transform={`rotate(-90 ${RING / 2} ${RING / 2})`}
+            />
+          ) : null}
+        </Svg>
+        <View style={[StyleSheet.absoluteFill, styles.ringLabel]}>
+          <Text style={S(900, 14, { color: c.waterText })}>REST</Text>
+          <Text style={S(900, 60, { lh: 64, color: c.ink })}>{label}</Text>
+        </View>
       </View>
-      <Text
-        style={[M(700, 72, { lh: 76, ls: -1.2, color: c.ink }), styles.big]}
+      <Pressable
+        onPress={addTime}
+        accessibilityRole="button"
+        accessibilityLabel="Add 15 seconds"
+        style={[styles.add, { backgroundColor: c.card, borderColor: c.hair }]}
       >
-        {label}
-      </Text>
-      <View style={[styles.track, { backgroundColor: c.track }]}>
-        <View
-          style={{
-            width: `${Math.max(0, Math.min(1, elapsed)) * 100}%`,
-            height: '100%',
-            backgroundColor: c.accSolid,
-          }}
-        />
-      </View>
+        <Text style={S(900, 16, { color: c.waterText })}>+15 seconds</Text>
+      </Pressable>
     </View>
   );
 }
 
+/** Dial size and stroke — the design's 240px ring. */
+const RING = 240;
+const RING_STROKE = 18;
+
 const styles = StyleSheet.create({
-  wrap: { marginTop: 20 },
-  head: {
-    flexDirection: 'row',
+  wrap: { alignItems: 'center', gap: 18 },
+  ring: { width: RING, height: RING },
+  ringLabel: { alignItems: 'center', justifyContent: 'center' },
+  add: {
+    height: 46,
+    paddingHorizontal: 20,
+    borderRadius: 999,
+    borderWidth: 2,
+    borderBottomWidth: 4,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
-  },
-  add: { position: 'absolute', right: 0 },
-  big: { textAlign: 'center', marginTop: 10 },
-  track: {
-    height: 4,
-    borderRadius: 2,
-    overflow: 'hidden',
-    marginTop: 14,
   },
 });

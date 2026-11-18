@@ -5,11 +5,11 @@ import { ScreenProps } from '../../app/navigation/types';
 import {
   BriefButton,
   BriefScreen,
-  Card,
+  chunky,
   inputStyle,
-  M,
   S,
 } from '../../components/brief';
+import { Icon } from '../../components/Icon';
 import {
   EQUIPMENT_LABELS,
   exerciseOrUnknown,
@@ -24,7 +24,11 @@ import { useTheme } from '../../theme/theme';
 import { ExerciseMedia } from './components/ExerciseMedia';
 import { formatKg } from './components/SetRow';
 
-/** A compact −/value/+ control for one builder field. */
+/**
+ * A compact −/value/+ control for one builder field: the design's soft well
+ * with two small chunky keys either side of the value and its label. The keys
+ * are 36px to fit two wells per row; `hitSlop` lifts the touch target to 44.
+ */
 function Adjust({
   label,
   value,
@@ -41,46 +45,47 @@ function Adjust({
   accessibilityPrefix: string;
 }) {
   const c = useTheme().colors;
+  const key = [chunky(c, 12), styles.key, { borderBottomWidth: 3 }];
   return (
-    <View style={styles.adjust}>
-      <Text style={M(700, 8.5, { ls: 1, color: c.fnt })}>{label}</Text>
-      <View style={styles.adjustRow}>
-        <Pressable
-          onPress={() => onDelta(-step)}
-          accessibilityRole="button"
-          accessibilityLabel={`Decrease ${accessibilityPrefix}`}
-          hitSlop={6}
-          style={[styles.pm, { borderColor: c.hair }]}
-        >
-          <Text style={M(700, 15, { color: c.ink })}>−</Text>
-        </Pressable>
-        <Text style={[M(700, 15, { color: c.ink }), styles.adjustVal]}>
+    <View style={[styles.adjust, { backgroundColor: c.soft }]}>
+      <Pressable
+        onPress={() => onDelta(-step)}
+        accessibilityRole="button"
+        accessibilityLabel={`Decrease ${accessibilityPrefix}`}
+        hitSlop={4}
+        style={key}
+      >
+        <Text style={S(900, 18, { color: c.ink })}>−</Text>
+      </Pressable>
+      <View style={styles.adjustVal}>
+        <Text style={S(900, 18, { lh: 21, color: c.ink })} numberOfLines={1}>
           {value}
           {suffix ? (
-            <Text style={M(700, 9, { color: c.fnt })}>{suffix}</Text>
+            <Text style={S(900, 13, { color: c.fnt })}>{suffix}</Text>
           ) : null}
         </Text>
-        <Pressable
-          onPress={() => onDelta(step)}
-          accessibilityRole="button"
-          accessibilityLabel={`Increase ${accessibilityPrefix}`}
-          hitSlop={6}
-          style={[styles.pm, { borderColor: c.hair }]}
-        >
-          <Text style={M(700, 15, { color: c.ink })}>＋</Text>
-        </Pressable>
+        <Text style={S(900, 12, { color: c.fnt })}>{label}</Text>
       </View>
+      <Pressable
+        onPress={() => onDelta(step)}
+        accessibilityRole="button"
+        accessibilityLabel={`Increase ${accessibilityPrefix}`}
+        hitSlop={4}
+        style={key}
+      >
+        <Text style={S(900, 18, { color: c.ink })}>+</Text>
+      </Pressable>
     </View>
   );
 }
 
-/** "3 × 10 · 22.5 KG · 90S REST" — the accent summary line for one entry. */
+/** "3 × 10 · 22.5 kg · 90s rest" — the violet summary line for one entry. */
 function entrySummary(entry: PlannedExercise): string {
   const parts = [`${entry.targetSets} × ${entry.targetReps}`];
-  if (entry.setTargets) parts[0] = `${entry.targetSets} SETS · PER-SET`;
+  if (entry.setTargets) parts[0] = `${entry.targetSets} sets · per-set`;
   if (entry.targetWeightKg != null)
-    parts.push(`${formatKg(entry.targetWeightKg)} KG`);
-  parts.push(`${entry.restSec}S REST`);
+    parts.push(`${formatKg(entry.targetWeightKg)} kg`);
+  parts.push(`${entry.restSec}s rest`);
   return parts.join(' · ');
 }
 
@@ -105,42 +110,51 @@ function BuilderRow({
   const weighted = entry.targetWeightKg != null;
 
   const roundKg = (n: number) => Math.max(0, Math.round(n * 10) / 10);
+  const moveBtn = [styles.moveBtn, { backgroundColor: c.soft }];
 
   return (
-    <View
-      style={[styles.row, { backgroundColor: c.card, borderColor: c.hair }]}
-    >
+    <View style={[chunky(c), styles.row]}>
       <View style={styles.rowHead}>
         <ExerciseMedia
           exerciseId={entry.exerciseId}
           variant="thumb"
-          height={76}
+          height={52}
         />
         <View style={styles.rowMain}>
-          <View style={styles.rowTitle}>
-            <Text
-              style={[S(700, 14.5, { lh: 18, color: c.ink }), styles.rowName]}
-              numberOfLines={1}
-            >
-              {def.name}
-            </Text>
-            <Pressable
-              onPress={() => remove(entry.id)}
-              accessibilityRole="button"
-              accessibilityLabel={`Remove ${def.name}`}
-              hitSlop={6}
-            >
-              <Text style={M(700, 10, { ls: 1, color: c.red })}>REMOVE</Text>
-            </Pressable>
-          </View>
-          <Text style={[M(600, 9, { ls: 0.6, color: c.fnt }), styles.rowMeta]}>
-            {MUSCLE_LABELS[def.muscleGroup].toUpperCase()} ·{' '}
-            {EQUIPMENT_LABELS[def.equipment].toUpperCase()}
+          <Text style={S(900, 17, { lh: 22, color: c.ink })} numberOfLines={2}>
+            {def.name}
           </Text>
-          <Text style={[M(700, 9, { ls: 1, color: c.acc }), styles.rowSummary]}>
+          <Text style={S(700, 14, { color: c.mut })}>
+            {MUSCLE_LABELS[def.muscleGroup]} ·{' '}
+            {EQUIPMENT_LABELS[def.equipment].toLowerCase()}
+          </Text>
+          <Text style={S(800, 13, { color: c.liftText })}>
             {entrySummary(entry)}
           </Text>
         </View>
+        {/* Reorder: only the moves that are possible are offered. */}
+        {index > 0 ? (
+          <Pressable
+            onPress={() => move(entry.id, -1)}
+            accessibilityRole="button"
+            accessibilityLabel={`Move ${def.name} up`}
+            hitSlop={4}
+            style={moveBtn}
+          >
+            <Text style={S(900, 16, { color: c.mut })}>↑</Text>
+          </Pressable>
+        ) : null}
+        {index < count - 1 ? (
+          <Pressable
+            onPress={() => move(entry.id, 1)}
+            accessibilityRole="button"
+            accessibilityLabel={`Move ${def.name} down`}
+            hitSlop={4}
+            style={moveBtn}
+          >
+            <Text style={S(900, 16, { color: c.mut })}>↓</Text>
+          </Pressable>
+        ) : null}
       </View>
 
       <View style={styles.adjustGrid}>
@@ -168,9 +182,8 @@ function BuilderRow({
             />
             {weighted ? (
               <Adjust
-                label="WEIGHT"
+                label="KG"
                 value={String(entry.targetWeightKg)}
-                suffix="kg"
                 step={0.5}
                 onDelta={d =>
                   update(entry.id, {
@@ -194,50 +207,12 @@ function BuilderRow({
         />
       </View>
 
-      <View style={styles.rowFooter}>
-        <Pressable
-          onPress={() => togglePerSet(entry.id, !perSet)}
-          accessibilityRole="switch"
-          accessibilityState={{ checked: perSet }}
-          accessibilityLabel={`Per-set targets for ${def.name}`}
-          hitSlop={6}
-        >
-          <Text style={M(700, 9.5, { ls: 1, color: perSet ? c.acc : c.mut })}>
-            {perSet ? '● ' : '○ '}PER-SET TARGETS
-          </Text>
-        </Pressable>
-        <View style={styles.moveRow}>
-          {index > 0 ? (
-            <Pressable
-              onPress={() => move(entry.id, -1)}
-              accessibilityRole="button"
-              accessibilityLabel={`Move ${def.name} up`}
-              hitSlop={6}
-            >
-              <Text style={M(700, 13, { color: c.mut })}>↑</Text>
-            </Pressable>
-          ) : null}
-          {index < count - 1 ? (
-            <Pressable
-              onPress={() => move(entry.id, 1)}
-              accessibilityRole="button"
-              accessibilityLabel={`Move ${def.name} down`}
-              hitSlop={6}
-            >
-              <Text style={M(700, 13, { color: c.mut })}>↓</Text>
-            </Pressable>
-          ) : null}
-        </View>
-      </View>
-
       {perSet && entry.setTargets ? (
         <View style={styles.setList}>
           {entry.setTargets.map((st, i) => (
-            <View key={i} style={[styles.setRow, { borderTopColor: c.hair }]}>
-              <Text
-                style={[M(700, 10, { ls: 0.5, color: c.fnt }), styles.setNum]}
-              >
-                SET {i + 1}
+            <View key={i} style={styles.setRow}>
+              <Text style={[S(900, 14, { color: c.mut }), styles.setNum]}>
+                Set {i + 1}
               </Text>
               {weighted ? (
                 <Adjust
@@ -265,15 +240,53 @@ function BuilderRow({
           ))}
         </View>
       ) : null}
+
+      <View style={styles.rowFooter}>
+        <Pressable
+          onPress={() => togglePerSet(entry.id, !perSet)}
+          accessibilityRole="switch"
+          accessibilityState={{ checked: perSet }}
+          accessibilityLabel={`Per-set targets for ${def.name}`}
+          hitSlop={10}
+          style={styles.toggle}
+        >
+          <View
+            style={[
+              styles.check,
+              perSet
+                ? { backgroundColor: c.lift, borderColor: c.lift }
+                : { borderColor: c.hair },
+            ]}
+          >
+            {perSet ? (
+              <Icon name="check" size={14} color={c.onAccent} strokeWidth={3} />
+            ) : null}
+          </View>
+          <Text style={S(900, 14, { color: c.acc })}>
+            Different target per set
+          </Text>
+        </Pressable>
+        <Pressable
+          onPress={() => remove(entry.id)}
+          accessibilityRole="button"
+          accessibilityLabel={`Remove ${def.name}`}
+          hitSlop={10}
+        >
+          <Text style={S(900, 14, { color: c.red })}>Remove</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
 
 /**
- * Build (or edit) a workout: name it, add exercises from the catalog, and set
- * per-exercise sets/reps/weight/rest. Save persists it for reuse; Start runs it
- * immediately (ad-hoc runs simply aren't saved). All draft state lives in the
- * strength store, so the picker modal can append to it without route params.
+ * Build (or edit) a workout (ADR-007 "Build workout" artboard): name it, pick
+ * strength vs core (how it's saved to Health Connect), add exercises from the
+ * catalog as chunky cards with soft −/+ wells for sets/reps/kg/rest (or a row
+ * per set when per-set targets are on), reorder them, then Save to keep it or
+ * Start to run it now (ad-hoc runs simply aren't saved). All draft state lives
+ * in the strength store, so the picker modal can append to it without route
+ * params.
  */
 export function WorkoutBuilderScreen({ navigation }: ScreenProps) {
   const c = useTheme().colors;
@@ -296,96 +309,98 @@ export function WorkoutBuilderScreen({ navigation }: ScreenProps) {
 
   return (
     <BriefScreen>
-      <Card first title="Workout name">
-        <TextInput
-          value={draft?.name ?? ''}
-          onChangeText={setName}
-          placeholder="e.g. Upper body A"
-          placeholderTextColor={c.fnt}
-          style={[
-            S(600, 15, { color: c.ink }),
-            inputStyle(c),
-            styles.nameInput,
-          ]}
-        />
-        <View style={styles.typeRow}>
-          {(['strength', 'core'] as const).map(k => {
-            const on = kind === k;
-            return (
-              <Pressable
-                key={k}
-                onPress={() => setKind(k)}
-                accessibilityRole="radio"
-                accessibilityState={{ selected: on }}
-                accessibilityLabel={
-                  k === 'strength' ? 'Strength session' : 'Core session'
-                }
-                style={[
-                  styles.typeBtn,
-                  {
-                    borderColor: on ? c.ink : c.hair,
-                    backgroundColor: on ? c.ink : 'transparent',
-                  },
-                ]}
-              >
-                <Text style={M(700, 10.5, { ls: 1, color: on ? c.inv : c.mut })}>
-                  {k === 'strength' ? 'STRENGTH' : 'CORE'}
-                </Text>
-              </Pressable>
-            );
-          })}
-        </View>
-        <Text style={[M(600, 9.5, { ls: 0.4, color: c.fnt }), styles.typeHint]}>
-          {kind === 'core'
-            ? 'SAVED TO HEALTH CONNECT AS EXERCISE CLASS'
-            : 'SAVED TO HEALTH CONNECT AS STRENGTH TRAINING'}
-        </Text>
-      </Card>
+      <Text style={[S(900, 16, { color: c.ink }), styles.fieldLabel]}>
+        Name
+      </Text>
+      <TextInput
+        value={draft?.name ?? ''}
+        onChangeText={setName}
+        placeholder="e.g. Upper body A"
+        placeholderTextColor={c.fnt}
+        accessibilityLabel="Workout name"
+        style={[S(800, 18, { color: c.ink }), inputStyle(c), styles.nameInput]}
+      />
+      {/* Strength vs core: hand-rolled rather than SegmentedRow so the chosen
+          tile takes the lift violet (SegmentedRow is the accent blue) and the
+          long accessibility labels the tests rely on stay. */}
+      <View style={styles.typeRow}>
+        {(['strength', 'core'] as const).map(k => {
+          const on = kind === k;
+          return (
+            <Pressable
+              key={k}
+              onPress={() => setKind(k)}
+              accessibilityRole="radio"
+              accessibilityState={{ selected: on }}
+              accessibilityLabel={
+                k === 'strength' ? 'Strength session' : 'Core session'
+              }
+              style={[
+                styles.typeBtn,
+                {
+                  borderColor: on ? c.lift : c.hair,
+                  backgroundColor: on ? c.liftTint : c.card,
+                },
+              ]}
+            >
+              <Text style={S(900, 16, { color: on ? c.liftText : c.ink })}>
+                {k === 'strength' ? 'Strength' : 'Core'}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </View>
+      <Text style={[S(700, 14, { lh: 19, color: c.fnt }), styles.typeHint]}>
+        {kind === 'core'
+          ? 'Saved to Health Connect as an exercise class.'
+          : 'Saved to Health Connect as strength training.'}
+      </Text>
 
-      <Card
-        title="Exercises"
-        right={
-          <Text style={M(700, 10.5, { color: c.fnt })}>{exercises.length}</Text>
-        }
-      >
-        {exercises.length === 0 ? (
-          <Text style={[S(600, 13, { lh: 19, color: c.mut }), styles.empty]}>
+      <View style={styles.sectionHead}>
+        <Text style={S(900, 22, { lh: 28, color: c.ink })}>Exercises</Text>
+        <Text style={S(800, 15, { color: c.fnt })}>
+          {exercises.length} {exercises.length === 1 ? 'exercise' : 'exercises'}
+        </Text>
+      </View>
+
+      {exercises.length === 0 ? (
+        <View style={[chunky(c), styles.emptyCard]}>
+          <Text style={S(700, 15, { lh: 21, color: c.mut })}>
             No exercises yet. Add movements from the catalog below.
           </Text>
-        ) : (
-          exercises.map((e, i) => (
-            <BuilderRow
-              key={e.id}
-              entry={e}
-              index={i}
-              count={exercises.length}
-            />
-          ))
-        )}
+        </View>
+      ) : (
+        exercises.map((e, i) => (
+          <BuilderRow key={e.id} entry={e} index={i} count={exercises.length} />
+        ))
+      )}
 
-        <BriefButton
-          label="＋ ADD EXERCISE"
-          kind="dashed"
-          size={13}
-          onPress={() => navigation.navigate('ExercisePicker')}
-          style={styles.addExercise}
-        />
-      </Card>
+      <BriefButton
+        label="+ Add exercise"
+        accessibilityLabel="Add exercise"
+        kind="dashed"
+        tone="lift"
+        size={15}
+        fontSize={16}
+        onPress={() => navigation.navigate('ExercisePicker')}
+        style={styles.addExercise}
+      />
 
       <View style={styles.footer}>
         <BriefButton
-          label="SAVE"
+          label="Save"
           kind="outline"
           size={15}
+          fontSize={17}
           disabled={!canRun}
           onPress={onSave}
           style={styles.footerBtn}
           accessibilityLabel="Save workout"
         />
         <BriefButton
-          label="START"
+          label="Start"
+          tone="lift"
           size={15}
-          fontSize={12}
           disabled={!canRun}
           onPress={onStart}
           style={styles.footerBtn}
@@ -397,64 +412,78 @@ export function WorkoutBuilderScreen({ navigation }: ScreenProps) {
 }
 
 const styles = StyleSheet.create({
-  nameInput: { marginTop: 12 },
-  typeRow: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  fieldLabel: { marginTop: 12 },
+  nameInput: { marginTop: 8, borderRadius: 16 },
+  typeRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
   typeBtn: {
     flex: 1,
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingVertical: 10,
+    height: 50,
+    borderWidth: 2,
+    borderBottomWidth: 4,
+    borderRadius: 14,
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  typeHint: { marginTop: 10, lineHeight: 14 },
-  empty: { marginTop: 12 },
-  row: {
-    borderWidth: 1,
-    borderRadius: 12,
-    padding: 14,
-    marginTop: 12,
-    gap: 14,
-  },
-  rowHead: { flexDirection: 'row', gap: 13, alignItems: 'flex-start' },
-  rowMain: { flex: 1, minWidth: 0 },
-  rowTitle: {
+  typeHint: { marginTop: 10 },
+  sectionHead: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 10,
+    gap: 12,
+    marginTop: 26,
   },
-  rowName: { flex: 1, minWidth: 0 },
-  rowMeta: { marginTop: 5 },
-  rowSummary: { marginTop: 8 },
-  adjustGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  emptyCard: { padding: 18, marginTop: 14 },
+  row: { padding: 16, marginTop: 14, gap: 14 },
+  rowHead: { flexDirection: 'row', gap: 12, alignItems: 'center' },
+  rowMain: { flex: 1, minWidth: 0 },
+  moveBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  adjustGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  // Two wells per row (the design's 2-column grid); flexBasis just under half
+  // so the gap fits, flexGrow so an odd last well fills its row.
+  adjust: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 4,
+    padding: 8,
+    borderRadius: 14,
+    flexBasis: '45%',
+    flexGrow: 1,
+    flexShrink: 1,
+    minWidth: 0,
+  },
+  adjustVal: { flex: 1, minWidth: 0, alignItems: 'center' },
+  key: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   rowFooter: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 12,
   },
-  moveRow: { flexDirection: 'row', gap: 14 },
-  setList: { gap: 10 },
-  setRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    borderTopWidth: 1,
-    paddingTop: 10,
-  },
-  setNum: { width: 44, flexShrink: 0 },
-  adjust: { gap: 6, minWidth: 84, flexGrow: 1, flexBasis: 84 },
-  adjustRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  adjustVal: { flex: 1, textAlign: 'center' },
-  pm: {
-    width: 34,
-    height: 34,
-    borderRadius: 999,
-    borderWidth: 1,
+  toggle: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 1 },
+  check: {
+    width: 22,
+    height: 22,
+    borderRadius: 7,
+    borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  addExercise: { marginTop: 14 },
-  footer: { flexDirection: 'row', gap: 12, marginTop: 22 },
+  setList: { gap: 8 },
+  setRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  setNum: { width: 46, flexShrink: 0 },
+  addExercise: { marginTop: 16 },
+  footer: { flexDirection: 'row', gap: 10, marginTop: 18 },
   footerBtn: { flex: 1 },
 });

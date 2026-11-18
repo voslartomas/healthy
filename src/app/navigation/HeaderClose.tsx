@@ -1,11 +1,12 @@
 import React from 'react';
 import { Pressable, Text } from 'react-native';
 
-import { BAND, M } from '../../components/brief';
+import { S, useBand } from '../../components/brief';
 
-/** A "Close" header button for modal screens (dismisses via goBack). The modal
- * header is the v4 dark ink band, so the label reads in the light steel accent. */
+/** A "Close" header button for modal screens (dismisses via goBack), in the
+ * accent so it reads as the action it is. */
 export function HeaderClose({ onPress }: { onPress: () => void }) {
+  const band = useBand();
   return (
     <Pressable
       onPress={onPress}
@@ -13,7 +14,7 @@ export function HeaderClose({ onPress }: { onPress: () => void }) {
       accessibilityLabel="Close"
       hitSlop={10}
     >
-      <Text style={M(700, 11, { ls: 1, color: BAND.acc })}>CLOSE</Text>
+      <Text style={S(900, 16, { color: band.acc })}>Close</Text>
     </Pressable>
   );
 }

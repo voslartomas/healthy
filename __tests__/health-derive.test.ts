@@ -15,6 +15,7 @@ import {
   startOfLocalDay,
   stepsInWindow,
   trackedFromExercise,
+  waterToday,
   weeklyGoalHistory,
   weekStartMs,
 } from '../src/health/derive';
@@ -266,17 +267,19 @@ describe('deriveSnapshot', () => {
 
   it('derives sleep hours and performance from the last session', () => {
     const raw = emptyRaw();
+    // The night before, then last night (23:00 → 07:00 local).
+    const today = startOfLocalDay(NOW);
     raw.sleep = [
       {
-        start: NOW - DAY,
-        end: NOW - DAY + 6 * 3600_000,
+        start: today - DAY - 3600_000,
+        end: today - DAY + 5 * 3600_000,
         durationMin: 360,
         source: WITHINGS,
         stages: null,
       },
       {
-        start: NOW - 12 * 3600_000,
-        end: NOW - 4 * 3600_000,
+        start: today - 3600_000,
+        end: today + 7 * 3600_000,
         durationMin: 480,
         source: FITBIT,
         stages: null,
@@ -868,5 +871,58 @@ describe('cardioFromExercise', () => {
       vigorousMin: 0,
       peakMin: 0,
     });
+  });
+});
+
+describe('waterToday (hydration)', () => {
+  const sod = startOfLocalDay(NOW);
+  const drink = (start: number, ml: number, source = 'com.water.app') => ({
+    ml,
+    start,
+    end: start + 60_000,
+    source,
+  });
+
+  it('sums only today, through now', () => {
+    const total = waterToday(
+      [
+        drink(sod + 1000, 250),
+        drink(sod + 2 * 3_600_000, 500),
+        drink(sod - 3_600_000, 750), // yesterday evening
+        drink(NOW + 60_000, 300), // future (clock skew) — ignored
+      ],
+      NOW,
+    );
+    expect(total).toBe(750);
+  });
+
+  it('is null, not 0, when nothing was logged today', () => {
+    expect(waterToday([drink(sod - DAY, 500)], NOW)).toBeNull();
+    expect(waterToday([], NOW)).toBeNull();
+    // A cache written before hydration was read has no `water` array at all.
+    expect(waterToday(undefined, NOW)).toBeNull();
+  });
+
+  it('counts a glass mirrored by a higher-priority source once', () => {
+    const t = sod + 3_600_000;
+    expect(waterToday([drink(t, 300, GFIT), drink(t, 300, FITBIT)], NOW)).toBe(
+      300,
+    );
+  });
+
+  it('reaches the snapshot, and splices across cached + recent reads', () => {
+    const history: RawHealthData = {
+      ...emptyRaw(),
+      water: [{ ...drink(NOW - 10 * DAY, 400), id: 'old' }],
+    };
+    const recent: RawHealthData = {
+      ...emptyRaw(),
+      water: [{ ...drink(sod + 1000, 330), id: 'today' }],
+    };
+    const merged = mergeRaw(history, recent, NOW - 14 * DAY, NOW - 7 * DAY);
+    expect(merged.water?.map(w => w.id).sort()).toEqual(['old', 'today']);
+    expect(deriveSnapshot(merged, NOW).waterTodayMl).toBe(330);
+    // Legacy raw (no `water`) derives cleanly to "no data".
+    expect(deriveSnapshot(emptyRaw(), NOW).waterTodayMl).toBeNull();
   });
 });

@@ -9,7 +9,8 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { M, S } from '../../components/brief';
+import { BriefButton, S } from '../../components/brief';
+import { Icon } from '../../components/Icon';
 import {
   createConversation,
   openConversation,
@@ -54,6 +55,10 @@ function relTime(ms: number): string {
  * header's burger button; tapping a row resumes that chat, "New chat" starts a
  * fresh one, and each row can be deleted. Rendered as an absolute overlay inside
  * the coach modal (the coach is a single native screen, not a drawer navigator).
+ *
+ * Friendly look (ADR-007): a page-coloured panel with rounded outer corners, a
+ * Nunito Black heading, the accent slab for "New chat", and roomy 44px+ rows —
+ * the open conversation sits on the accent tint with a solid dot.
  */
 export function ConversationDrawer({ onClose }: { onClose: () => void }) {
   const c = useTheme().colors;
@@ -85,27 +90,25 @@ export function ConversationDrawer({ onClose }: { onClose: () => void }) {
           styles.panel,
           {
             backgroundColor: c.bg,
-            borderRightColor: c.hair,
-            paddingTop: insets.top + 14,
+            borderColor: c.hair,
+            paddingTop: insets.top + 18,
             paddingBottom: insets.bottom,
           },
         ]}
       >
-        <Text style={[M(700, 9, { ls: 1.4, color: c.fnt }), styles.heading]}>
-          CONVERSATIONS
+        <Text style={[S(900, 22, { lh: 28, color: c.ink }), styles.heading]}>
+          Conversations
         </Text>
 
-        <Pressable
+        <BriefButton
+          label="New chat"
           onPress={() => {
             createConversation();
             onClose();
           }}
-          accessibilityRole="button"
-          style={[styles.newBtn, { borderColor: c.hair }]}
-        >
-          <Text style={M(700, 15, { color: c.acc })}>＋</Text>
-          <Text style={S(600, 13.5, { color: c.ink })}>New chat</Text>
-        </Pressable>
+          size={12}
+          fontSize={16}
+        />
 
         <ScrollView
           style={styles.list}
@@ -113,18 +116,24 @@ export function ConversationDrawer({ onClose }: { onClose: () => void }) {
           showsVerticalScrollIndicator={false}
         >
           {conversations.length === 0 ? (
-            <Text style={[S(500, 12.5, { color: c.mut }), styles.empty]}>
+            <Text style={[S(700, 15, { color: c.mut }), styles.empty]}>
               No conversations yet.
             </Text>
           ) : null}
           {conversations.map(conv => {
             const active = conv.id === currentId;
             return (
-              <View key={conv.id} style={styles.row}>
+              <View
+                key={conv.id}
+                style={[
+                  styles.row,
+                  { backgroundColor: active ? c.accTint : 'transparent' },
+                ]}
+              >
                 <View
                   style={[
                     styles.dot,
-                    { backgroundColor: active ? c.acc : 'transparent' },
+                    { backgroundColor: active ? c.accSolid : 'transparent' },
                   ]}
                 />
                 <Pressable
@@ -138,23 +147,29 @@ export function ConversationDrawer({ onClose }: { onClose: () => void }) {
                 >
                   <Text
                     numberOfLines={1}
-                    style={S(active ? 600 : 500, 13, {
-                      color: active ? c.ink : c.mut,
+                    style={S(active ? 900 : 800, 16, {
+                      lh: 21,
+                      color: active ? c.acc : c.ink,
                     })}
                   >
                     {conv.title}
                   </Text>
-                  <Text style={M(600, 9, { ls: 0.5, color: c.fnt })}>
-                    {relTime(conv.updatedAt).toUpperCase()}
+                  <Text style={S(700, 13, { color: c.fnt })}>
+                    {relTime(conv.updatedAt)}
                   </Text>
                 </Pressable>
                 <Pressable
                   onPress={() => confirmDelete(conv)}
-                  hitSlop={8}
                   accessibilityRole="button"
                   accessibilityLabel={`Delete conversation ${conv.title}`}
+                  style={styles.delete}
                 >
-                  <Text style={M(700, 15, { color: c.fnt })}>×</Text>
+                  <Icon
+                    name="close"
+                    size={18}
+                    strokeWidth={2.6}
+                    color={c.fnt}
+                  />
                 </Pressable>
               </View>
             );
@@ -172,7 +187,6 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    opacity: 0.35,
   },
   panel: {
     position: 'absolute',
@@ -181,28 +195,30 @@ const styles = StyleSheet.create({
     left: 0,
     width: '82%',
     maxWidth: 340,
-    borderRightWidth: 1,
+    borderWidth: 2,
+    borderLeftWidth: 0,
+    borderTopRightRadius: 24,
+    borderBottomRightRadius: 24,
     paddingHorizontal: 16,
   },
-  heading: { marginBottom: 12, marginLeft: 4 },
-  newBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderRadius: 12,
-  },
-  list: { marginTop: 8 },
-  listContent: { paddingBottom: 24 },
+  heading: { marginBottom: 14, marginLeft: 4 },
+  list: { marginTop: 12 },
+  listContent: { paddingBottom: 24, gap: 4 },
   empty: { marginTop: 16, marginLeft: 4 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingVertical: 12,
+    minHeight: 56,
+    paddingLeft: 12,
+    borderRadius: 16,
   },
-  dot: { width: 6, height: 6, borderRadius: 3 },
-  rowMain: { flex: 1, minWidth: 0, gap: 3 },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  rowMain: { flex: 1, minWidth: 0, gap: 1, paddingVertical: 10 },
+  delete: {
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });

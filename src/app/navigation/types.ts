@@ -18,6 +18,7 @@ export type ScreenName =
   | 'WorkoutRun'
   | 'WorkoutSummary'
   | 'WorkoutsLibrary'
+  | 'WorkoutDetail'
   | 'HabitDefine';
 
 /**
@@ -54,6 +55,8 @@ export interface ScreenParams {
   intent?: string;
   /** HabitDefine: the habit to edit; omitted when creating a new one. */
   habitId?: string;
+  /** WorkoutDetail: `derive.exerciseKey` of the recorded session to open. */
+  workoutKey?: string;
 }
 
 export interface ScreenProps {
@@ -82,6 +85,8 @@ export type RootStackParamList = {
   Recovery: undefined;
   Cardio: undefined;
   Sleep: undefined;
+  /** A recorded session (from the wearable), keyed by `workoutKey`. */
+  WorkoutDetail: ScreenParams | undefined;
   /** Strength flow: build → (pick) → run → summary. All coordinate via the
    * strength store, so no route params are needed. */
   WorkoutBuilder: undefined;
