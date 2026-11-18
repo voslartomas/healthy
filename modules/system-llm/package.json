@@ -1,0 +1,6 @@
+{
+  "name": "system-llm",
+  "version": "1.0.0",
+  "private": true,
+  "description": "The OS on-device language model (Gemini Nano / Apple Intelligence) for the Healthy coach — ADR-008."
+}

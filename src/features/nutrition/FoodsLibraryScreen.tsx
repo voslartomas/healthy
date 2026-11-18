@@ -13,14 +13,18 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { ScreenProps } from '../../app/navigation/types';
-import { inputStyle, M, S } from '../../components/brief';
+import { chunky, inputStyle, S } from '../../components/brief';
+import { Icon } from '../../components/Icon';
 import { FoodEntryInput, healthSourceName } from '../../health';
-import { CommonFood, useCommonFoodsStore } from '../../state/useCommonFoodsStore';
+import {
+  CommonFood,
+  useCommonFoodsStore,
+} from '../../state/useCommonFoodsStore';
 import { useHealthStore } from '../../state/useHealthStore';
 import { useTheme } from '../../theme/theme';
 import { PortionSheet } from './PortionSheet';
 
-/** A compact macro/serving descriptor line for a saved food. */
+/** A compact macro/serving descriptor line for a saved food ("12P · 3C"). */
 function subLine(f: CommonFood): string {
   const macros = [
     f.proteinG != null ? `${Math.round(f.proteinG)}P` : null,
@@ -31,16 +35,19 @@ function subLine(f: CommonFood): string {
     .join(' · ');
   if (macros) return macros;
   if (f.servingUnit && f.servingUnit !== 'serving') {
-    return `PER ${f.servingSize ?? 1} ${f.servingUnit.toUpperCase()}`;
+    return `Per ${f.servingSize ?? 1} ${f.servingUnit}`;
   }
-  return 'CALORIES ONLY';
+  return 'Calories only';
 }
 
 /**
- * The full common-foods library, presented as a native modal from the Fuel
- * screen's "MORE" affordance. Search the saved foods and tap one to pick a
- * portion and log it — the same flow the Fuel chips use, but over the whole
- * list instead of the eight most-recent shown inline.
+ * The full common-foods library, presented as a native modal from the Food
+ * screen's "See all" link. Search the saved foods and tap one to pick a
+ * portion and log it — the same flow the Quick add tiles use, but over the
+ * whole list instead of the eight most-recent shown inline.
+ *
+ * Friendly layout (ADR-007): a soft search well, then each food as a chunky
+ * row with its kcal and an orange "+" — the Quick add tile, stretched.
  */
 export function FoodsLibraryScreen(_props: ScreenProps) {
   const c = useTheme().colors;
@@ -66,7 +73,7 @@ export function FoodsLibraryScreen(_props: ScreenProps) {
       if (!ok) {
         Alert.alert(
           'Not logged',
-          `Connect ${healthSourceName()} in Setup to save food entries.`,
+          `Connect ${healthSourceName()} in Me to save food entries.`,
         );
       }
     },
@@ -82,10 +89,13 @@ export function FoodsLibraryScreen(_props: ScreenProps) {
         <View style={styles.portionWrap}>
           <PortionSheet
             food={portionFood}
-            actionLabel="LOG"
+            actionLabel="Log"
             onConfirm={entry => {
               const food = portionFood;
-              const input: FoodEntryInput = { name: entry.name, kcal: entry.kcal };
+              const input: FoodEntryInput = {
+                name: entry.name,
+                kcal: entry.kcal,
+              };
               if (entry.proteinG != null) input.proteinG = entry.proteinG;
               if (entry.carbsG != null) input.carbsG = entry.carbsG;
               if (entry.fatG != null) input.fatG = entry.fatG;
@@ -97,14 +107,15 @@ export function FoodsLibraryScreen(_props: ScreenProps) {
         </View>
       ) : (
         <>
-          <View style={[styles.searchWrap, { borderBottomColor: c.hair }]}>
+          <View style={styles.searchWrap}>
             <TextInput
               value={query}
               onChangeText={setQuery}
               placeholder="Search saved foods"
               placeholderTextColor={c.fnt}
               autoCorrect={false}
-              style={[S(600, 15, { color: c.ink }), inputStyle(c)]}
+              accessibilityLabel="Search saved foods"
+              style={[inputStyle(c), S(800, 17, { color: c.ink })]}
             />
           </View>
 
@@ -119,9 +130,11 @@ export function FoodsLibraryScreen(_props: ScreenProps) {
             showsVerticalScrollIndicator={false}
           >
             {results.length === 0 ? (
-              <Text style={[S(600, 13, { lh: 19, color: c.mut }), styles.empty]}>
+              <Text
+                style={[S(700, 15, { lh: 21, color: c.mut }), styles.empty]}
+              >
                 {foods.length === 0
-                  ? 'No saved foods yet. Add one on the Fuel screen to tap-log it later.'
+                  ? 'No saved foods yet. Save one on the Food screen to tap-log it later.'
                   : 'No saved foods match.'}
               </Text>
             ) : (
@@ -133,23 +146,34 @@ export function FoodsLibraryScreen(_props: ScreenProps) {
                   accessibilityRole="button"
                   accessibilityLabel={`Log ${f.name}`}
                   style={[
+                    chunky(c, 18),
                     styles.row,
-                    { borderBottomColor: c.hair, opacity: busy ? 0.6 : 1 },
+                    { opacity: busy ? 0.6 : 1 },
                   ]}
                 >
                   <View style={styles.rowMain}>
                     <Text
                       numberOfLines={1}
-                      style={S(600, 14, { color: c.ink })}
+                      style={S(900, 16, { color: c.ink })}
                     >
                       {f.name}
                     </Text>
-                    <Text style={[M(600, 9.5, { ls: 0.6, color: c.fnt }), styles.sub]}>
+                    <Text style={S(700, 14, { color: c.mut })}>
                       {subLine(f)}
                     </Text>
                   </View>
-                  <Text style={M(700, 12, { color: c.ink })}>{f.kcal}</Text>
-                  <Text style={M(700, 18, { color: c.acc })}>＋</Text>
+                  <Text style={S(900, 16, { color: c.ink })}>
+                    {f.kcal}
+                    <Text style={S(800, 13, { color: c.fnt })}> kcal</Text>
+                  </Text>
+                  <View style={[styles.plus, { backgroundColor: c.foodTint }]}>
+                    <Icon
+                      name="plus"
+                      size={20}
+                      color={c.foodText}
+                      strokeWidth={3}
+                    />
+                  </View>
                 </Pressable>
               ))
             )}
@@ -166,7 +190,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 8,
     paddingBottom: 12,
-    borderBottomWidth: 1,
   },
   list: { flex: 1 },
   empty: { marginTop: 20 },
@@ -174,10 +197,18 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingVertical: 13,
-    borderBottomWidth: 1,
+    marginTop: 10,
+    paddingVertical: 12,
+    paddingLeft: 16,
+    paddingRight: 12,
   },
-  rowMain: { flex: 1, minWidth: 0, gap: 3 },
-  sub: {},
+  rowMain: { flex: 1, minWidth: 0, gap: 2 },
+  plus: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   portionWrap: { paddingHorizontal: 20, paddingTop: 8 },
 });

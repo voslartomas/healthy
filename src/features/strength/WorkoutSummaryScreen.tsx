@@ -6,14 +6,13 @@ import {
   BriefButton,
   BriefScreen,
   Card,
-  cardTitleStyle,
-  GridCell,
-  GridRow,
-  HeroRow,
-  InkBand,
-  M,
+  chunky,
+  GroupLabel,
   S,
+  Tone,
+  toneColors,
 } from '../../components/brief';
+import { Icon } from '../../components/Icon';
 import { exerciseOrUnknown } from '../../data/exerciseCatalog';
 import { LoggedSet, useStrengthStore } from '../../state/useStrengthStore';
 import { useTheme } from '../../theme/theme';
@@ -48,11 +47,40 @@ function mmss(totalSec: number): string {
   return `${m}:${String(s).padStart(2, '0')}`;
 }
 
+/** 6240 → "6,240". */
+function grp(n: number): string {
+  return Math.round(n)
+    .toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+/** One soft, tinted stat tile in the 2×2 recap grid. */
+function StatTile({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: Tone;
+}) {
+  const c = useTheme().colors;
+  const tc = toneColors(c, tone);
+  return (
+    <View style={[styles.tile, { backgroundColor: tc.tint }]}>
+      <Text style={S(900, 13, { color: tc.text })}>{label}</Text>
+      <Text style={S(900, 26, { lh: 32, color: c.ink })}>{value}</Text>
+    </View>
+  );
+}
+
 /**
- * Post-run recap. Shows total volume, sets, reps and duration, plus a
- * per-exercise breakdown of the sets actually performed. The session is already
- * persisted (by finishSession) before this screen renders; "Done" just returns
- * to the Strength list.
+ * Post-run recap (ADR-007 "Summary" artboard): a trophy, "Workout complete!",
+ * the workout's name (and "saved to Health Connect" once the automatic sync
+ * lands), four tinted tiles — volume, time, sets, reps — and "What you did", a
+ * per-exercise list of the sets actually performed as chips. The session is
+ * already persisted (by finishSession) before this screen renders; "Done" just
+ * returns to the Lift tab.
  */
 export function WorkoutSummaryScreen({ navigation }: ScreenProps) {
   const c = useTheme().colors;
@@ -73,10 +101,15 @@ export function WorkoutSummaryScreen({ navigation }: ScreenProps) {
     return (
       <BriefScreen>
         <Card first title="No session">
-          <Text style={[S(600, 13, { lh: 19, color: c.mut }), styles.empty]}>
+          <Text style={[S(700, 15, { lh: 21, color: c.mut }), styles.empty]}>
             Nothing to show.
           </Text>
-          <BriefButton label="DONE" onPress={done} style={styles.doneEmpty} />
+          <BriefButton
+            label="Done"
+            tone="green"
+            onPress={done}
+            style={styles.doneEmpty}
+          />
         </Card>
       </BriefScreen>
     );
@@ -84,112 +117,129 @@ export function WorkoutSummaryScreen({ navigation }: ScreenProps) {
 
   return (
     <BriefScreen>
-      <InkBand>
-        <HeroRow
-          value={String(summary.totalVolumeKg)}
-          suffix="kg"
-          suffixSpace
-          suffixSize={26}
-          pillText={summary.name.toUpperCase()}
-          caption="TOTAL VOLUME"
-        />
-      </InkBand>
-
-      <View style={[styles.sessionCard, { backgroundColor: c.card, borderColor: c.hair }]}>
-        <View style={styles.sessionHead}>
-          <Text style={cardTitleStyle(c.ink)}>Session</Text>
+      <View style={styles.hero}>
+        <View style={[styles.trophy, { backgroundColor: c.streakTint }]}>
+          <Icon name="star" size={60} color={c.streak} />
         </View>
-        <GridRow borderTop>
-          <GridCell first label="SETS">
-            <Text style={M(700, 22, { ls: -0.2, color: c.ink })}>
-              {summary.setsCompleted}
-            </Text>
-          </GridCell>
-          <GridCell label="REPS">
-            <Text style={M(700, 22, { ls: -0.2, color: c.ink })}>
-              {summary.totalReps}
-            </Text>
-          </GridCell>
-          <GridCell label="TIME">
-            <Text style={M(700, 22, { ls: -0.2, color: c.ink })}>
-              {mmss(summary.durationSec)}
-            </Text>
-          </GridCell>
-        </GridRow>
+        <Text style={S(900, 32, { lh: 38, color: c.ink, align: 'center' })}>
+          Workout complete!
+        </Text>
+        <Text style={S(700, 17, { lh: 23, color: c.mut, align: 'center' })}>
+          {summary.name}
+          {summary.healthId ? ' · saved to Health Connect' : ''}
+        </Text>
       </View>
 
-      <Card title="Breakdown">
+      <View style={styles.tiles}>
+        <StatTile
+          label="VOLUME"
+          value={`${grp(summary.totalVolumeKg)} kg`}
+          tone="streak"
+        />
+        <StatTile label="TIME" value={mmss(summary.durationSec)} tone="lift" />
+        <StatTile
+          label="SETS"
+          value={String(summary.setsCompleted)}
+          tone="green"
+        />
+        <StatTile label="REPS" value={String(summary.totalReps)} tone="water" />
+      </View>
+
+      <GroupLabel>What you did</GroupLabel>
+      <View style={[chunky(c), styles.list]}>
         {groups.length === 0 ? (
-          <Text style={[S(600, 13, { lh: 19, color: c.mut }), styles.empty]}>
+          <Text style={[S(700, 15, { lh: 21, color: c.mut }), styles.noSets]}>
             No sets were logged.
           </Text>
         ) : (
-          groups.map(g => (
+          groups.map((g, gi) => (
             <View
               key={`${g.position}-${g.exerciseId}`}
-              style={[styles.exBlock, { borderBottomColor: c.hair }]}
+              style={[
+                styles.exBlock,
+                gi > 0 ? { borderTopWidth: 2, borderTopColor: c.hair } : null,
+              ]}
             >
               <ExerciseMedia
                 exerciseId={g.exerciseId}
                 variant="thumb"
-                height={56}
+                height={48}
                 playing={false}
               />
               <View style={styles.exMain}>
                 <Text
-                  style={S(700, 14, { lh: 17, color: c.ink })}
+                  style={S(900, 16, { lh: 21, color: c.ink })}
                   numberOfLines={1}
                 >
                   {exerciseOrUnknown(g.exerciseId).name}
                 </Text>
-                <View style={styles.setList}>
+                <View style={styles.chips}>
                   {g.sets.map((s, i) => (
-                    <Text key={i} style={M(600, 11, { ls: 0.3, color: c.mut })}>
-                      {s.weightKg != null
-                        ? `${formatKg(s.weightKg)}KG × ${s.reps}`
-                        : `${s.reps} REPS`}
-                    </Text>
+                    <View
+                      key={i}
+                      style={[styles.chip, { backgroundColor: c.soft }]}
+                    >
+                      <Text style={S(800, 14, { color: c.ink })}>
+                        {s.weightKg != null
+                          ? `${formatKg(s.weightKg)} kg × ${s.reps}`
+                          : `${s.reps} reps`}
+                      </Text>
+                    </View>
                   ))}
                 </View>
               </View>
             </View>
           ))
         )}
-      </Card>
+      </View>
 
       <BriefButton
-        label="DONE"
+        label="Done"
+        tone="green"
+        size={18}
+        fontSize={19}
         onPress={done}
         style={styles.done}
-        accessibilityLabel="Done"
       />
     </BriefScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  empty: { marginTop: 12 },
-  sessionCard: {
-    borderWidth: 1,
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginTop: 16,
+  empty: { marginTop: 10 },
+  doneEmpty: { marginTop: 16 },
+  hero: { alignItems: 'center', gap: 10, marginTop: 24 },
+  trophy: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  sessionHead: { paddingTop: 16, paddingHorizontal: 18, paddingBottom: 14 },
+  tiles: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginTop: 20,
+  },
+  tile: {
+    flexBasis: '45%',
+    flexGrow: 1,
+    alignItems: 'center',
+    padding: 14,
+    borderRadius: 20,
+  },
+  list: { marginTop: 14, overflow: 'hidden' },
+  noSets: { padding: 16 },
   exBlock: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 13,
+    gap: 12,
     paddingVertical: 14,
-    borderBottomWidth: 1,
+    paddingHorizontal: 16,
   },
-  exMain: { flex: 1, minWidth: 0 },
-  setList: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 14,
-    marginTop: 8,
-  },
+  exMain: { flex: 1, minWidth: 0, gap: 6 },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  chip: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 999 },
   done: { marginTop: 24 },
-  doneEmpty: { marginTop: 16 },
 });

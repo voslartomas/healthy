@@ -10,7 +10,7 @@ describe('CoachScreen', () => {
     useAppStore.getState().setAiProvider('anthropic');
     await renderWithProviders(<CoachScreen navigation={mockNav()} />);
 
-    expect(screen.getByText(/ANTHROPIC CLAUDE/)).toBeOnTheScreen();
+    expect(screen.getByText(/Anthropic Claude/)).toBeOnTheScreen();
     // Open-ended by default: food logging has its own explicit action chip, so
     // the bare composer no longer has to double as the way to log a meal.
     expect(

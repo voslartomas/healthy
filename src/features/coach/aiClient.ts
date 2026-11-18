@@ -115,9 +115,9 @@ export async function runCoach(
   opts: RunOptions,
 ): Promise<string> {
   if (cfg.provider === 'ondevice') {
-    // Lazily required so the native `llama.rn` / filesystem stack is only pulled
-    // in when the user actually runs the on-device coach (keeps cloud paths and
-    // most tests free of the native runtime). A plain require (not `import()`)
+    // Lazily required so the native system-model module is only touched when
+    // the user actually runs the on-device coach (keeps cloud paths and most
+    // tests free of native code). A plain require (not `import()`)
     // works under both Metro and Jest's CommonJS environment.
     const { runOnDevice } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports -- lazy, on purpose

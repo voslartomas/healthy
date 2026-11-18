@@ -9,15 +9,17 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { M, S } from '../../components/brief';
+import { chunky, S } from '../../components/brief';
+import { Icon } from '../../components/Icon';
 import { useAppStore } from '../../state/useAppStore';
 import { useTheme } from '../../theme/theme';
 import { COACH_LANGUAGES, languageLabel } from './languages';
 
 /**
- * The coach's reply-language selector: a field showing the current language that
- * opens a bottom-sheet list of every Gemma-supported language. Writes to
- * {@link useAppStore.coachLanguage}, which the coach + daily-brief prompts read.
+ * The coach's reply-language selector: a chunky "Coach language  Automatic ›"
+ * row (Me tab) that opens a bottom-sheet list of the coach's reply
+ * languages (see languages.ts on how well the OS models cover them). Writes to {@link useAppStore.coachLanguage}, which the coach +
+ * daily-brief prompts read.
  */
 export function LanguageSelect() {
   const c = useTheme().colors;
@@ -28,19 +30,16 @@ export function LanguageSelect() {
 
   return (
     <>
-      <Text style={[M(700, 10, { ls: 1.6, color: c.fnt }), styles.label]}>
-        LANGUAGE
-      </Text>
       <Pressable
         onPress={() => setOpen(true)}
         accessibilityRole="button"
         accessibilityLabel="Coach language"
-        style={[styles.field, { borderColor: c.hair }]}
+        style={[chunky(c, 18), styles.field]}
       >
-        <Text style={S(600, 13.5, { color: c.ink })}>
-          {languageLabel(lang)}
+        <Text style={S(900, 16, { color: c.ink })}>Coach language</Text>
+        <Text style={S(800, 15, { color: c.mut })}>
+          {`${languageLabel(lang)} ›`}
         </Text>
-        <Text style={M(700, 13, { color: c.fnt })}>▾</Text>
       </Pressable>
 
       <Modal
@@ -59,22 +58,24 @@ export function LanguageSelect() {
           style={[
             styles.sheet,
             {
-              backgroundColor: c.bg,
-              borderTopColor: c.hair,
+              backgroundColor: c.card,
+              borderColor: c.hair,
               paddingBottom: insets.bottom + 8,
             },
           ]}
         >
           <View style={styles.sheetHead}>
-            <Text style={M(700, 9, { ls: 1.4, color: c.fnt })}>
-              COACH LANGUAGE
+            <Text style={S(900, 20, { lh: 25, color: c.ink })}>
+              Coach language
             </Text>
             <Pressable
               onPress={() => setOpen(false)}
               hitSlop={8}
               accessibilityRole="button"
+              accessibilityLabel="Done"
+              style={styles.done}
             >
-              <Text style={M(700, 11, { ls: 1, color: c.acc })}>DONE</Text>
+              <Text style={S(900, 16, { color: c.acc })}>Done</Text>
             </Pressable>
           </View>
           <ScrollView
@@ -92,24 +93,30 @@ export function LanguageSelect() {
                   }}
                   accessibilityRole="button"
                   accessibilityState={{ selected: on }}
-                  style={[styles.row, { borderBottomColor: c.hair }]}
+                  accessibilityLabel={l.name}
+                  style={[
+                    styles.row,
+                    {
+                      backgroundColor: on ? c.accTint : 'transparent',
+                      borderColor: on ? c.accSolid : 'transparent',
+                    },
+                  ]}
                 >
                   <View style={styles.rowText}>
-                    <Text
-                      style={S(on ? 600 : 500, 14, {
-                        color: on ? c.ink : c.mut,
-                      })}
-                    >
+                    <Text style={S(900, 16, { color: on ? c.acc : c.ink })}>
                       {l.native}
                     </Text>
                     {l.native !== l.name ? (
-                      <Text style={M(600, 9, { ls: 0.5, color: c.fnt })}>
-                        {l.name.toUpperCase()}
-                      </Text>
+                      <Text style={S(700, 13, { color: c.fnt })}>{l.name}</Text>
                     ) : null}
                   </View>
                   {on ? (
-                    <Text style={M(700, 14, { color: c.acc })}>✓</Text>
+                    <Icon
+                      name="check"
+                      size={20}
+                      color={c.acc}
+                      strokeWidth={3}
+                    />
                   ) : null}
                 </Pressable>
               );
@@ -122,42 +129,48 @@ export function LanguageSelect() {
 }
 
 const styles = StyleSheet.create({
-  label: { marginTop: 16, marginBottom: 8 },
   field: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 13,
+    gap: 12,
+    marginTop: 12,
+    minHeight: 56,
+    paddingHorizontal: 16,
   },
-  backdrop: { flex: 1, opacity: 0.35 },
+  // The scrim colour already carries its own alpha; no extra opacity here.
+  backdrop: { flex: 1 },
   sheet: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
     maxHeight: '72%',
-    borderTopWidth: 1,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    paddingHorizontal: 20,
-    paddingTop: 16,
+    borderWidth: 2,
+    borderBottomWidth: 0,
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    paddingHorizontal: 16,
+    paddingTop: 18,
   },
   sheetHead: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 6,
+    paddingHorizontal: 4,
+    marginBottom: 8,
   },
-  listContent: { paddingBottom: 12 },
+  done: { minHeight: 44, justifyContent: 'center', paddingHorizontal: 4 },
+  listContent: { paddingBottom: 12, gap: 4 },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    paddingVertical: 13,
-    borderBottomWidth: 1,
+    minHeight: 52,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 14,
+    borderWidth: 2,
   },
-  rowText: { flex: 1, minWidth: 0, gap: 2 },
+  rowText: { flex: 1, minWidth: 0 },
 });

@@ -8,7 +8,10 @@ import { TrendPoint, TrendSeries } from '../../health';
 
 export interface MetricConfig {
   key: string;
+  /** Short picker label ("Resting HR"). */
   label: string;
+  /** Full name, shown over the value ("Resting heart rate"). */
+  name: string;
   unit: string;
   decimals: number;
   /** Whether a rising value is the good direction (drives delta colour). */
@@ -18,13 +21,62 @@ export interface MetricConfig {
 // HRV and RHR lead — they are the recovery signals the user checks first (and
 // the two metrics that carry a range band). Body-composition metrics trail.
 export const METRIC_CONFIG: MetricConfig[] = [
-  { key: 'hrv', label: 'HRV', unit: 'ms', decimals: 0, goodUp: true },
-  { key: 'rhr', label: 'RHR', unit: 'bpm', decimals: 0, goodUp: false },
-  { key: 'sleep', label: 'SLEEP', unit: 'h', decimals: 1, goodUp: true },
-  { key: 'sleepq', label: 'SLEEP Q', unit: '%', decimals: 0, goodUp: true },
-  { key: 'recovery', label: 'RECOV', unit: '%', decimals: 0, goodUp: true },
-  { key: 'weight', label: 'WEIGHT', unit: 'kg', decimals: 1, goodUp: false },
-  { key: 'bodyfat', label: 'BODYFAT', unit: '%', decimals: 1, goodUp: false },
+  {
+    key: 'hrv',
+    label: 'HRV',
+    name: 'Heart rate variability',
+    unit: 'ms',
+    decimals: 0,
+    goodUp: true,
+  },
+  {
+    key: 'rhr',
+    label: 'Resting HR',
+    name: 'Resting heart rate',
+    unit: 'bpm',
+    decimals: 0,
+    goodUp: false,
+  },
+  {
+    key: 'sleep',
+    label: 'Sleep',
+    name: 'Sleep',
+    unit: 'h',
+    decimals: 1,
+    goodUp: true,
+  },
+  {
+    key: 'sleepq',
+    label: 'Sleep quality',
+    name: 'Sleep quality',
+    unit: '%',
+    decimals: 0,
+    goodUp: true,
+  },
+  {
+    key: 'recovery',
+    label: 'Recovery',
+    name: 'Recovery',
+    unit: '%',
+    decimals: 0,
+    goodUp: true,
+  },
+  {
+    key: 'weight',
+    label: 'Weight',
+    name: 'Weight',
+    unit: 'kg',
+    decimals: 1,
+    goodUp: false,
+  },
+  {
+    key: 'bodyfat',
+    label: 'Body fat',
+    name: 'Body fat',
+    unit: '%',
+    decimals: 1,
+    goodUp: false,
+  },
 ];
 
 /** Maps each metric key to its daily series in the snapshot's TrendSeries. */
@@ -64,7 +116,7 @@ export function toMetric(
   cfg: MetricConfig,
   series: TrendPoint[],
   band?: { lo: number; hi: number }[],
-  /** Span the series covers, for the delta's "/ 30D" suffix. */
+  /** Span the series covers, for the delta's "/ 30d" suffix. */
   rangeDays = 30,
 ): TrendMetric {
   if (series.length === 0) {
@@ -88,11 +140,12 @@ export function toMetric(
   const d = last - first;
   const rounded = cfg.decimals > 0 ? Math.round(d * 10) / 10 : Math.round(d);
   const unitSuffix = cfg.unit === '%' ? '%' : ` ${cfg.unit}`;
-  const span = `${rangeDays}D`;
+  // Sentence case (ADR-007): "▲ 5 ms / 30d", "Flat / 30d".
+  const span = `${rangeDays}d`;
   const delta =
     rounded === 0
-      ? `FLAT / ${span}`
-      : `${rounded > 0 ? '▲' : '▼'}${Math.abs(rounded)}${unitSuffix} / ${span}`.toUpperCase();
+      ? `Flat / ${span}`
+      : `${rounded > 0 ? '▲' : '▼'} ${Math.abs(rounded)}${unitSuffix} / ${span}`;
   return {
     key: cfg.key,
     label: cfg.label,

@@ -27,20 +27,45 @@ const GROUPS = new Set(['chest', 'back', 'shoulders', 'arms', 'legs', 'core']);
 
 /** Free-text muscle words → a canonical group or primary-muscle token. */
 const MUSCLE_SYNONYMS: Record<string, string> = {
-  chest: 'chest', pec: 'chest', pecs: 'chest',
-  back: 'back', lat: 'lats', lats: 'lats',
-  shoulder: 'shoulders', shoulders: 'shoulders', delt: 'shoulders', delts: 'shoulders',
-  trap: 'traps', traps: 'traps', neck: 'neck',
-  arm: 'arms', arms: 'arms',
-  bicep: 'biceps', biceps: 'biceps',
-  tricep: 'triceps', triceps: 'triceps',
-  forearm: 'forearms', forearms: 'forearms',
-  leg: 'legs', legs: 'legs',
-  quad: 'quadriceps', quads: 'quadriceps', quadriceps: 'quadriceps',
-  hamstring: 'hamstrings', hamstrings: 'hamstrings', ham: 'hamstrings', hams: 'hamstrings',
-  glute: 'glutes', glutes: 'glutes',
-  calf: 'calves', calves: 'calves',
-  core: 'core', ab: 'abdominals', abs: 'abdominals', abdominal: 'abdominals', abdominals: 'abdominals',
+  chest: 'chest',
+  pec: 'chest',
+  pecs: 'chest',
+  back: 'back',
+  lat: 'lats',
+  lats: 'lats',
+  shoulder: 'shoulders',
+  shoulders: 'shoulders',
+  delt: 'shoulders',
+  delts: 'shoulders',
+  trap: 'traps',
+  traps: 'traps',
+  neck: 'neck',
+  arm: 'arms',
+  arms: 'arms',
+  bicep: 'biceps',
+  biceps: 'biceps',
+  tricep: 'triceps',
+  triceps: 'triceps',
+  forearm: 'forearms',
+  forearms: 'forearms',
+  leg: 'legs',
+  legs: 'legs',
+  quad: 'quadriceps',
+  quads: 'quadriceps',
+  quadriceps: 'quadriceps',
+  hamstring: 'hamstrings',
+  hamstrings: 'hamstrings',
+  ham: 'hamstrings',
+  hams: 'hamstrings',
+  glute: 'glutes',
+  glutes: 'glutes',
+  calf: 'calves',
+  calves: 'calves',
+  core: 'core',
+  ab: 'abdominals',
+  abs: 'abdominals',
+  abdominal: 'abdominals',
+  abdominals: 'abdominals',
 };
 
 /** Normalize free-text muscle words to canonical tokens, de-duped in order. */
@@ -98,6 +123,41 @@ export function pickExercises(
   return chosen;
 }
 
+/** Lower-case words of 3+ letters, with a plural "s" dropped ("dips" → "dip"). */
+function exerciseWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(w => w.length >= 3)
+    .map(w => (w.length > 3 && w.endsWith('s') ? w.slice(0, -1) : w));
+}
+
+/**
+ * The catalog exercise the user named ("bench press", "dips"), or null. Every
+ * word they said must appear in the name; among those, one they have trained
+ * wins, then the plainest (shortest) name — so "bench press" is "Dumbbell Bench
+ * Press", not "Decline Dumbbell Bench Press". Before this the tool only took
+ * muscles, so asking for bench press and dips produced a Floor Press.
+ */
+export function findExercise(
+  catalog: ExerciseDef[],
+  query: string,
+  hasHistory: (id: string) => boolean = () => false,
+): ExerciseDef | null {
+  const q = exerciseWords(query);
+  if (q.length === 0) return null;
+  const hits = catalog.filter(e => {
+    const w = exerciseWords(e.name);
+    return q.every(x => w.includes(x));
+  });
+  hits.sort(
+    (a, b) =>
+      Number(hasHistory(b.id)) - Number(hasHistory(a.id)) ||
+      a.name.length - b.name.length,
+  );
+  return hits[0] ?? null;
+}
+
 /** The user's most recently logged set for an exercise, or null. */
 function lastLogged(
   sessions: SessionSummary[],
@@ -136,8 +196,7 @@ export function buildPlanned(
   sessions: SessionSummary[],
   workouts: SavedWorkout[],
 ): PlannedExercise {
-  const src =
-    lastLogged(sessions, def.id) ??
+  const src = lastLogged(sessions, def.id) ??
     plannedTarget(workouts, def.id) ?? {
       weightKg: def.defaultWeightKg ?? (def.isWeighted ? 10 : null),
       reps: def.defaultReps,
@@ -167,7 +226,8 @@ export const WORKOUT_TOOLS: ToolSpec[] = [
     name: 'create_workout',
     description:
       "Create and save a new strength workout from the app's exercise database. " +
-      'Give the muscles to target and how many exercises to include; the tool ' +
+      'Give the muscles to target and how many exercises to include, plus any ' +
+      'exercises the user named in `exercises`; the tool ' +
       "picks matching exercises and sets each one's weight and reps from the " +
       "user's own logged history when available (otherwise their saved workouts, " +
       'then sensible defaults). Call this whenever the user asks to build, make, ' +
@@ -183,6 +243,13 @@ export const WORKOUT_TOOLS: ToolSpec[] = [
             'Muscles/groups to target. Groups: chest, back, shoulders, arms, ' +
             'legs, core. Specific muscles: biceps, triceps, forearms, chest, ' +
             'lats, traps, quadriceps, hamstrings, glutes, calves, abdominals.',
+        },
+        exercises: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Exercises the user asked for by name, e.g. ["bench press", "dips"]. ' +
+            'They come first; the muscles fill the rest.',
         },
         exerciseCount: {
           type: 'number',
@@ -225,7 +292,12 @@ export function makeWorkoutToolset(
     const tokens = normalizeMuscles(
       Array.isArray(args.muscles) ? args.muscles.map(String) : [],
     );
-    if (tokens.length === 0) {
+    const named = Array.isArray(args.exercises)
+      ? args.exercises.map(String).filter(x => x.trim())
+      : typeof args.exercises === 'string'
+        ? [args.exercises]
+        : [];
+    if (tokens.length === 0 && named.length === 0) {
       return JSON.stringify({
         ok: false,
         error:
@@ -243,16 +315,37 @@ export function makeWorkoutToolset(
       : EXERCISE_CATALOG;
 
     const { sessions, workouts } = useStrengthStore.getState();
-    const trained = new Set(sessions.flatMap(s => s.sets.map(x => x.exerciseId)));
-    const picked = pickExercises(catalog, tokens, count, id => trained.has(id));
+    const trained = new Set(
+      sessions.flatMap(s => s.sets.map(x => x.exerciseId)),
+    );
+    const hasHistory = (id: string) => trained.has(id);
+    // Named exercises first (in the order asked), then muscles fill up to count.
+    const missing: string[] = [];
+    const chosenNamed: ExerciseDef[] = [];
+    for (const q of named) {
+      const def = findExercise(catalog, q, hasHistory);
+      if (!def) missing.push(q);
+      else if (!chosenNamed.some(d => d.id === def.id)) chosenNamed.push(def);
+    }
+    const total = Math.max(count, chosenNamed.length);
+    const fill = pickExercises(catalog, tokens, total, hasHistory).filter(
+      d => !chosenNamed.some(c => c.id === d.id),
+    );
+    const picked = [...chosenNamed, ...fill].slice(0, total);
     if (picked.length === 0) {
       return JSON.stringify({
         ok: false,
-        error: 'No exercises matched those muscles (and equipment filter).',
+        error:
+          'No exercises matched those muscles or names (and equipment filter).',
       });
     }
     const plan = picked.map(def => buildPlanned(def, sessions, workouts));
-    const workoutName = String(args.name ?? '').trim() || defaultName(tokens);
+    // A generic "Workout" from the model says nothing; name it by muscles then.
+    const given = String(args.name ?? '').trim();
+    const generic = /^(?:new\s+)?workout$/i.test(given);
+    const workoutName =
+      (!generic && given) ||
+      (tokens.length ? defaultName(tokens) : given || 'Workout');
     const workout = await addWorkout(workoutName, plan);
     onCreate(
       `Created "${workout.name}" — ${plan.length} exercise${plan.length === 1 ? '' : 's'}.`,
@@ -270,6 +363,12 @@ export function makeWorkoutToolset(
         })),
       },
       hint: 'The workout is saved. The user can start it from the Strength tab.',
+      // Ends the on-device turn without a second model round (see runner.ts).
+      confirm:
+        `Created "${workout.name}" with ${plan.length} exercise${plan.length === 1 ? '' : 's'} — start it from the Lift tab.` +
+        (missing.length
+          ? ` (${missing.join(', ')} isn't in the exercise library, so I left it out.)`
+          : ''),
     });
   };
   return { tools: WORKOUT_TOOLS, exec };

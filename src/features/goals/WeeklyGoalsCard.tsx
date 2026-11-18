@@ -3,7 +3,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle } from 'react-native-svg';
 
 import { AppNav } from '../../app/navigation/types';
-import { Card, M } from '../../components/brief';
+import { chunky, S } from '../../components/brief';
 import { ENERGY_METRICS, GOAL_SOURCES } from '../../data/goalSources';
 import { removeGoal } from '../../state/goalsService';
 import { useHealthStore } from '../../state/useHealthStore';
@@ -30,23 +30,29 @@ function todayIndex(): number {
   return (new Date().getDay() + 6) % 7;
 }
 
-/** "3 DAYS LEFT" — week runs Monday–Sunday. */
+/** "3 days left" — week runs Monday–Sunday. */
 function daysLeftLabel(): string {
   const left = 6 - todayIndex();
-  return `${left} DAY${left === 1 ? '' : 'S'} LEFT`;
+  return left === 0 ? 'Last day' : `${left} day${left === 1 ? '' : 's'} left`;
 }
 
-const DAY_NAMES = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'] as const;
+/** Goal names are saved in caps (GoalDefine); show them as words. */
+function displayName(name: string): string {
+  if (name !== name.toUpperCase()) return name;
+  const lower = name.toLowerCase();
+  return lower.charAt(0).toUpperCase() + lower.slice(1);
+}
 
-// Ring geometry: r=13 in a 32×32 box (stroke 4), starting from 12 o'clock.
-const RING_R = 13;
+const RING = 44;
+const RING_STROKE = 7;
+const RING_R = (RING - RING_STROKE) / 2;
 const RING_C = 2 * Math.PI * RING_R;
 
 /**
- * The Today screen's "Week" section (v4): auto-tracked weekly goals laid out as
- * a grid of tiles — each a progress ring with its current value and a seven-day
- * mini-bar row in the goal's colour — with inline edit and a native modal to
- * define new ones. Owns the editing state and subscribes to the goals +
+ * The Today screen's "This week" section (ADR-007): auto-tracked weekly goals as
+ * a two-column grid of chunky tiles — each a progress ring in the goal's colour,
+ * its value against the target, and a Mon→Sun mini-bar row — followed by a
+ * dashed "+ New goal" tile, with inline edit. Subscribes to the goals +
  * snapshot stores; the host passes `navigation` to push the DefineGoal modal.
  */
 export function WeeklyGoalsCard({ navigation }: { navigation: AppNav }) {
@@ -55,50 +61,47 @@ export function WeeklyGoalsCard({ navigation }: { navigation: AppNav }) {
   const [editing, setEditing] = useState(false);
 
   return (
-    <Card
-      title="Week"
-      right={
+    <>
+      <View style={styles.head}>
+        <Text style={S(900, 22, { lh: 28, color: c.ink })}>This week</Text>
         <View style={styles.titleRight}>
-          <Text style={M(700, 9.5, { color: c.fnt })}>{daysLeftLabel()}</Text>
-          <Pressable
-            onPress={() => setEditing(e => !e)}
-            accessibilityRole="button"
-            accessibilityLabel={editing ? 'Done editing goals' : 'Edit goals'}
-          >
-            <Text style={M(700, 9.5, { ls: 1, color: c.acc })}>
-              {editing ? 'DONE' : 'EDIT'}
-            </Text>
-          </Pressable>
+          <Text style={S(800, 14, { color: c.fnt })}>{daysLeftLabel()}</Text>
+          {goals.length > 0 ? (
+            <Pressable
+              onPress={() => setEditing(e => !e)}
+              accessibilityRole="button"
+              accessibilityLabel={editing ? 'Done editing goals' : 'Edit goals'}
+              hitSlop={10}
+            >
+              <Text style={S(900, 15, { color: c.acc })}>
+                {editing ? 'Done' : 'Edit'}
+              </Text>
+            </Pressable>
+          ) : null}
         </View>
-      }
-    >
-      {goals.length > 0 ? (
-        <View style={styles.grid}>
-          {goals.map((g, i) => (
-            <GoalTile key={g.id} goal={g} index={i} editing={editing} />
-          ))}
-        </View>
-      ) : (
-        <Text style={[M(600, 11, { lh: 16, color: c.mut }), styles.empty]}>
+      </View>
+
+      {goals.length === 0 ? (
+        <Text style={[S(700, 15, { lh: 21, color: c.mut }), styles.empty]}>
           No goals yet — define one to track your week.
         </Text>
-      )}
+      ) : null}
 
-      <View style={styles.footer}>
-        <Text style={M(700, 8.5, { ls: 1, color: c.fnt })}>
-          MON → SUN · TODAY {DAY_NAMES[todayIndex()]}
-        </Text>
+      <View style={styles.grid}>
+        {goals.map((g, i) => (
+          <GoalTile key={g.id} goal={g} index={i} editing={editing} />
+        ))}
         <Pressable
           onPress={() => navigation.navigate('DefineGoal')}
           accessibilityRole="button"
           accessibilityLabel="Define a goal"
+          style={[styles.tile, styles.addTile, { borderColor: c.hair }]}
         >
-          <Text style={M(700, 9.5, { ls: 1.6, color: c.acc })}>
-            + DEFINE GOAL
-          </Text>
+          <Text style={S(900, 30, { lh: 32, color: c.acc })}>+</Text>
+          <Text style={S(900, 15, { color: c.acc })}>New goal</Text>
         </Pressable>
       </View>
-    </Card>
+    </>
   );
 }
 
@@ -112,8 +115,6 @@ function GoalTile({
   editing: boolean;
 }) {
   const c = useTheme().colors;
-  // Progress reflects the calendar week (Mon–Sun) the header counts down, using
-  // the same current-week window the Trends grid derives from.
   const week = useHealthStore(
     s => s.snapshot.weeklyHistory[s.snapshot.weeklyHistory.length - 1],
   );
@@ -135,20 +136,41 @@ function GoalTile({
   const days = week ? goalDailySeries(goal, week) : [0, 0, 0, 0, 0, 0, 0];
   const today = todayIndex();
 
-  const frac = goal.target > 0 ? Math.max(0, Math.min(1, cur / goal.target)) : 0;
+  const frac =
+    goal.target > 0 ? Math.max(0, Math.min(1, cur / goal.target)) : 0;
   const dash = `${frac * RING_C} ${RING_C}`;
 
   return (
-    <View style={styles.tile}>
+    <View style={[styles.tile, chunky(c, 20)]}>
       <View style={styles.tileTop}>
+        <Svg width={RING} height={RING}>
+          <Circle
+            cx={RING / 2}
+            cy={RING / 2}
+            r={RING_R}
+            fill="none"
+            stroke={c.track}
+            strokeWidth={RING_STROKE}
+          />
+          {frac > 0 ? (
+            <Circle
+              cx={RING / 2}
+              cy={RING / 2}
+              r={RING_R}
+              fill="none"
+              stroke={color}
+              strokeWidth={RING_STROKE}
+              strokeLinecap="round"
+              strokeDasharray={dash}
+              transform={`rotate(-90 ${RING / 2} ${RING / 2})`}
+            />
+          ) : null}
+        </Svg>
         <Text
           numberOfLines={2}
-          style={[
-            M(700, 9.5, { lh: 12, ls: 0.4, color: done ? color : c.mut }),
-            styles.tileLabel,
-          ]}
+          style={[S(900, 16, { lh: 19, color: c.ink }), styles.tileLabel]}
         >
-          {goal.name}
+          {displayName(goal.name)}
           {done ? ' ✓' : ''}
         </Text>
         {editing ? (
@@ -156,48 +178,21 @@ function GoalTile({
             onPress={() => removeGoal(goal.id)}
             accessibilityRole="button"
             accessibilityLabel={`Remove ${goal.name} goal`}
-            hitSlop={8}
+            hitSlop={10}
+            style={[styles.remove, { backgroundColor: c.redTint }]}
           >
-            <Text style={M(700, 12, { lh: 12, color: c.fnt })}>×</Text>
+            <Text style={S(900, 16, { lh: 18, color: c.red })}>×</Text>
           </Pressable>
         ) : null}
       </View>
 
-      <View style={styles.tileMid}>
-        <Svg width={32} height={32}>
-          <Circle
-            cx={16}
-            cy={16}
-            r={RING_R}
-            fill="none"
-            stroke={c.track}
-            strokeWidth={4}
-          />
-          <Circle
-            cx={16}
-            cy={16}
-            r={RING_R}
-            fill="none"
-            stroke={color}
-            strokeWidth={4}
-            strokeLinecap="round"
-            strokeDasharray={dash}
-            transform="rotate(-90 16 16)"
-          />
-        </Svg>
-        <View style={styles.tileVals}>
-          <Text style={M(700, 13, { ls: -0.2, color: done ? color : c.ink })}>
-            {kfmt(cur)}
-          </Text>
-          <Text
-            numberOfLines={1}
-            style={M(600, 8.5, { ls: 0.6, color: c.fnt })}
-          >
-            /{kfmt(goal.target)}
-            {unit ? ` ${unit}` : ''}
-          </Text>
-        </View>
-      </View>
+      <Text numberOfLines={1} style={S(800, 15, { color: c.mut })}>
+        <Text style={S(900, 20, { color: done ? c.grn : c.ink })}>
+          {kfmt(cur)}
+        </Text>{' '}
+        / {kfmt(goal.target)}
+        {unit ? ` ${unit}` : ''}
+      </Text>
 
       <View style={styles.bars}>
         {days.map((v, d) => {
@@ -208,8 +203,8 @@ function GoalTile({
                 testID="weekly-goal-bar-filled"
                 style={{
                   flex: 1,
-                  borderRadius: 2,
-                  height: binary ? 8 : (`${Math.max(38, v * 100)}%` as const),
+                  borderRadius: 3,
+                  height: binary ? 10 : (`${Math.max(38, v * 100)}%` as const),
                   backgroundColor: color,
                 }}
               />
@@ -221,10 +216,12 @@ function GoalTile({
               testID="weekly-goal-bar-empty"
               style={{
                 flex: 1,
-                height: 8,
-                borderRadius: 2,
+                height: 10,
+                borderRadius: 3,
                 backgroundColor: c.track,
-                ...(d === today ? { borderWidth: 1, borderColor: color } : null),
+                ...(d === today
+                  ? { borderWidth: 2, borderColor: color }
+                  : null),
               }}
             />
           );
@@ -235,30 +232,45 @@ function GoalTile({
 }
 
 const styles = StyleSheet.create({
-  titleRight: { flexDirection: 'row', alignItems: 'baseline', gap: 12 },
-  empty: { marginTop: 14 },
+  head: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 26,
+    gap: 12,
+  },
+  titleRight: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  empty: { marginTop: 10 },
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    rowGap: 16,
-    columnGap: 12,
-    marginTop: 16,
+    gap: 12,
+    marginTop: 12,
   },
-  tile: { flexGrow: 1, flexBasis: 96, minWidth: 96, gap: 8 },
-  tileTop: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 4,
-    minHeight: 24,
+  tile: {
+    flexGrow: 1,
+    flexBasis: 150,
+    minWidth: 140,
+    padding: 14,
+    gap: 10,
   },
-  tileLabel: { flex: 1, minWidth: 0 },
-  tileMid: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  tileVals: { flex: 1, minWidth: 0, gap: 4 },
-  bars: { flexDirection: 'row', gap: 2, alignItems: 'flex-end', height: 22 },
-  footer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  addTile: {
+    borderWidth: 2,
+    borderStyle: 'dashed',
+    borderRadius: 20,
     alignItems: 'center',
-    marginTop: 16,
+    justifyContent: 'center',
+    gap: 2,
+    minHeight: 120,
   },
+  tileTop: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  tileLabel: { flex: 1, minWidth: 0 },
+  remove: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bars: { flexDirection: 'row', gap: 3, alignItems: 'flex-end', height: 24 },
 });

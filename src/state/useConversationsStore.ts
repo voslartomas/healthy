@@ -7,13 +7,29 @@ import { create } from 'zustand';
  * native database.
  */
 
+/** A food the coach wrote to the health store, attached to its "Logged: …"
+ * note so the note can open the food editor. `entryId` is the native record id
+ * (null when the platform didn't return one — the note then isn't editable). */
+export interface LoggedFood {
+  entryId: string | null;
+  name: string;
+  kcal: number;
+  proteinG?: number;
+  carbsG?: number;
+  fatG?: number;
+  mealType?: string;
+}
+
 /** One chat bubble. `system` rows are inline notes (e.g. "Logged: …"); `ms` is
- * the model's response time for an `ai` reply. */
+ * the model's response time for an `ai` reply; `food` makes a note editable.
+ * Persisted as JSON with the conversation, so optional fields need no schema
+ * change and older conversations simply lack them. */
 export interface StoredMessage {
   id: string;
   from: 'ai' | 'me' | 'system';
   text: string;
   ms?: number;
+  food?: LoggedFood;
 }
 
 export interface Conversation {

@@ -1,0 +1,24 @@
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'cz.healthy'
+version = '1.0.0'
+
+android {
+  namespace "cz.healthy.systemllm"
+  defaultConfig {
+    versionCode 1
+    versionName "1.0.0"
+  }
+}
+
+dependencies {
+  implementation 'com.facebook.react:react-android'
+  // Gemini Nano via AICore (ADR-008). Built with Kotlin 2.3, which is why the
+  // whole app compiles with Kotlin 2.3.20 (plugins/withKotlinCompiler.js +
+  // `kotlinVersion` in app.json). beta4 fixed Gemini Nano v4 on non-Pixel
+  // devices; beta5 is fine to adopt now that the compiler is 2.3.
+  implementation 'com.google.mlkit:genai-prompt:1.0.0-beta4'
+}

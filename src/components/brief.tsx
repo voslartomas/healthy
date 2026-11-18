@@ -1,14 +1,19 @@
 /**
- * Shared primitives for the v3 "data brief" layout (HealthApp v3.dc.html).
+ * Shared primitives for the "friendly" layout (ADR-007).
  *
- * The design is a scrolling column of cards on a cool page ground: each section
- * is a `card`-filled block outlined in a `hair` hairline, 10px radius, 16/18
- * padding, separated by a 12px gap. Titles are Archivo ExtraBold; every number,
- * label and eyebrow is Oswald, uppercase. These pieces encode that vocabulary so
- * each screen stays declarative.
+ * The design is a white scrolling column of chunky, rounded cards — 2px outline
+ * with a 4px bottom edge, 22px radius — each holding one idea, in Nunito, with
+ * oversized numbers and a colour per area of the app. These pieces encode that
+ * vocabulary so each screen stays declarative.
  *
- * (The previous revision was a flat editorial sheet with numbered 01/02/03
- * sections and hairline rules — hence no `n` prop here any more.)
+ * Every export of the earlier v3 "data brief" vocabulary is kept (same names,
+ * same props) and restyled here, which is how every screen picked up the new
+ * look at once; screens then get rebuilt one by one on top. The two that changed
+ * meaning:
+ *  - {@link InkBand} is no longer a full-bleed dark band but a soft, tinted hero
+ *    card; pass `tone` for the area's colour.
+ *  - the fixed white-on-dark `BAND` palette became {@link useBand}, because the
+ *    header and hero now sit on the page colour, which follows the theme.
  */
 import { HeaderHeightContext } from '@react-navigation/elements';
 import React from 'react';
@@ -30,6 +35,14 @@ import { Palette } from '../theme/colors';
 import { mono, sans, Weight } from '../theme/fonts';
 import { card as cardGeom, useTheme } from '../theme/theme';
 
+/** Smallest type the design allows. The v3 sheet ran labels down to 8–9px, which
+ * is exactly what "readable" was asking us to stop; a floor here lifts every
+ * screen at once, before each is rebuilt. */
+const MIN_FONT_SIZE = 12;
+/** v3's spaced-out uppercase eyebrows used 1–2px tracking; at Nunito's width
+ * that reads as shouting, so tracking is capped. */
+const MAX_LETTER_SPACING = 0.6;
+
 /** Build a text style from a family + size, with optional line-height,
  * letter-spacing, colour and uppercasing. Keeps one-off labels terse. */
 export function txt(
@@ -43,14 +56,15 @@ export function txt(
     align?: TextStyle['textAlign'];
   } = {},
 ): TextStyle {
-  const s: TextStyle = { fontFamily: family, fontSize: size };
+  const fontSize = Math.max(size, MIN_FONT_SIZE);
+  const s: TextStyle = { fontFamily: family, fontSize };
   // iOS clips the top of tall glyphs (caps, accents) in some custom faces when
   // no lineHeight is set and layout falls back to the font's own slightly-too-
   // tight metrics. Default to a roomy line box so ascenders are never cut;
   // callers pass an explicit `lh` when they need a precise rhythm (e.g. the
-  // oversized hero numbers), and that always wins.
-  s.lineHeight = opts.lh ?? Math.ceil(size * 1.3);
-  if (opts.ls != null) s.letterSpacing = opts.ls;
+  // oversized hero numbers), and that always wins — but never below the size.
+  s.lineHeight = Math.max(opts.lh ?? Math.ceil(fontSize * 1.3), fontSize);
+  if (opts.ls != null) s.letterSpacing = Math.min(opts.ls, MAX_LETTER_SPACING);
   if (opts.color != null) s.color = opts.color;
   if (opts.upper) s.textTransform = 'uppercase';
   if (opts.align) s.textAlign = opts.align;
@@ -58,8 +72,9 @@ export function txt(
 }
 
 /** Convenience wrappers so screens read `M(700, 10, …)` / `S(800, 16, …)`.
+ * `M` is the number face (Nunito one weight heavier, see fonts.ts), `S` text.
  * IMPORTANT: only `fontFamily` is set — the weight-specific family (e.g.
- * `Archivo_700Bold`) already carries the weight. Do NOT add `fontWeight`
+ * `Nunito_800ExtraBold`) already carries the weight. Do NOT add `fontWeight`
  * here: on iOS, pairing a weighted custom family with `fontWeight` makes the
  * face fail to resolve and silently fall back to the system font. */
 export const M = (
@@ -73,57 +88,155 @@ export const S = (
   o?: Parameters<typeof txt>[2],
 ): TextStyle => txt(sans(w), size, o);
 
-/** Max content width of the brief. On phones the column fills the screen; on
- * wider surfaces (tablet / web) it stays a centered phone-width column so the
- * mobile layout never stretches edge-to-edge. */
+/** Max content width. On phones the column fills the screen; on wider surfaces
+ * (tablet / web) it stays a centered phone-width column. */
 export const BRIEF_MAX_WIDTH = 440;
 
-/** Horizontal gutter of the card column (the design's `padding: 4px 22px`). */
-export const BRIEF_GUTTER = 22;
+/** Horizontal gutter of the card column. */
+export const BRIEF_GUTTER = 20;
 
-/** The card title face — Archivo ExtraBold 15, used by {@link Card} and by the
- * few screens that head a block without wrapping it in one. */
+/** The card title face — Nunito Black 20. */
 export function cardTitleStyle(ink: string): TextStyle {
-  return S(800, 15, { ls: -0.15, lh: 18, color: ink });
+  return S(900, 20, { lh: 25, color: ink });
+}
+
+/** A screen's big page title ("Food", "Lift"). */
+export function pageTitleStyle(ink: string): TextStyle {
+  return S(900, 30, { lh: 36, color: ink });
 }
 
 /**
- * The fixed inverted palette used for content that sits inside an ink band. The
- * band ({@link Palette.band}) is dark in *both* colour schemes, so the text,
- * hairlines and accents on top of it are constant — white ink, cool-grey muted
- * copy, and the light steel accents the dark theme already uses. Screens read
- * these directly (not through {@link useTheme}) because there is no theme
- * provider to override for a subtree. Mirrors the design's per-band CSS-var
- * overrides in HealthApp v4. */
-export const BAND = {
-  ink: '#FFFFFF',
-  mut: '#D5DEE9',
-  fnt: '#B4C1D2',
-  hair: 'rgba(255,255,255,0.14)',
-  track: 'rgba(255,255,255,0.14)',
-  acc: '#6FA3D6',
-  accSolid: '#6FA3D6',
-  sand: '#7FA8CE',
-  grn: '#5FAE8B',
-  pillBg: 'rgba(95,174,139,0.18)',
-  pillText: '#5FAE8B',
-} as const;
+ * Colours for content in the header and the hero. v3 drew these white on a dark
+ * band that was dark in BOTH schemes; the friendly design puts them on the page
+ * itself, so they follow the theme like everything else.
+ */
+export interface BandPalette {
+  ink: string;
+  mut: string;
+  fnt: string;
+  hair: string;
+  track: string;
+  acc: string;
+  accSolid: string;
+  sand: string;
+  grn: string;
+  pillBg: string;
+  pillText: string;
+}
 
-/** Shared field styling for the design's text inputs: hairline box on the page
- * ground, 12px radius, 12/14 padding. */
-export function inputStyle(c: Palette): ViewStyle {
+export function bandPalette(c: Palette): BandPalette {
   return {
-    borderWidth: 1,
-    borderColor: c.hair,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    backgroundColor: c.bg,
+    ink: c.ink,
+    mut: c.mut,
+    fnt: c.fnt,
+    hair: c.hair,
+    track: c.track,
+    acc: c.acc,
+    accSolid: c.accSolid,
+    sand: c.sand,
+    grn: c.grn,
+    pillBg: c.pillBg,
+    pillText: c.pillText,
   };
 }
 
-/** Page-ground scrolling screen body with the v3 gutter, centered and capped to
- * a phone-width column on wide screens.
+export function useBand(): BandPalette {
+  return bandPalette(useTheme().colors);
+}
+
+/** The colour families a hero / button can take — one per area of the app. */
+export type Tone =
+  'accent' | 'green' | 'food' | 'lift' | 'water' | 'sleep' | 'red' | 'streak';
+
+/** `tint` = soft fill, `text` = readable text on it, `solid` = bars/buttons,
+ * `edge` = a solid button's darker bottom edge. */
+export function toneColors(
+  c: Palette,
+  tone: Tone,
+): { tint: string; text: string; solid: string; edge: string } {
+  switch (tone) {
+    case 'green':
+      return {
+        tint: c.grnTint,
+        text: c.grn,
+        solid: c.grnSolid,
+        edge: c.grnEdge,
+      };
+    case 'food':
+      return {
+        tint: c.foodTint,
+        text: c.foodText,
+        solid: c.food,
+        edge: c.foodEdge,
+      };
+    case 'lift':
+      return {
+        tint: c.liftTint,
+        text: c.liftText,
+        solid: c.lift,
+        edge: c.liftEdge,
+      };
+    case 'water':
+      return {
+        tint: c.waterTint,
+        text: c.waterText,
+        solid: c.water,
+        edge: c.waterText,
+      };
+    case 'sleep':
+      return {
+        tint: c.sleepTint,
+        text: c.sleepText,
+        solid: c.sleepSolid,
+        edge: c.sleepText,
+      };
+    case 'red':
+      return { tint: c.redTint, text: c.red, solid: c.redSolid, edge: c.red };
+    case 'streak':
+      return {
+        tint: c.streakTint,
+        text: c.streakText,
+        solid: c.streak,
+        edge: c.streakText,
+      };
+    default:
+      return {
+        tint: c.accTint,
+        text: c.acc,
+        solid: c.accSolid,
+        edge: c.accEdge,
+      };
+  }
+}
+
+/** Shared field styling: a soft well with a 2px outline, 14px radius. */
+export function inputStyle(c: Palette): ViewStyle {
+  return {
+    borderWidth: 2,
+    borderColor: c.hair,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 13,
+    backgroundColor: c.soft,
+  };
+}
+
+/** The chunky outline every card and tile shares: 2px, 4px at the bottom. */
+export function chunky(
+  c: Palette,
+  radius: number = cardGeom.radius,
+): ViewStyle {
+  return {
+    borderWidth: cardGeom.borderWidth,
+    borderBottomWidth: cardGeom.borderBottomWidth,
+    borderColor: c.hair,
+    borderRadius: radius,
+    backgroundColor: c.card,
+  };
+}
+
+/** Page-ground scrolling screen body with the gutter, centered and capped to a
+ * phone-width column on wide screens.
  *
  * Pass `onRefresh` to enable pull-to-refresh; `refreshing` drives the spinner and
  * should be the store's in-flight flag, so a refresh started elsewhere (app
@@ -141,12 +254,6 @@ export function BriefScreen({
   refreshing?: boolean;
 }) {
   const t = useTheme();
-  // Lift the whole sheet above the keyboard so a focused input is never hidden.
-  // Under Android edge-to-edge (SDK 57 / RN 0.86) `adjustResize` no longer
-  // shrinks the window, so a bare ScrollView gets overlapped; KeyboardAvoidingView
-  // is the JS-only fix that works on both platforms. Offset by the nav header
-  // height (0 when there is no header) so the avoided distance is measured from
-  // the top of the scroll area, matching CoachScreen.
   const headerHeight = React.useContext(HeaderHeightContext) ?? 0;
   return (
     <KeyboardAvoidingView
@@ -160,12 +267,10 @@ export function BriefScreen({
         contentContainerStyle={{
           alignItems: 'center',
           paddingTop: 4,
-          paddingBottom: 120,
+          paddingBottom: 140,
         }}
         showsVerticalScrollIndicator={false}
         contentInsetAdjustmentBehavior="never"
-        // Let a Save/＋ button fire on the first tap while the keyboard is up,
-        // instead of that tap only dismissing the keyboard.
         keyboardShouldPersistTaps="handled"
         refreshControl={
           onRefresh ? (
@@ -192,7 +297,7 @@ export function BriefScreen({
   );
 }
 
-/** The mono eyebrow row: uppercase context on the left, accent status right. */
+/** A small context row: label on the left, coloured status on the right. */
 export function BriefHeader({
   left,
   right,
@@ -205,17 +310,9 @@ export function BriefHeader({
   const t = useTheme();
   return (
     <View style={styles.headRow}>
-      <Text style={M(700, 10, { ls: 2, upper: true, color: t.colors.fnt })}>
-        {left}
-      </Text>
+      <Text style={S(800, 14, { color: t.colors.fnt })}>{left}</Text>
       {right ? (
-        <Text
-          style={M(700, 10, {
-            ls: 2,
-            upper: true,
-            color: rightColor ?? t.colors.acc,
-          })}
-        >
+        <Text style={S(800, 14, { color: rightColor ?? t.colors.acc })}>
           {right}
         </Text>
       ) : null}
@@ -223,7 +320,7 @@ export function BriefHeader({
   );
 }
 
-/** A free-standing mono label above a card ("OVERNIGHT VITALS"). */
+/** A section heading above a card ("Today's habits"). */
 export function GroupLabel({
   children,
   style,
@@ -234,9 +331,7 @@ export function GroupLabel({
   const c = useTheme().colors;
   return (
     <View style={[styles.groupLabel, style]}>
-      <Text style={M(700, 10, { ls: 2, upper: true, color: c.fnt })}>
-        {children}
-      </Text>
+      <Text style={S(900, 22, { lh: 28, color: c.ink })}>{children}</Text>
     </View>
   );
 }
@@ -245,15 +340,13 @@ export interface PillSpec {
   text: string;
   /** Dot colour before the text; omit for no dot. */
   dot?: string;
-  /** Fill; defaults to the tinted `pillBg`. Pass `null` for a hairline outline. */
+  /** Fill; defaults to the tinted `pillBg`. Pass `null` for an outline. */
   bg?: string | null;
   textColor?: string;
 }
 
-/** Small rounded status pill — a tinted fill by default, hairline when `bg` is
- * explicitly null. `small` is the tighter variant the Today "Body & fuel" rows
- * use (9.5px text, 4/8 padding) so the trailing pill sits inside a metric row
- * without crowding it. */
+/** Rounded status pill — a tinted fill by default, outlined when `bg` is
+ * explicitly null. `small` is the tighter variant for inside a row. */
 export function Pill({ spec, small }: { spec: PillSpec; small?: boolean }) {
   const c = useTheme().colors;
   const outlined = spec.bg === null;
@@ -262,7 +355,7 @@ export function Pill({ spec, small }: { spec: PillSpec; small?: boolean }) {
       style={[
         small ? styles.pillSmall : styles.pill,
         outlined
-          ? { borderWidth: 1, borderColor: c.hair }
+          ? { borderWidth: 2, borderColor: c.hair }
           : { backgroundColor: spec.bg ?? c.pillBg },
       ]}
     >
@@ -270,9 +363,8 @@ export function Pill({ spec, small }: { spec: PillSpec; small?: boolean }) {
         <View style={[styles.pillDot, { backgroundColor: spec.dot }]} />
       ) : null}
       <Text
-        style={M(700, small ? 9.5 : 10.5, {
-          ls: small ? 0.3 : 1,
-          color: spec.textColor ?? (outlined ? c.fnt : c.pillText),
+        style={S(900, small ? 12 : 13.5, {
+          color: spec.textColor ?? (outlined ? c.mut : c.pillText),
         })}
       >
         {spec.text}
@@ -282,11 +374,10 @@ export function Pill({ spec, small }: { spec: PillSpec; small?: boolean }) {
 }
 
 /**
- * A section card: the design's `background:card; border:1px hair; radius:10;
- * padding:16px 18px` block. `title` renders the Archivo ExtraBold heading with
- * an optional `right` slot; `flush` drops the padding so edge-to-edge media can
- * sit inside; `first` uses the tighter top gap the first card gets under the
- * native header.
+ * A section card: chunky outline (2px, 4px bottom edge), 22px radius, 18px
+ * padding. `title` renders the Nunito Black heading with an optional `right`
+ * slot; `flush` drops the padding so edge-to-edge content can sit inside;
+ * `first` uses the tighter top gap of the first card under the header.
  */
 export function Card({
   title,
@@ -330,11 +421,8 @@ export function Card({
   );
   const shell = [
     styles.card,
-    {
-      backgroundColor: c.card,
-      borderColor: c.hair,
-      marginTop: first ? cardGeom.firstGap : cardGeom.gap,
-    },
+    chunky(c),
+    { marginTop: first ? cardGeom.firstGap : cardGeom.gap },
     flush ? styles.cardFlush : null,
     style,
   ];
@@ -354,14 +442,13 @@ export function Card({
 }
 
 /**
- * The oversized mono hero number with an optional unit suffix, status pill and
- * caption, wrapped in its own card. Becomes a button when `onPress` is set
- * (e.g. tap → Recovery).
+ * The oversized number with an optional unit suffix, status pill and caption,
+ * wrapped in its own card. Becomes a button when `onPress` is set.
  */
 export function BigStat({
   value,
   suffix,
-  suffixSize = 30,
+  suffixSize = 26,
   valueColor,
   pill,
   caption,
@@ -382,31 +469,17 @@ export function BigStat({
   const c = useTheme().colors;
   const body = (
     <>
-      <Text
-        style={[
-          { color: valueColor ?? c.ink },
-          // lineHeight must stay >= fontSize or iOS clips the tops of the digits
-          // (a shorter line box crops the glyph). Keep it snug but not clipping.
-          M(700, 64, { ls: -1, lh: 68 }),
-        ]}
-      >
+      <Text style={[{ color: valueColor ?? c.ink }, S(900, 56, { lh: 62 })]}>
         {value}
         {suffix ? (
-          <Text style={M(700, suffixSize, { ls: -0.2, color: c.fnt })}>
-            {suffix}
-          </Text>
+          <Text style={S(900, suffixSize, { color: c.fnt })}>{suffix}</Text>
         ) : null}
       </Text>
       {pill || caption ? (
         <View style={styles.bigRight}>
           {pill ? <Pill spec={pill} /> : null}
           {caption ? (
-            <Text
-              style={[
-                M(700, 10, { ls: 1, upper: true, color: c.fnt }),
-                { lineHeight: 16, marginTop: 5 },
-              ]}
-            >
+            <Text style={[S(700, 14, { color: c.mut }), styles.heroCaption]}>
               {caption}
             </Text>
           ) : null}
@@ -415,8 +488,7 @@ export function BigStat({
     </>
   );
   const cardStyle: ViewStyle = {
-    backgroundColor: c.card,
-    borderColor: c.hair,
+    ...chunky(c),
     marginTop: first ? cardGeom.firstGap : cardGeom.gap,
   };
   if (onPress) {
@@ -434,56 +506,64 @@ export function BigStat({
   return <View style={[styles.card, styles.bigRow, cardStyle]}>{body}</View>;
 }
 
+const ToneContext = React.createContext<Tone>('accent');
+
 /**
- * A full-bleed dark "ink band" — the v4 signature surface. It bleeds past the
- * brief's 22px gutter to the column edge and re-adds the gutter as padding, so
- * the dark fill runs edge-to-edge while its content keeps the page rhythm. The
- * native header is the same band, so a hero band at the top of a screen (with
- * the default −4 top margin) meets the header with no seam.
+ * The screen's hero: a soft, rounded card tinted in the area's colour (`tone`)
+ * that holds the one number the screen is about. It replaced v3's full-bleed
+ * dark "ink band"; the name stays so every screen kept working through the
+ * switch. {@link HeroRow} inside it picks the tone up for its pill.
+ *
+ * `marginTop` defaults to a small gap below the header; the old band's negative
+ * offset (to meet a dark header with no seam) no longer applies.
  */
 export function InkBand({
   children,
   style,
-  marginTop = -4,
-  paddingTop = 8,
-  paddingBottom = 22,
+  tone = 'accent',
+  marginTop = 8,
+  paddingTop = 20,
+  paddingBottom = 20,
 }: {
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
+  tone?: Tone;
   marginTop?: number;
   paddingTop?: number;
   paddingBottom?: number;
 }) {
   const c = useTheme().colors;
+  const tc = toneColors(c, tone);
   return (
-    <View
-      style={[
-        {
-          backgroundColor: c.band,
-          marginHorizontal: -BRIEF_GUTTER,
-          marginTop,
-          paddingHorizontal: BRIEF_GUTTER,
-          paddingTop,
-          paddingBottom,
-        },
-        style,
-      ]}
-    >
-      {children}
-    </View>
+    <ToneContext.Provider value={tone}>
+      <View
+        style={[
+          {
+            backgroundColor: tc.tint,
+            borderRadius: 26,
+            marginTop: Math.max(0, marginTop),
+            paddingHorizontal: 20,
+            paddingTop,
+            paddingBottom,
+          },
+          style,
+        ]}
+      >
+        {children}
+      </View>
+    </ToneContext.Provider>
   );
 }
 
 /**
- * The oversized hero readout that sits inside an {@link InkBand}: a 72px Oswald
- * number (optional smaller unit suffix) on the left, with an optional status
- * pill and uppercase caption stacked to its lower-right. Rendered with the
- * fixed {@link BAND} palette. Becomes a button when `onPress` is set.
+ * The hero readout inside an {@link InkBand}: a big Nunito Black number (with
+ * an optional smaller unit), and a status pill + caption beside it. The pill
+ * takes the band's tone. Becomes a button when `onPress` is set.
  */
 export function HeroRow({
   value,
   suffix,
-  suffixSize = 30,
+  suffixSize = 26,
   suffixSpace,
   pillText,
   pillDot,
@@ -497,18 +577,20 @@ export function HeroRow({
   /** Render a space before the unit (" kg"); omit for "%". */
   suffixSpace?: boolean;
   pillText?: string;
-  /** Show the green status dot before the pill text. */
+  /** Show the status dot before the pill text. */
   pillDot?: boolean;
   caption?: string;
   onPress?: () => void;
   accessibilityLabel?: string;
 }) {
+  const c = useTheme().colors;
+  const tc = toneColors(c, React.useContext(ToneContext));
   const body = (
     <>
-      <Text style={M(700, 72, { ls: -1.5, lh: 72, color: BAND.ink })}>
+      <Text style={S(900, 60, { lh: 64, color: c.ink })}>
         {value}
         {suffix ? (
-          <Text style={M(700, suffixSize, { ls: -0.2, color: BAND.fnt })}>
+          <Text style={S(900, suffixSize, { color: c.mut })}>
             {suffixSpace ? ' ' : ''}
             {suffix}
           </Text>
@@ -517,20 +599,15 @@ export function HeroRow({
       {pillText || caption ? (
         <View style={styles.heroRight}>
           {pillText ? (
-            <View style={styles.heroPill}>
-              {pillDot ? <View style={styles.heroDot} /> : null}
-              <Text style={M(700, 10.5, { ls: 1, color: BAND.pillText })}>
-                {pillText}
-              </Text>
+            <View style={[styles.heroPill, { backgroundColor: c.card }]}>
+              {pillDot ? (
+                <View style={[styles.heroDot, { backgroundColor: tc.solid }]} />
+              ) : null}
+              <Text style={S(900, 13.5, { color: tc.text })}>{pillText}</Text>
             </View>
           ) : null}
           {caption ? (
-            <Text
-              style={[
-                M(700, 10, { ls: 1, upper: true, color: BAND.fnt }),
-                styles.heroCaption,
-              ]}
-            >
+            <Text style={[S(700, 14, { color: c.mut }), styles.heroCaption]}>
               {caption}
             </Text>
           ) : null}
@@ -553,8 +630,8 @@ export function HeroRow({
   return <View style={styles.heroBox}>{body}</View>;
 }
 
-/** The outlined, rounded shell that holds a bordered stat grid ({@link
- * GridRow} / {@link GridCell}). Clips the cells' bled left dividers. */
+/** The chunky rounded shell that holds a stat grid ({@link GridRow} /
+ * {@link GridCell}). Clips the cells' dividers. */
 export function GridBox({
   children,
   style,
@@ -563,20 +640,10 @@ export function GridBox({
   style?: StyleProp<ViewStyle>;
 }) {
   const c = useTheme().colors;
-  return (
-    <View
-      style={[
-        styles.gridBox,
-        { backgroundColor: c.card, borderColor: c.hair },
-        style,
-      ]}
-    >
-      {children}
-    </View>
-  );
+  return <View style={[styles.gridBox, chunky(c, 20), style]}>{children}</View>;
 }
 
-/** A row of cells inside a {@link GridBox}. `borderTop` draws the hairline that
+/** A row of cells inside a {@link GridBox}. `borderTop` draws the divider that
  * splits it from the row above (or from a card body it is nested under). */
 export function GridRow({
   children,
@@ -592,7 +659,7 @@ export function GridRow({
     <View
       style={[
         styles.gridRow,
-        borderTop ? { borderTopWidth: 1, borderTopColor: c.hair } : null,
+        borderTop ? { borderTopWidth: 2, borderTopColor: c.hair } : null,
         style,
       ]}
     >
@@ -601,8 +668,8 @@ export function GridRow({
   );
 }
 
-/** One grid cell: a mono eyebrow label over its value node(s). `first` drops
- * the left divider (the leading cell in a row); the rest carry a hairline. */
+/** One grid cell: a small label over its value node(s). `first` drops the left
+ * divider (the leading cell in a row); the rest carry one. */
 export function GridCell({
   label,
   children,
@@ -621,14 +688,12 @@ export function GridCell({
   const c = useTheme().colors;
   const cellStyle = [
     styles.gridCell,
-    first ? null : { borderLeftWidth: 1, borderLeftColor: c.hair },
+    first ? null : { borderLeftWidth: 2, borderLeftColor: c.hair },
     style,
   ];
   const body = (
     <>
-      <Text style={M(700, 8.5, { ls: 1.2, upper: true, color: c.fnt })}>
-        {label}
-      </Text>
+      <Text style={S(800, 12, { color: c.fnt })}>{label}</Text>
       {children}
     </>
   );
@@ -653,7 +718,7 @@ export interface QuadItem {
   onPress?: () => void;
 }
 
-/** A four-up row of mono stats (HRV / RHR / SLEEP / LOAD). */
+/** A row of stat chips (HRV / RHR / SLEEP / LOAD) on soft wells. */
 export function Quad({ items }: { items: QuadItem[] }) {
   const c = useTheme().colors;
   return (
@@ -661,22 +726,19 @@ export function Quad({ items }: { items: QuadItem[] }) {
       {items.map((it, i) => {
         const inner = (
           <>
-            <Text style={M(700, 20, { ls: -0.2, color: it.color ?? c.ink })}>
+            <Text style={S(800, 12, { color: c.fnt })}>{it.label}</Text>
+            <Text style={S(900, 20, { color: it.color ?? c.ink })}>
               {it.value}
-            </Text>
-            <Text
-              style={[M(600, 9, { ls: 1, color: c.fnt }), { lineHeight: 14 }]}
-            >
-              {it.label}
             </Text>
           </>
         );
+        const cell = [styles.quadCell, { backgroundColor: c.soft }];
         return it.onPress ? (
-          <Pressable key={i} style={styles.quadCell} onPress={it.onPress}>
+          <Pressable key={i} style={cell} onPress={it.onPress}>
             {inner}
           </Pressable>
         ) : (
-          <View key={i} style={styles.quadCell}>
+          <View key={i} style={cell}>
             {inner}
           </View>
         );
@@ -685,10 +747,9 @@ export function Quad({ items }: { items: QuadItem[] }) {
   );
 }
 
-/** A labelled macro/target bar: caption row + track + fill, with an optional
- * target marker line pinned to the right edge. `compact` is the slimmer variant
- * the Today fuel row uses (9.5px caption, 6px track) so the bars nest under a
- * metric row rather than heading their own card. */
+/** A labelled progress bar: caption row + rounded track + fill, with an
+ * optional target marker pinned to the right edge. `compact` is the slimmer
+ * variant for nesting under a row. */
 export function MacroBar({
   label,
   right,
@@ -708,12 +769,12 @@ export function MacroBar({
 }) {
   const c = useTheme().colors;
   const pct = `${Math.max(0, Math.min(1, fill)) * 100}%` as const;
-  const capSize = compact ? 9.5 : 11;
+  const capSize = compact ? 13 : 15;
   return (
     <View style={style}>
       <View style={compact ? styles.macroCapCompact : styles.macroCap}>
-        <Text style={M(700, capSize, { color: c.mut })}>{label}</Text>
-        <Text style={M(700, capSize, { color: c.ink })}>{right}</Text>
+        <Text style={S(800, capSize, { color: c.mut })}>{label}</Text>
+        <Text style={S(900, capSize, { color: c.ink })}>{right}</Text>
       </View>
       <View
         style={[
@@ -725,7 +786,7 @@ export function MacroBar({
           style={{
             width: pct,
             height: '100%',
-            borderRadius: compact ? 3 : 4,
+            borderRadius: compact ? 5 : 7,
             backgroundColor: fillColor,
           }}
         />
@@ -748,15 +809,11 @@ export interface SegmentOption<T extends string> {
 }
 
 /**
- * A row of mutually-exclusive pills — the design's one "pick one of these"
- * control, filled with `accSolid` when chosen.
+ * A row of mutually-exclusive chunky tiles — the design's one "pick one of
+ * these" control: tinted with an accent outline when chosen.
  *
- * Shared rather than restyled per screen because that is exactly how Setup ended
- * up with two looks for the same gesture: Appearance filled its choice with the
- * accent while the profile's Sex filled with `ink`.
- *
- * `allowDeselect` covers an optional field (Sex), where tapping the active pill
- * clears it; a required choice (Appearance) leaves it off so a pill can never be
+ * `allowDeselect` covers an optional field (Sex), where tapping the active tile
+ * clears it; a required choice (Appearance) leaves it off so a tile can never be
  * turned off into nothing.
  */
 export function SegmentedRow<T extends string>({
@@ -787,14 +844,12 @@ export function SegmentedRow<T extends string>({
             style={[
               styles.segPill,
               {
-                backgroundColor: on ? c.accSolid : 'transparent',
+                backgroundColor: on ? c.accTint : c.card,
                 borderColor: on ? c.accSolid : c.hair,
               },
             ]}
           >
-            <Text
-              style={M(700, 10.5, { ls: 0.8, color: on ? c.onAccent : c.mut })}
-            >
+            <Text style={S(900, 15, { color: on ? c.acc : c.ink })}>
               {option.label}
             </Text>
           </Pressable>
@@ -807,16 +862,18 @@ export function SegmentedRow<T extends string>({
 type ButtonKind = 'solid' | 'outline' | 'dashed';
 
 /**
- * The design's one button shape: a full-width 999-radius pill. `solid` is the
- * steel-blue call to action (white label in both schemes), `outline` the
- * hairline secondary, `dashed` the accent "add another" affordance.
+ * The design's button: a 16px-radius slab. `solid` is the call to action — a
+ * bright fill with a darker 4px bottom edge, so it looks pressable — in the
+ * area's `tone`; `outline` the chunky secondary; `dashed` the "add another"
+ * affordance.
  */
 export function BriefButton({
   label,
   onPress,
   kind = 'solid',
+  tone = 'accent',
   disabled,
-  size = 16,
+  size = 15,
   fontSize,
   style,
   accessibilityLabel,
@@ -824,26 +881,37 @@ export function BriefButton({
   label: string;
   onPress: () => void;
   kind?: ButtonKind;
+  tone?: Tone;
   disabled?: boolean;
-  /** Vertical padding; the design uses 16 for primary, 13 for inline adds. */
+  /** Vertical padding; 15 for primary, smaller for inline adds. */
   size?: number;
   fontSize?: number;
   style?: StyleProp<ViewStyle>;
   accessibilityLabel?: string;
 }) {
   const c = useTheme().colors;
-  const fill =
+  const tc = toneColors(c, tone);
+  const fill: ViewStyle =
     kind === 'solid'
-      ? { backgroundColor: c.accSolid }
+      ? {
+          backgroundColor: tc.solid,
+          borderBottomWidth: 4,
+          borderBottomColor: tc.edge,
+        }
       : kind === 'outline'
-        ? { borderWidth: 1, borderColor: c.hair }
+        ? {
+            borderWidth: 2,
+            borderBottomWidth: 4,
+            borderColor: c.hair,
+            backgroundColor: c.card,
+          }
         : {
-            borderWidth: 1,
-            borderColor: c.acc,
-            borderStyle: 'dashed' as const,
+            borderWidth: 2,
+            borderColor: tc.solid,
+            borderStyle: 'dashed',
           };
   const color =
-    kind === 'solid' ? c.onAccent : kind === 'outline' ? c.ink : c.acc;
+    kind === 'solid' ? c.onAccent : kind === 'outline' ? c.ink : tc.text;
   return (
     <Pressable
       onPress={onPress}
@@ -857,12 +925,7 @@ export function BriefButton({
         style,
       ]}
     >
-      <Text
-        style={M(700, fontSize ?? (kind === 'solid' ? 13 : 12), {
-          ls: 1,
-          color,
-        })}
-      >
+      <Text style={S(900, fontSize ?? (kind === 'solid' ? 17 : 15), { color })}>
         {label}
       </Text>
     </Pressable>
@@ -875,14 +938,14 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'baseline',
   },
-  groupLabel: { marginTop: 20, paddingHorizontal: 2 },
+  groupLabel: { marginTop: 26, marginBottom: -2, paddingHorizontal: 2 },
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     alignSelf: 'flex-start',
-    paddingVertical: 6,
-    paddingHorizontal: 11,
+    paddingVertical: 5,
+    paddingHorizontal: 12,
     borderRadius: 999,
   },
   pillSmall: {
@@ -890,14 +953,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 5,
     alignSelf: 'flex-start',
-    paddingVertical: 4,
-    paddingHorizontal: 8,
+    paddingVertical: 3,
+    paddingHorizontal: 10,
     borderRadius: 999,
   },
-  pillDot: { width: 7, height: 7, borderRadius: 4 },
+  pillDot: { width: 8, height: 8, borderRadius: 4 },
   card: {
-    borderWidth: cardGeom.borderWidth,
-    borderRadius: cardGeom.radius,
     paddingVertical: cardGeom.paddingVertical,
     paddingHorizontal: cardGeom.paddingHorizontal,
   },
@@ -905,37 +966,35 @@ const styles = StyleSheet.create({
   cardTitleRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'baseline',
+    alignItems: 'center',
+    gap: 12,
   },
   bigRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 16 },
-  bigRight: { paddingBottom: 6, flexShrink: 1 },
-  // Hero readout inside an ink band (72px number + pill/caption to lower-right).
+  bigRight: { paddingBottom: 8, flexShrink: 1 },
   heroBox: { flexDirection: 'row', alignItems: 'flex-end', gap: 16 },
-  heroRight: { paddingBottom: 6, flexShrink: 1 },
+  heroRight: { paddingBottom: 8, flexShrink: 1 },
   heroPill: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     alignSelf: 'flex-start',
-    paddingVertical: 6,
-    paddingHorizontal: 11,
+    paddingVertical: 5,
+    paddingHorizontal: 12,
     borderRadius: 999,
-    backgroundColor: BAND.pillBg,
   },
-  heroDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: BAND.grn },
-  heroCaption: { lineHeight: 16, marginTop: 5 },
-  // Bordered stat grid (GridBox / GridRow / GridCell).
-  gridBox: { borderWidth: 1, borderRadius: 12, overflow: 'hidden' },
+  heroDot: { width: 8, height: 8, borderRadius: 4 },
+  heroCaption: { marginTop: 6 },
+  gridBox: { overflow: 'hidden' },
   gridRow: { flexDirection: 'row' },
   gridCell: {
     flex: 1,
     minWidth: 0,
-    paddingVertical: 13,
+    paddingVertical: 12,
     paddingHorizontal: 12,
-    gap: 6,
+    gap: 4,
   },
-  quad: { flexDirection: 'row', marginTop: 12 },
-  quadCell: { flex: 1, gap: 4 },
+  quad: { flexDirection: 'row', gap: 8, marginTop: 14 },
+  quadCell: { flex: 1, gap: 2, padding: 10, borderRadius: 14 },
   macroCap: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -944,36 +1003,38 @@ const styles = StyleSheet.create({
   macroCapCompact: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 7,
+    marginBottom: 6,
   },
   macroTrack: {
     position: 'relative',
-    height: 8,
-    borderRadius: 4,
+    height: 14,
+    borderRadius: 7,
     overflow: 'visible',
   },
   macroTrackCompact: {
     position: 'relative',
-    height: 6,
-    borderRadius: 3,
+    height: 10,
+    borderRadius: 5,
     overflow: 'visible',
   },
   macroMarker: {
     position: 'absolute',
     right: 0,
     top: -3,
-    height: 14,
-    width: 2,
+    height: 20,
+    width: 3,
+    borderRadius: 2,
   },
   macroMarkerCompact: {
     position: 'absolute',
     right: 0,
     top: -3,
-    height: 12,
-    width: 2,
+    height: 16,
+    width: 3,
+    borderRadius: 2,
   },
   button: {
-    borderRadius: 999,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -981,8 +1042,9 @@ const styles = StyleSheet.create({
   segPill: {
     flex: 1,
     alignItems: 'center',
-    paddingVertical: 11,
-    borderRadius: 999,
-    borderWidth: 1,
+    paddingVertical: 12,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderBottomWidth: 4,
   },
 });

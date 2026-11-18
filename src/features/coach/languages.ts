@@ -1,9 +1,12 @@
 /**
- * Languages the on-device Gemma coach can converse in. Gemma 3 is trained on
- * 140+ languages; this is a broad, practical subset covering the widely-spoken
- * ones (the model handles them well). The stored value is the English `name`;
- * the picker shows the `native` label. "Automatic" makes the coach reply in
- * whatever language the user writes in.
+ * Languages the coach can be asked to reply in. The stored value is the English
+ * `name`; the picker shows the `native` label. "Automatic" makes the coach reply
+ * in whatever language the user writes in.
+ *
+ * The list predates ADR-008: it was sized for Gemma 3 (140+ languages). The OS
+ * models now behind the coach — Gemini Nano, Apple Intelligence — support a
+ * narrower, per-platform set, so a less common choice here may get weaker or
+ * English replies. The directive is only a prompt instruction; nothing breaks.
  */
 
 export interface CoachLanguage {

@@ -1,8 +1,24 @@
 import React from 'react';
-import { Alert, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  Alert,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 
 import { ScreenProps } from '../../app/navigation/types';
-import { BriefButton, BriefScreen, Card, M, S } from '../../components/brief';
+import {
+  BriefButton,
+  BriefScreen,
+  Card,
+  cardTitleStyle,
+  chunky,
+  pageTitleStyle,
+  Pill,
+  S,
+} from '../../components/brief';
 import {
   removeSession,
   removeWorkout,
@@ -17,7 +33,7 @@ import {
   useStrengthStore,
 } from '../../state/useStrengthStore';
 import { useTheme } from '../../theme/theme';
-import { ExerciseMedia } from './components/ExerciseMedia';
+import { WorkoutCard } from './components/WorkoutCard';
 
 const MONTHS = [
   'Jan',
@@ -40,33 +56,41 @@ function sessionDate(ms: number): string {
   return `${MONTHS[d.getMonth()]} ${d.getDate()}`;
 }
 
-/** "3 EXERCISES · 9 SETS · ~28 MIN" — the mono meta line under a workout name.
- * The estimate assumes ~40s of work per set on top of its rest. */
-function summarize(w: SavedWorkout): string {
-  const sets = w.exercises.reduce((n, e) => n + e.targetSets, 0);
-  const ex = w.exercises.length;
-  const mins = Math.round(
-    w.exercises.reduce((t, e) => t + e.targetSets * (e.restSec + 40), 0) / 60,
-  );
-  return `${ex} ${ex === 1 ? 'EXERCISE' : 'EXERCISES'} · ${sets} SETS · ~${mins} MIN`;
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/** "Mon, Aug 13" — the visible date on a recent-session row. */
+function sessionDay(ms: number): string {
+  return `${DAYS[new Date(ms).getDay()]}, ${sessionDate(ms)}`;
 }
 
-/** How many saved workouts the Lift card shows inline before the rest move
- * behind "MORE" (the full searchable workouts library modal). */
+/** 6240 → "6,240". */
+function grp(n: number): string {
+  return Math.round(n)
+    .toString()
+    .replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+/** How many saved workouts the Lift tab shows inline before the rest move
+ * behind "Search all" (the full searchable workouts library modal). */
 const WORKOUT_LIMIT = 5;
 
-/** A dependency-free vertical-bar trend of session volume, newest bar accented,
- * with a headline delta vs the previous weighted session. */
+/**
+ * The volume card: the latest weighted session's total with a green/red pill
+ * for the change vs the one before, over a dependency-free bar chart of the
+ * weighted sessions (newest bar in full lift violet, the rest faded).
+ */
 function VolumeTrend({ sessions }: { sessions: SessionSummary[] }) {
   const c = useTheme().colors;
   const points = volumeTrendPoints(sessions);
   if (points.length < 2) {
     return (
-      <Text style={[S(600, 13, { lh: 19, color: c.mut }), styles.hint]}>
-        {points.length === 0
-          ? 'Your training-volume trend will show up here once you finish a couple of weighted workouts.'
-          : 'One weighted session so far — finish another to see whether your total volume is trending up.'}
-      </Text>
+      <Card title="Volume">
+        <Text style={[S(700, 15, { lh: 21, color: c.mut }), styles.hint]}>
+          {points.length === 0
+            ? 'Your training-volume trend will show up here once you finish a couple of weighted workouts.'
+            : 'One weighted session so far — finish another to see whether your total volume is trending up.'}
+        </Text>
+      </Card>
     );
   }
   const max = Math.max(...points.map(p => p.volume));
@@ -76,43 +100,58 @@ function VolumeTrend({ sessions }: { sessions: SessionSummary[] }) {
   const up = delta >= 0;
 
   return (
-    <>
-      <View style={styles.trendHead}>
-        <Text style={M(700, 24, { ls: -0.2, color: c.ink })}>
-          {latest}
-          <Text style={M(700, 12, { color: c.fnt })}> KG</Text>
-        </Text>
-        <Text style={M(700, 11, { ls: 0.4, color: up ? c.grn : c.red })}>
-          {up ? '▲' : '▼'} {up ? '+' : '−'}
-          {Math.abs(delta)} KG VS PREV
-        </Text>
+    <View style={[chunky(c), styles.volCard]}>
+      <View style={styles.volHead}>
+        <View style={styles.flexText}>
+          <Text style={cardTitleStyle(c.ink)}>Volume</Text>
+          <Text style={S(900, 28, { lh: 34, color: c.ink })}>
+            {grp(latest)} kg
+          </Text>
+        </View>
+        <Pill
+          spec={{
+            text: `${up ? '▲' : '▼'} ${grp(Math.abs(delta))} kg vs last`,
+            bg: up ? c.grnTint : c.redTint,
+            textColor: up ? c.grn : c.red,
+          }}
+        />
       </View>
-      <View style={styles.bars}>
+      <View
+        style={styles.bars}
+        accessible
+        accessibilityRole="image"
+        accessibilityLabel={`Volume of the last ${points.length} weighted sessions, ${up ? 'up' : 'down'} ${Math.abs(delta)} kilograms on the one before`}
+      >
         {points.map((p, i) => (
           <View key={`${p.startedAt}-${i}`} style={styles.barCol}>
             <View
               style={{
                 height: `${max > 0 ? (p.volume / max) * 100 : 0}%`,
-                backgroundColor: i === points.length - 1 ? c.acc : c.sand,
-                borderRadius: 3,
+                backgroundColor: c.lift,
+                // Older sessions fade back so the newest bar is the one that
+                // reads first; opacity keeps it to one token in both schemes.
+                opacity: i === points.length - 1 ? 1 : 0.3,
+                borderRadius: 8,
                 width: '100%',
               }}
             />
           </View>
         ))}
       </View>
-      <Text style={[M(600, 9, { ls: 1, color: c.fnt }), styles.trendAxis]}>
-        {points.length} WEIGHTED SESSIONS · OLDEST → NEWEST
+      <Text style={S(700, 14, { color: c.fnt })}>
+        Last {points.length} weighted sessions · oldest → newest
       </Text>
-    </>
+    </View>
   );
 }
 
 /**
- * Strength home (tab 03 · LIFT): the list of saved workouts (first five, with
- * run / edit / delete and a "MORE" affordance into the searchable library), the
- * volume trend and the recent sessions. Ad-hoc workouts are built the same way
- * (New workout → build → Start) and just aren't saved.
+ * Strength home (the Lift tab, ADR-007): a page title with the saved count, the
+ * "New workout" slab, the saved workouts as chunky cards (first five, each with
+ * Start / Edit / Delete, and "Search all" into the full library), the volume
+ * trend and the recent sessions (hold to delete; on Android a pill syncs each
+ * one to — or removes it from — Health Connect). Ad-hoc workouts are built the
+ * same way (New workout → build → Start) and just aren't saved.
  */
 export function StrengthHomeScreen({ navigation }: ScreenProps) {
   const c = useTheme().colors;
@@ -151,7 +190,7 @@ export function StrengthHomeScreen({ navigation }: ScreenProps) {
       if (!ok) {
         Alert.alert(
           'Not synced',
-          'Could not write to Health Connect. Make sure it’s connected in Setup.',
+          'Could not write to Health Connect. Make sure it’s connected in Me.',
         );
       }
     })();
@@ -202,254 +241,205 @@ export function StrengthHomeScreen({ navigation }: ScreenProps) {
     );
   }
 
+  const browse = () => navigation.navigate('WorkoutsLibrary');
+
   return (
     <BriefScreen>
-      {/* ── Saved workouts ──────────────────────────────────────────── */}
-      <Card
-        first
-        title="Workouts"
-        right={
-          <View style={styles.wHeadRight}>
-            {workouts.length > WORKOUT_LIMIT ? (
-              <Pressable
-                onPress={() => navigation.navigate('WorkoutsLibrary')}
-                accessibilityRole="button"
-                accessibilityLabel="Browse all workouts"
-              >
-                <Text style={M(700, 9.5, { ls: 1, color: c.acc })}>MORE →</Text>
-              </Pressable>
-            ) : null}
-            <Text style={M(700, 9.5, { ls: 1, color: c.fnt })}>
-              {workouts.length} SAVED
-            </Text>
-          </View>
-        }
-      >
-        {workouts.length === 0 ? (
-          <Text style={[S(600, 13, { lh: 19, color: c.mut }), styles.hint]}>
-            No saved workouts yet. Tap NEW WORKOUT to build one from dumbbell,
-            bench, bodyweight and pull-up-bar exercises.
-          </Text>
-        ) : (
-          workouts.slice(0, WORKOUT_LIMIT).map(w => (
-            <View key={w.id} style={[styles.wRow, { borderTopColor: c.hair }]}>
-              <ExerciseMedia
-                exerciseId={w.exercises[0].exerciseId}
-                variant="thumb"
-                height={62}
-              />
-              <View style={styles.wMain}>
-                <Pressable
-                  onPress={() => run(w)}
-                  accessibilityRole="button"
-                  accessibilityLabel={`Start ${w.name}`}
-                >
-                  <Text
-                    style={S(700, 14.5, { lh: 17, color: c.ink })}
-                    numberOfLines={1}
-                  >
-                    {w.name}
-                  </Text>
-                  <Text
-                    style={[M(700, 9, { ls: 1, color: c.acc }), styles.wMeta]}
-                  >
-                    {summarize(w)}
-                  </Text>
-                </Pressable>
-                <View style={styles.wActions}>
-                  <Pressable
-                    onPress={() => edit(w)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Edit ${w.name}`}
-                    style={[
-                      styles.actBtn,
-                      { borderColor: c.hair, backgroundColor: c.bg },
-                    ]}
-                  >
-                    <Text style={M(700, 10.5, { ls: 1, color: c.ink })}>
-                      EDIT
-                    </Text>
-                  </Pressable>
-                  <Pressable
-                    onPress={() => confirmDelete(w)}
-                    accessibilityRole="button"
-                    accessibilityLabel={`Delete ${w.name}`}
-                    style={[
-                      styles.actBtn,
-                      { borderColor: c.red, backgroundColor: c.bg },
-                    ]}
-                  >
-                    <Text style={M(700, 10.5, { ls: 1, color: c.red })}>
-                      DELETE
-                    </Text>
-                  </Pressable>
-                </View>
-              </View>
-            </View>
-          ))
-        )}
+      {/* ── Title + count ─────────────────────────────────────────────── */}
+      <View style={styles.titleRow}>
+        <Text style={pageTitleStyle(c.ink)}>Lift</Text>
+        <Pill
+          spec={{
+            text:
+              workouts.length === 0
+                ? 'No workouts yet'
+                : `${workouts.length} ${workouts.length === 1 ? 'workout' : 'workouts'} saved`,
+            bg: c.liftTint,
+            textColor: c.liftText,
+          }}
+        />
+      </View>
 
-        {workouts.length > WORKOUT_LIMIT ? (
+      <BriefButton
+        label="+  New workout"
+        accessibilityLabel="New workout"
+        tone="lift"
+        onPress={newWorkout}
+        style={styles.newBtn}
+      />
+
+      {/* ── Saved workouts ──────────────────────────────────────────── */}
+      <View style={styles.sectionHead}>
+        <Text style={S(900, 22, { lh: 28, color: c.ink })}>Your workouts</Text>
+        {workouts.length > 0 ? (
           <Pressable
-            onPress={() => navigation.navigate('WorkoutsLibrary')}
+            onPress={browse}
             accessibilityRole="button"
             accessibilityLabel="Browse all workouts"
-            style={[styles.moreRow, { borderTopColor: c.hair }]}
+            hitSlop={10}
           >
-            <Text style={M(700, 10.5, { ls: 1, color: c.acc })}>
-              +{workouts.length - WORKOUT_LIMIT} MORE · SEARCH ALL →
-            </Text>
+            <Text style={S(900, 15, { color: c.acc })}>Search all</Text>
           </Pressable>
         ) : null}
+      </View>
 
+      {workouts.length === 0 ? (
+        <View style={[chunky(c), styles.emptyCard]}>
+          <Text style={S(700, 15, { lh: 21, color: c.mut })}>
+            No saved workouts yet. Tap New workout to build one from dumbbell,
+            bench, bodyweight and pull-up-bar exercises.
+          </Text>
+        </View>
+      ) : (
+        workouts
+          .slice(0, WORKOUT_LIMIT)
+          .map(w => (
+            <WorkoutCard
+              key={w.id}
+              workout={w}
+              onStart={() => run(w)}
+              onEdit={() => edit(w)}
+              onDelete={() => confirmDelete(w)}
+              style={styles.listGap}
+            />
+          ))
+      )}
+
+      {workouts.length > WORKOUT_LIMIT ? (
         <BriefButton
-          label="＋ NEW WORKOUT"
-          kind="dashed"
-          size={12}
-          fontSize={11}
-          onPress={newWorkout}
-          style={styles.newBtn}
+          label={`+${workouts.length - WORKOUT_LIMIT} more · Search all`}
+          accessibilityLabel="Browse all workouts"
+          kind="outline"
+          size={13}
+          onPress={browse}
+          style={styles.listGap}
         />
-      </Card>
+      ) : null}
 
       {/* ── Volume trend ────────────────────────────────────────────── */}
-      <Card title="Volume trend">
+      <View style={styles.sectionGap}>
         <VolumeTrend sessions={sessions} />
-      </Card>
+      </View>
 
       {/* ── Recent sessions ─────────────────────────────────────────── */}
       {sessions.length > 0 ? (
-        <Card
-          title="Recent sessions"
-          right={
-            <Text style={M(700, 9.5, { ls: 1, color: c.fnt })}>
-              HOLD TO DELETE
+        <>
+          <View style={styles.sectionHead}>
+            <Text style={S(900, 22, { lh: 28, color: c.ink })}>
+              Recent sessions
             </Text>
-          }
-        >
-          <View style={styles.sessionList}>
-            {sessions.slice(0, 6).map((s: SessionSummary) => (
+            <Text style={S(800, 14, { color: c.fnt })}>Hold to delete</Text>
+          </View>
+          <View style={[chunky(c), styles.sessionCard]}>
+            {sessions.slice(0, 6).map((s: SessionSummary, i) => (
               <Pressable
                 key={s.id}
                 onLongPress={() => confirmDeleteSession(s)}
                 delayLongPress={350}
                 accessibilityRole="button"
                 accessibilityLabel={`${s.name} session, ${sessionDate(s.startedAt)}. Long press to delete.`}
-                style={[styles.session, { borderTopColor: c.hair }]}
+                style={[
+                  styles.session,
+                  i > 0 ? { borderTopWidth: 2, borderTopColor: c.hair } : null,
+                ]}
               >
-                <View style={styles.sessionMain}>
-                  <Text
-                    style={S(600, 13.5, { color: c.ink })}
-                    numberOfLines={1}
-                  >
+                <View style={styles.flexText}>
+                  <Text style={S(900, 16, { color: c.ink })} numberOfLines={1}>
                     {s.name}
                   </Text>
-                  <Text style={M(600, 9.5, { ls: 0.5, color: c.fnt })}>
-                    {sessionDate(s.startedAt).toUpperCase()} · {s.setsCompleted}{' '}
-                    SETS{s.kind === 'core' ? ' · CORE' : ''}
+                  <Text style={S(700, 14, { color: c.mut })}>
+                    {sessionDay(s.startedAt)} · {s.setsCompleted}{' '}
+                    {s.setsCompleted === 1 ? 'set' : 'sets'}
+                    {s.kind === 'core' ? ' · core' : ''}
+                    {' · '}
+                    {s.totalVolumeKg > 0 ? `${grp(s.totalVolumeKg)} kg` : '—'}
                   </Text>
                 </View>
-                <View style={styles.sessionRight}>
-                  <Text style={M(700, 12, { color: c.acc })}>
-                    {s.totalVolumeKg > 0 ? `${s.totalVolumeKg} KG` : '—'}
-                  </Text>
-                  {canSync ? (
-                    <Pressable
-                      onPress={() => onSyncPress(s)}
-                      disabled={syncingId === s.id}
-                      hitSlop={6}
-                      accessibilityRole="button"
-                      accessibilityLabel={
-                        s.healthId
-                          ? `Remove ${s.name} from Health Connect`
-                          : `Sync ${s.name} to Health Connect`
-                      }
-                      style={[
-                        styles.syncPill,
-                        s.healthId
-                          ? { backgroundColor: c.pillBg, borderColor: 'transparent' }
-                          : { borderColor: c.hair },
-                        { opacity: syncingId === s.id ? 0.5 : 1 },
-                      ]}
+                {canSync ? (
+                  <Pressable
+                    onPress={() => onSyncPress(s)}
+                    disabled={syncingId === s.id}
+                    hitSlop={6}
+                    accessibilityRole="button"
+                    accessibilityLabel={
+                      s.healthId
+                        ? `Remove ${s.name} from Health Connect`
+                        : `Sync ${s.name} to Health Connect`
+                    }
+                    style={[
+                      styles.syncPill,
+                      s.healthId
+                        ? { backgroundColor: c.grnTint, borderColor: c.grnTint }
+                        : { backgroundColor: c.card, borderColor: c.hair },
+                      { opacity: syncingId === s.id ? 0.5 : 1 },
+                    ]}
+                  >
+                    <Text
+                      style={S(900, 13, {
+                        color: s.healthId ? c.grn : c.acc,
+                      })}
                     >
-                      <Text
-                        style={M(700, 8.5, {
-                          ls: 0.6,
-                          color: s.healthId ? c.pillText : c.acc,
-                        })}
-                      >
-                        {s.healthId ? '✓ HEALTH' : '+ HEALTH'}
-                      </Text>
-                    </Pressable>
-                  ) : null}
-                </View>
+                      {s.healthId ? '✓ In Health' : '+ Health'}
+                    </Text>
+                  </Pressable>
+                ) : null}
               </Pressable>
             ))}
           </View>
-        </Card>
+        </>
       ) : null}
     </BriefScreen>
   );
 }
 
 const styles = StyleSheet.create({
-  hint: { marginTop: 12 },
-  wRow: {
+  titleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 13,
-    paddingVertical: 13,
-    marginTop: 12,
-    borderTopWidth: 1,
-  },
-  wMain: { flex: 1, minWidth: 0 },
-  wMeta: { marginTop: 6 },
-  wHeadRight: { flexDirection: 'row', alignItems: 'baseline', gap: 12 },
-  moreRow: {
-    borderTopWidth: 1,
-    paddingTop: 14,
-    marginTop: 13,
-    alignItems: 'center',
-  },
-  wActions: { flexDirection: 'row', gap: 10, marginTop: 11 },
-  actBtn: {
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingVertical: 7,
-    paddingHorizontal: 14,
-  },
-  newBtn: { marginTop: 14 },
-  trendHead: {
-    flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'baseline',
-    marginTop: 14,
+    gap: 12,
+    marginTop: 4,
+  },
+  newBtn: { marginTop: 16 },
+  sectionHead: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginTop: 26,
+  },
+  listGap: { marginTop: 14 },
+  sectionGap: { marginTop: 12 },
+  emptyCard: { padding: 18, marginTop: 14 },
+  hint: { marginTop: 10 },
+  flexText: { flex: 1, minWidth: 0 },
+  volCard: { padding: 18, gap: 14, marginTop: 14 },
+  volHead: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 12,
   },
   bars: {
     flexDirection: 'row',
     alignItems: 'flex-end',
     gap: 8,
-    height: 80,
-    marginTop: 14,
+    height: 110,
   },
   barCol: { flex: 1, height: '100%', justifyContent: 'flex-end' },
-  trendAxis: { marginTop: 8 },
+  sessionCard: { marginTop: 14, overflow: 'hidden' },
   session: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    paddingVertical: 13,
-    borderTopWidth: 1,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
   },
-  sessionList: { marginTop: 8 },
-  sessionMain: { flex: 1, minWidth: 0, gap: 4 },
-  sessionRight: { alignItems: 'flex-end', gap: 6 },
   syncPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 4,
-    paddingHorizontal: 9,
+    height: 36,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
     borderRadius: 999,
-    borderWidth: 1,
+    borderWidth: 2,
   },
 });

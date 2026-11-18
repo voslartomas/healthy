@@ -6,7 +6,7 @@
  * the native runtime in. The filesystem/path side lives in
  * {@link ./useWhisperStore}; the inference side in {@link ./whisperEngine}.
  *
- * Mirrors the Gemma {@link ./models} registry. A single multilingual model
+ * A single multilingual model
  * keeps setup to one tap and matches the coach's multi-language support.
  */
 

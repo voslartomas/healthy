@@ -8,7 +8,8 @@ import {
   View,
 } from 'react-native';
 
-import { M, S } from '../../components/brief';
+import { BriefButton, chunky, S } from '../../components/brief';
+import { Icon } from '../../components/Icon';
 import { healthSourceName } from '../../health';
 import { logMeal, MealItem } from '../../state/mealLogService';
 import {
@@ -16,6 +17,13 @@ import {
   useCommonFoodsStore,
 } from '../../state/useCommonFoodsStore';
 import { useTheme } from '../../theme/theme';
+import {
+  ChoiceTile,
+  FieldLabel,
+  fieldStyle,
+  formStyles,
+  MacroFields,
+} from './foodFormParts';
 import { PortionSheet } from './PortionSheet';
 
 /** The four standard meal buckets, matching the coach + Health Connect labels. */
@@ -51,6 +59,12 @@ function parseMacro(s: string): number | undefined {
  * foods and/or typing items, and finally logs them all at once — each food
  * becomes its own entry sharing that meal type + timestamp (see
  * {@link logMeal}). `onDone` fires after a successful log so the host can close.
+ *
+ * Laid out to the friendly MealLogger artboard (ADR-007): meal-type tiles, the
+ * saved foods as chunky "+ name" chips, a type-it row with an orange add slab,
+ * the draft in its own outlined list, and one orange slab that logs it all. The
+ * host renders the title + close; this is the body. The artboard drops the
+ * per-item macro fields; they are kept because typed items carried them before.
  */
 export function MealLogger({ onDone }: { onDone?: () => void }) {
   const t = useTheme();
@@ -121,58 +135,34 @@ export function MealLogger({ onDone }: { onDone?: () => void }) {
     } else {
       Alert.alert(
         'Not logged',
-        `Connect ${healthSourceName()} in Setup to save food entries.`,
+        `Connect ${healthSourceName()} in Me to save food entries.`,
       );
     }
   };
 
-  const inputStyle = {
-    ...S(600, 14, { color: c.ink }),
-    borderWidth: 1,
-    borderColor: c.hair,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 11,
-    // The design fills fields with the page ground so they read as insets in
-    // the card rather than as another raised surface.
-    backgroundColor: c.bg,
-  } as const;
-  const numFont = { fontFamily: M(600, 14).fontFamily } as const;
+  const label = mealType.toLowerCase();
 
   return (
     <View style={styles.wrap}>
       {/* Meal-type selector. */}
-      <View style={styles.pills}>
-        {MEAL_TYPES.map(mt => {
-          const on = mt === mealType;
-          return (
-            <Pressable
-              key={mt}
-              onPress={() => setMealType(mt)}
-              accessibilityRole="radio"
-              accessibilityState={{ selected: on }}
-              accessibilityLabel={titleCase(mt)}
-              style={[
-                styles.pill,
-                {
-                  backgroundColor: on ? c.ink : 'transparent',
-                  borderColor: on ? c.ink : c.hair,
-                },
-              ]}
-            >
-              <Text style={M(700, 10, { ls: 0.6, color: on ? c.inv : c.mut })}>
-                {mt}
-              </Text>
-            </Pressable>
-          );
-        })}
+      <View style={formStyles.tileRow}>
+        {MEAL_TYPES.map(mt => (
+          <ChoiceTile
+            key={mt}
+            label={titleCase(mt)}
+            on={mt === mealType}
+            onPress={() => setMealType(mt)}
+            role="radio"
+            accessibilityLabel={titleCase(mt)}
+          />
+        ))}
       </View>
 
       {/* Portion picker for the tapped common food. */}
       {portionFood ? (
         <PortionSheet
           food={portionFood}
-          actionLabel="ADD TO MEAL"
+          actionLabel="Add to meal"
           onConfirm={entry => {
             pushItem(entry);
             setPortionFood(null);
@@ -183,10 +173,8 @@ export function MealLogger({ onDone }: { onDone?: () => void }) {
 
       {/* Quick-add from saved common foods. */}
       {commonFoods.length > 0 ? (
-        <>
-          <Text style={[M(700, 9.5, { ls: 1, color: c.fnt }), styles.subhead]}>
-            ADD FROM COMMON
-          </Text>
+        <View style={formStyles.group}>
+          <FieldLabel>Add from saved</FieldLabel>
           <View style={styles.chips}>
             {commonFoods.map(food => (
               <Pressable
@@ -197,189 +185,169 @@ export function MealLogger({ onDone }: { onDone?: () => void }) {
                 style={[
                   styles.chip,
                   {
-                    borderColor: portionFood?.id === food.id ? c.acc : c.hair,
+                    backgroundColor: c.card,
+                    borderColor: portionFood?.id === food.id ? c.food : c.hair,
                   },
                 ]}
               >
-                <Text style={M(700, 12, { color: c.acc })}>+</Text>
+                <Text style={S(900, 17, { color: c.foodEdge })}>+</Text>
                 <Text
                   numberOfLines={1}
-                  style={[S(600, 12.5, { color: c.ink }), styles.chipName]}
+                  style={[S(900, 15, { color: c.ink }), styles.chipName]}
                 >
                   {food.name}
                 </Text>
-                <Text style={M(700, 10.5, { color: c.fnt })}>{food.kcal}</Text>
+                <Text style={S(800, 13, { color: c.fnt })}>{food.kcal}</Text>
               </Pressable>
             ))}
           </View>
-        </>
+        </View>
       ) : null}
 
       {/* Type a one-off item. */}
-      <View style={styles.addRow}>
-        <TextInput
-          value={name}
-          onChangeText={setName}
-          placeholder="Food name"
-          placeholderTextColor={c.fnt}
-          style={[inputStyle, styles.addName]}
-        />
-        <TextInput
-          value={kcal}
-          onChangeText={setKcal}
-          placeholder="kcal"
-          placeholderTextColor={c.fnt}
-          keyboardType="number-pad"
-          style={[inputStyle, styles.addKcal, numFont]}
-        />
-        <Pressable
-          onPress={addManual}
-          accessibilityRole="button"
-          accessibilityLabel="Add food to the meal"
-          style={[styles.addBtn, { backgroundColor: c.accSolid }]}
-        >
-          <Text style={M(700, 16, { color: c.onAccent })}>+</Text>
-        </Pressable>
+      <View style={formStyles.group}>
+        <FieldLabel>
+          {commonFoods.length > 0 ? 'Or type it' : 'Type a food'}
+        </FieldLabel>
+        <View style={styles.addRow}>
+          <TextInput
+            value={name}
+            onChangeText={setName}
+            placeholder="Food name"
+            placeholderTextColor={c.fnt}
+            accessibilityLabel="Food name"
+            style={[fieldStyle(c, 16), styles.addName]}
+          />
+          <TextInput
+            value={kcal}
+            onChangeText={setKcal}
+            placeholder="kcal"
+            placeholderTextColor={c.fnt}
+            keyboardType="number-pad"
+            accessibilityLabel="Calories"
+            style={[fieldStyle(c, 16), styles.addKcal]}
+          />
+          <Pressable
+            onPress={addManual}
+            accessibilityRole="button"
+            accessibilityLabel="Add food to the meal"
+            style={[
+              styles.addBtn,
+              { backgroundColor: c.food, borderBottomColor: c.foodEdge },
+            ]}
+          >
+            <Icon name="plus" size={22} color={c.onAccent} strokeWidth={3} />
+          </Pressable>
+        </View>
       </View>
-      <View style={styles.macroRow}>
-        <TextInput
-          value={protein}
-          onChangeText={setProtein}
-          placeholder="protein g"
-          placeholderTextColor={c.fnt}
-          keyboardType="number-pad"
-          style={[inputStyle, styles.macroInput, numFont]}
-        />
-        <TextInput
-          value={carbs}
-          onChangeText={setCarbs}
-          placeholder="carbs g"
-          placeholderTextColor={c.fnt}
-          keyboardType="number-pad"
-          style={[inputStyle, styles.macroInput, numFont]}
-        />
-        <TextInput
-          value={fat}
-          onChangeText={setFat}
-          placeholder="fat g"
-          placeholderTextColor={c.fnt}
-          keyboardType="number-pad"
-          style={[inputStyle, styles.macroInput, numFont]}
-        />
-      </View>
+      <MacroFields
+        protein={protein}
+        carbs={carbs}
+        fat={fat}
+        onProtein={setProtein}
+        onCarbs={setCarbs}
+        onFat={setFat}
+      />
 
       {/* Draft list of items in this meal. */}
-      {items.length > 0 ? (
-        <View style={styles.draft}>
-          {items.map(it => (
-            <View
-              key={it.key}
-              style={[styles.draftRow, { borderBottomColor: c.hair }]}
-            >
-              <Text
-                numberOfLines={1}
-                style={[S(600, 13.5, { color: c.ink }), styles.draftName]}
+      <View style={formStyles.group}>
+        <FieldLabel>In this meal</FieldLabel>
+        <View style={[chunky(c, 20), styles.draft]}>
+          {items.length > 0 ? (
+            items.map((it, i) => (
+              <View
+                key={it.key}
+                style={[
+                  styles.draftRow,
+                  i > 0 ? { borderTopWidth: 2, borderTopColor: c.hair } : null,
+                ]}
               >
-                {it.name}
-              </Text>
-              <Text style={[M(700, 12, { color: c.ink }), styles.draftKcal]}>
-                {it.kcal}
-              </Text>
-              <Pressable
-                onPress={() => removeItem(it.key)}
-                accessibilityRole="button"
-                accessibilityLabel={`Remove ${it.name} from the meal`}
-                hitSlop={8}
-              >
-                <Text style={M(700, 15, { color: c.fnt })}>×</Text>
-              </Pressable>
-            </View>
-          ))}
+                <Text
+                  numberOfLines={1}
+                  style={[S(900, 16, { color: c.ink }), styles.draftName]}
+                >
+                  {it.name}
+                </Text>
+                <Text style={S(900, 16, { color: c.ink })}>{it.kcal}</Text>
+                <Pressable
+                  onPress={() => removeItem(it.key)}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Remove ${it.name} from the meal`}
+                  hitSlop={4}
+                  style={[styles.remove, { backgroundColor: c.soft }]}
+                >
+                  <Icon name="close" size={16} color={c.mut} strokeWidth={3} />
+                </Pressable>
+              </View>
+            ))
+          ) : (
+            <Text style={[S(700, 15, { color: c.fnt }), styles.empty]}>
+              Add foods above to build this meal.
+            </Text>
+          )}
         </View>
-      ) : (
-        <Text style={[S(600, 12.5, { color: c.mut }), styles.empty]}>
-          Add foods above to build this meal.
-        </Text>
-      )}
+      </View>
 
-      {/* Log the whole meal. */}
-      <Pressable
+      {/* Log the whole meal. The disabled state says what's missing instead of
+          just greying out the label. */}
+      <BriefButton
+        label={
+          items.length > 0
+            ? `Log ${label} · ${items.length} item${items.length > 1 ? 's' : ''} · ${totalKcal} kcal`
+            : 'Add something first'
+        }
+        accessibilityLabel={`Log ${titleCase(mealType)}`}
         onPress={submit}
         disabled={busy || items.length === 0}
-        accessibilityRole="button"
-        accessibilityLabel={`Log ${titleCase(mealType)}`}
-        style={[
-          styles.logBtn,
-          {
-            backgroundColor: c.accSolid,
-            opacity: busy || items.length === 0 ? 0.4 : 1,
-          },
-        ]}
-      >
-        <Text style={M(700, 12, { ls: 0.6, color: c.onAccent })}>
-          {`LOG ${mealType}`}
-          {items.length > 0 ? (
-            <Text style={M(700, 12, { color: c.onAccent })}>
-              {`  ·  ${items.length} ITEM${items.length > 1 ? 'S' : ''}  ·  ${totalKcal} KCAL`}
-            </Text>
-          ) : null}
-        </Text>
-      </Pressable>
+        tone="food"
+        style={styles.logBtn}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: { marginTop: 14, gap: 10 },
-  pills: { flexDirection: 'row', gap: 8 },
-  pill: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 9,
-    borderRadius: 999,
-    borderWidth: 1,
-  },
-  subhead: { marginTop: 2 },
+  wrap: { marginTop: 16, gap: 18 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
-    paddingVertical: 9,
-    paddingHorizontal: 13,
+    gap: 6,
+    minHeight: 44,
+    paddingHorizontal: 14,
     borderRadius: 999,
-    borderWidth: 1,
+    borderWidth: 2,
+    borderBottomWidth: 4,
     maxWidth: '100%',
   },
   chipName: { flexShrink: 1 },
   addRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  addName: { flex: 1 },
-  addKcal: { width: 78 },
+  addName: { flex: 1, minWidth: 0 },
+  addKcal: { width: 84 },
   addBtn: {
-    width: 42,
-    height: 42,
-    borderRadius: 12,
+    width: 52,
+    height: 52,
+    borderRadius: 14,
+    borderBottomWidth: 4,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  macroRow: { flexDirection: 'row', gap: 8 },
-  macroInput: { flex: 1, textAlign: 'center' },
-  draft: { marginTop: 2 },
+  draft: { overflow: 'hidden' },
   draftRow: {
     flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 10,
+    alignItems: 'center',
+    gap: 12,
     paddingVertical: 10,
-    borderBottomWidth: 1,
+    paddingHorizontal: 16,
   },
   draftName: { flex: 1, minWidth: 0 },
-  draftKcal: { textAlign: 'right' },
-  empty: { marginTop: 2 },
-  logBtn: {
-    marginTop: 2,
-    paddingVertical: 13,
-    borderRadius: 12,
+  remove: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  empty: { paddingVertical: 18, paddingHorizontal: 16 },
+  logBtn: { marginTop: 4 },
 });

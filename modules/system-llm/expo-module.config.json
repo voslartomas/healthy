@@ -1,0 +1,9 @@
+{
+  "platforms": ["apple", "android"],
+  "apple": {
+    "modules": ["SystemLlmModule"]
+  },
+  "android": {
+    "modules": ["cz.healthy.systemllm.SystemLlmModule"]
+  }
+}

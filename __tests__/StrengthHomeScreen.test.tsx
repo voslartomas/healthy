@@ -8,7 +8,10 @@ import { fireEvent, screen, waitFor } from '@testing-library/react-native';
 import { mockNav, renderWithProviders } from '../jest/renderWithProviders';
 import * as repo from '../src/db/strengthRepository';
 import { StrengthHomeScreen } from '../src/features/strength/StrengthHomeScreen';
-import { SessionSummary, useStrengthStore } from '../src/state/useStrengthStore';
+import {
+  SessionSummary,
+  useStrengthStore,
+} from '../src/state/useStrengthStore';
 
 function summary(o: Partial<SessionSummary>): SessionSummary {
   return {
@@ -48,10 +51,7 @@ it('long-pressing a session confirms then deletes it from history', async () => 
   });
 
   await renderWithProviders(<StrengthHomeScreen navigation={mockNav()} />);
-  fireEvent(
-    screen.getByLabelText(/Push A session/i),
-    'longPress',
-  );
+  fireEvent(screen.getByLabelText(/Push A session/i), 'longPress');
 
   // The confirm dialog is shown; fire its destructive action.
   expect(alertSpy).toHaveBeenCalledWith(

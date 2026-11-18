@@ -1,5 +1,6 @@
 import { EXERCISE_CATALOG } from '../src/data/exerciseCatalog';
 import {
+  findExercise,
   buildPlanned,
   normalizeMuscles,
   pickExercises,
@@ -9,7 +10,14 @@ import { SessionSummary } from '../src/state/useStrengthStore';
 describe('normalizeMuscles', () => {
   it('maps synonyms/case and drops unknowns, deduped in order', () => {
     expect(
-      normalizeMuscles(['Biceps', 'hamstring', 'quads', 'xyz', 'arms', 'biceps']),
+      normalizeMuscles([
+        'Biceps',
+        'hamstring',
+        'quads',
+        'xyz',
+        'arms',
+        'biceps',
+      ]),
     ).toEqual(['biceps', 'hamstrings', 'quadriceps', 'arms']);
   });
 });
@@ -89,5 +97,30 @@ describe('buildPlanned', () => {
     const p = buildPlanned(bicep, [], []);
     expect(p.targetReps).toBe(bicep.defaultReps);
     expect(p.targetSets).toBe(bicep.defaultSets);
+  });
+});
+
+describe('findExercise — exercises the user names', () => {
+  /** The phone case: "push day with bench press and dips" gave a Floor Press. */
+  it('finds the plainest catalog match for a named exercise', () => {
+    expect(findExercise(EXERCISE_CATALOG, 'bench press')?.name).toBe(
+      'Dumbbell Bench Press',
+    );
+    expect(findExercise(EXERCISE_CATALOG, 'dips')?.name).toBe('Bench Dips');
+    expect(findExercise(EXERCISE_CATALOG, 'goblet squats')?.name).toBe(
+      'Goblet Squat',
+    );
+  });
+
+  it('prefers one the user has trained', () => {
+    const decline = findExercise(EXERCISE_CATALOG, 'decline bench press')!;
+    expect(
+      findExercise(EXERCISE_CATALOG, 'bench press', id => id === decline.id)
+        ?.id,
+    ).toBe(decline.id);
+  });
+
+  it('returns null for something not in the library', () => {
+    expect(findExercise(EXERCISE_CATALOG, 'barbell snatch')).toBeNull();
   });
 });

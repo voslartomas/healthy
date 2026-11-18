@@ -3,16 +3,25 @@
  * {@link useHealthStore}. The model estimates calories + macros from a natural
  * description ("Breakfast — 4 eggs, 2 slices of bread") and calls `log_food`.
  *
- * To correct a mistake it can `list_food_log` (today's entries with their ids,
- * sourced from the live snapshot), then `update_food_log`/`delete_food_log` by
- * id. Update is a delete-old + create-new (the v4 nutrition API has no in-place
- * update we rely on), and delete uses the batchDelete method. Because ids come
- * from the refreshed snapshot, this works for entries logged in any session —
- * not just the current chat.
+ * To correct a mistake it calls `update_food_log`/`delete_food_log` with the
+ * entry's NAME, resolved against today's entries by {@link resolveEntry} (an id
+ * from `list_food_log` also works). Names, because Gemini Nano could not copy
+ * the right id out of a list: asked to "remove the banana" it deleted the bread.
+ * Update goes through {@link replaceFoodEntry} (delete-old + create-new,
+ * keeping the entry's time, meal type and habit tags). Because ids come from the
+ * refreshed snapshot, this works for entries logged in any session — not just
+ * the current chat.
+ *
+ * Every successful WRITE returns a `confirm` sentence. The on-device runner ends
+ * the turn with it instead of asking the model to phrase the confirmation (see
+ * runner.ts): a second model round was slow and was where the small OS models
+ * went wrong — re-calling log_food (a duplicate entry) or replying garbled.
  */
 
 import { FoodEntryInput } from '../../health';
 import { addCommonFood } from '../../state/commonFoodsService';
+import { deleteFoodEntry, replaceFoodEntry } from '../../state/foodLogService';
+import type { LoggedFood } from '../../state/useConversationsStore';
 import { useHealthStore } from '../../state/useHealthStore';
 import { ToolExecutor, ToolSpec } from './aiClient';
 
@@ -105,64 +114,207 @@ export const FOOD_TOOLS: ToolSpec[] = [
   {
     name: 'update_food_log',
     description:
-      'Correct a logged entry (e.g. wrong quantity or macros). First call ' +
-      'list_food_log to get the entry `id`. Provide the corrected FULL values (not ' +
-      'deltas) — the entry is replaced with exactly what you pass.',
+      'Correct a food logged today (e.g. wrong quantity or macros). Identify it by ' +
+      "`name`, as it appears in today's food log. Provide the corrected FULL values " +
+      '(not deltas) — the entry is replaced with exactly what you pass.',
     parameters: {
       type: 'object',
       properties: {
+        ...ENTRY_FIELDS,
         id: {
           type: 'string',
-          description:
-            'The entry id from list_food_log (or a prior log_food result).',
+          description: 'Optional: the entry id from list_food_log.',
         },
-        ...ENTRY_FIELDS,
       },
-      required: ['id', 'name', 'kcal'],
+      required: ['name', 'kcal'],
     },
   },
   {
     name: 'delete_food_log',
     description:
-      'Delete a logged entry the user wants removed. First call list_food_log to get ' +
-      'the entry `id`.',
+      'Delete a food logged today that the user wants removed. Identify it by ' +
+      "`name`, as the user calls it or as it appears in today's food log.",
     parameters: {
       type: 'object',
       properties: {
+        name: {
+          type: 'string',
+          description: 'The food to delete, e.g. "banana".',
+        },
         id: {
           type: 'string',
-          description:
-            'The entry id from list_food_log (or a prior log_food result).',
+          description: 'Optional: the entry id from list_food_log.',
         },
       },
-      required: ['id'],
+      required: ['name'],
     },
   },
 ];
 
-/** Coerce a loose tool-arg object into a typed FoodEntryInput. */
+/** First non-empty string (or number, as text) among `keys` of `obj`. */
+function pickText(
+  obj: Record<string, unknown>,
+  keys: string[],
+): string | undefined {
+  for (const k of keys) {
+    const v = obj[k];
+    if (typeof v === 'string' && v.trim()) return v.trim();
+    if (typeof v === 'number') return String(v);
+  }
+  return undefined;
+}
+
+/** Lower-case, diacritics stripped, split into words of 3+ letters. */
+function words(text: string): string[] {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter(w => w.length >= 3);
+}
+
+/** Same word, allowing inflection: "banan"/"banana", "rohlik"/"rohliky". */
+function sameWord(a: string, b: string): boolean {
+  if (a === b) return true;
+  const n = Math.min(a.length, b.length);
+  return (
+    n >= 4 && a.slice(0, Math.max(4, n - 1)) === b.slice(0, Math.max(4, n - 1))
+  );
+}
+
+/** How many of `query`'s words appear in `name`. */
+function nameScore(name: string, query: string): number {
+  const nw = words(name);
+  return words(query).filter(q => nw.some(w => sameWord(q, w))).length;
+}
+
+export interface ResolvableMeal {
+  id?: string | null;
+  name: string;
+  kcal: number;
+  time: number;
+}
+
+/**
+ * Which of today's entries the model means. The NAME decides: a small model
+ * names the food reliably but picks ids badly (it passed the bread's id, and a
+ * made-up "1", when asked to remove the banana). So an id is honoured only
+ * when its entry also matches the name — or when no entry matches the name
+ * (a renamed correction, "it was an apple, not a pear"). Several matches → the
+ * most recent. Returns null when nothing fits.
+ */
+export function resolveEntry<M extends ResolvableMeal>(
+  meals: M[],
+  id: string | undefined,
+  name: string | undefined,
+): M | null {
+  const editable = meals.filter(m => m.id);
+  const byId = id ? editable.find(m => m.id === id) : undefined;
+  if (!name || !name.trim()) return byId ?? null;
+  if (byId && nameScore(byId.name, name) > 0) return byId;
+  let best: M | null = null;
+  let bestScore = 0;
+  for (const m of editable) {
+    const sc = nameScore(m.name, name);
+    if (
+      sc > bestScore ||
+      (sc === bestScore && sc > 0 && best && m.time > best.time)
+    ) {
+      best = m;
+      bestScore = sc;
+    }
+  }
+  return best ?? byId ?? null;
+}
+
+/** "Today you have: Banana, 2 eggs." — for a not-found error the model can use. */
+function todayNames(meals: ResolvableMeal[]): string {
+  const names = meals.filter(m => m.id).map(m => m.name);
+  return names.length
+    ? `Today's entries: ${names.join(', ')}.`
+    : 'Nothing is logged today.';
+}
+
+/** First finite number among `keys` of `obj` (strings like "12 g" count). */
+function pick(
+  obj: Record<string, unknown>,
+  keys: string[],
+): number | undefined {
+  for (const k of keys) {
+    const v = obj[k];
+    if (v == null || v === '') continue;
+    const n = typeof v === 'number' ? v : parseFloat(String(v));
+    if (Number.isFinite(n)) return n;
+  }
+  return undefined;
+}
+
+/**
+ * Coerce a loose tool-arg object into a typed FoodEntryInput.
+ *
+ * Tolerant on purpose. The schema asks for `kcal` / `proteinG` / `carbsG` /
+ * `fatG`, but the small on-device model (Gemini Nano, observed on a real phone)
+ * invents its own field names — `calories`, `protein`, `carbohydrates`, macros
+ * nested under `nutrients` — and sometimes omits calories entirely while giving
+ * macros. Rejecting that cost a whole extra model round and usually ended in a
+ * confused reply, when the meaning was perfectly clear. So read the common
+ * aliases, and when calories are missing derive them from the macros
+ * (4 kcal/g protein & carbs, 9 kcal/g fat).
+ */
 function toInput(raw: Record<string, unknown>): FoodEntryInput {
-  const num = (v: unknown): number | undefined => {
-    const n = Number(v);
-    return v != null && v !== '' && Number.isFinite(n) ? n : undefined;
-  };
-  const input: FoodEntryInput = {
-    name: String(raw.name ?? 'Food'),
-    kcal: num(raw.kcal) ?? 0,
-  };
-  if (raw.mealType) input.mealType = String(raw.mealType);
-  const p = num(raw.proteinG);
-  const c = num(raw.carbsG);
-  const f = num(raw.fatG);
+  const nested =
+    raw.nutrients && typeof raw.nutrients === 'object'
+      ? (raw.nutrients as Record<string, unknown>)
+      : raw.macros && typeof raw.macros === 'object'
+        ? (raw.macros as Record<string, unknown>)
+        : {};
+  const all = { ...nested, ...raw };
+  const p = pick(all, ['proteinG', 'protein', 'protein_g', 'proteins']);
+  const c = pick(all, [
+    'carbsG',
+    'carbs',
+    'carbohydrates',
+    'carbs_g',
+    'carbohydratesG',
+  ]);
+  const f = pick(all, ['fatG', 'fat', 'fat_g', 'fats']);
+  const fromMacros =
+    p != null || c != null || f != null
+      ? Math.round((p ?? 0) * 4 + (c ?? 0) * 4 + (f ?? 0) * 9)
+      : undefined;
+  const kcal =
+    pick(all, ['kcal', 'calories', 'energy', 'kcals', 'energyKcal']) ??
+    fromMacros ??
+    0;
+  const name = String(raw.name ?? raw.food ?? raw.item ?? 'Food');
+  const input: FoodEntryInput = { name, kcal };
+  const meal = raw.mealType ?? raw.meal;
+  if (typeof meal === 'string' && meal) input.mealType = meal.toUpperCase();
   if (p != null) input.proteinG = p;
   if (c != null) input.carbsG = c;
   if (f != null) input.fatG = f;
   return input;
 }
 
+/** The entries of a log_food call, whatever the model called the array (or a
+ * single object passed directly as the args). */
+function entryList(args: Record<string, unknown>): Record<string, unknown>[] {
+  for (const key of ['entries', 'food', 'foods', 'items', 'meals']) {
+    const v = args[key];
+    if (Array.isArray(v)) {
+      return v.filter(
+        (x): x is Record<string, unknown> => !!x && typeof x === 'object',
+      );
+    }
+  }
+  return typeof args.name === 'string' ? [args] : [];
+}
+
 /** Short human summary for a confirmation bubble, e.g.
- * "Oatmeal — 320 kcal · 12P · 54C · 6F". */
-function summarize(input: FoodEntryInput): string {
+ * "Oatmeal — 320 kcal · 12P · 54C · 6F". Exported for the food editor, which
+ * rewrites the note after an edit. */
+export function summarizeFood(input: FoodEntryInput): string {
   const macros = [
     input.proteinG != null ? `${Math.round(input.proteinG)}P` : null,
     input.carbsG != null ? `${Math.round(input.carbsG)}C` : null,
@@ -189,20 +341,36 @@ export interface FoodToolset {
   exec: ToolExecutor;
 }
 
+/** The entry as the chat note stores it, so tapping the note can edit it. */
+function loggedFood(input: FoodEntryInput, id: string | null): LoggedFood {
+  return {
+    entryId: id,
+    name: input.name,
+    kcal: input.kcal,
+    proteinG: input.proteinG,
+    carbsG: input.carbsG,
+    fatG: input.fatG,
+    mealType: input.mealType,
+  };
+}
+
 /**
  * Build the food-logging toolset for one chat session. `onLog` is called with a
  * short human summary each time an entry is written, updated, or deleted so the
- * screen can render a confirmation line. All writes go through
+ * screen can render a confirmation line — plus, for a written entry, the entry
+ * itself, which makes the line tappable (food editor). All writes go through
  * {@link useHealthStore}, which refreshes the snapshot on success.
  */
-export function makeFoodToolset(onLog: (summary: string) => void): FoodToolset {
+export function makeFoodToolset(
+  onLog: (summary: string, food?: LoggedFood) => void,
+): FoodToolset {
   const exec: ToolExecutor = async (name, args) => {
     const store = useHealthStore.getState();
 
     if (name === 'log_food') {
-      const entries = Array.isArray(args.entries)
-        ? (args.entries as Record<string, unknown>[])
-        : [];
+      // Entries without any calories (none given, none derivable) can't be
+      // logged meaningfully; they fall through to the "no entries" error.
+      const entries = entryList(args).filter(e => toInput(e).kcal > 0);
       if (entries.length === 0) {
         return JSON.stringify({
           ok: false,
@@ -215,7 +383,10 @@ export function makeFoodToolset(onLog: (summary: string) => void): FoodToolset {
         const input = toInput(raw);
         const res = await store.logFoodEntry(input);
         if (res.ok) {
-          onLog(`Logged: ${summarize(input)}`);
+          onLog(
+            `Logged: ${summarizeFood(input)}`,
+            loggedFood(input, res.name ?? null),
+          );
           results.push({ ok: true, id: res.name ?? null, ...input });
         } else {
           results.push({ ok: false, error: res.error, ...input });
@@ -229,9 +400,17 @@ export function makeFoodToolset(onLog: (summary: string) => void): FoodToolset {
         onLog(human);
         return JSON.stringify({ ok: false, error: human, results });
       }
+      const done = results.filter(r => r.ok) as (FoodEntryInput & {
+        ok: true;
+      })[];
+      const kcal = Math.round(done.reduce((sum, r) => sum + (r.kcal ?? 0), 0));
       return JSON.stringify({
         ok: true,
         results,
+        confirm:
+          done.length === 1
+            ? `Logged ${done[0].name} — ${kcal} kcal. Tap it above to adjust the numbers.`
+            : `Logged ${done.length} foods — ${kcal} kcal in total. Tap one above to adjust it.`,
         hint: 'To change or remove an entry later, call list_food_log to get its id.',
       });
     }
@@ -244,8 +423,7 @@ export function makeFoodToolset(onLog: (summary: string) => void): FoodToolset {
         typeof args.servingUnit === 'string'
           ? args.servingUnit.toLowerCase()
           : '';
-      const isUnit =
-        rawUnit === 'g' || rawUnit === 'ml' || rawUnit === 'piece';
+      const isUnit = rawUnit === 'g' || rawUnit === 'ml' || rawUnit === 'piece';
       const rawSize = Number(args.servingSize);
       const servingUnit = isUnit ? rawUnit : null;
       const servingSize = isUnit
@@ -267,8 +445,12 @@ export function makeFoodToolset(onLog: (summary: string) => void): FoodToolset {
         });
         const portion =
           servingUnit != null ? ` · per ${servingSize} ${servingUnit}` : '';
-        onLog(`Saved to Common Foods: ${summarize(input)}${portion}`);
-        return JSON.stringify({ ok: true, saved });
+        onLog(`Saved to Common Foods: ${summarizeFood(input)}${portion}`);
+        return JSON.stringify({
+          ok: true,
+          saved,
+          confirm: `Saved ${input.name} to your quick-add foods.`,
+        });
       } catch (err) {
         return JSON.stringify({
           ok: false,
@@ -296,14 +478,22 @@ export function makeFoodToolset(onLog: (summary: string) => void): FoodToolset {
     }
 
     if (name === 'delete_food_log') {
-      const id = String(args.id ?? '');
-      if (!id) {
+      const meals = store.snapshot.nutrition?.meals ?? [];
+      const gone = resolveEntry(
+        meals,
+        pickText(args, ['id', 'entryId']),
+        pickText(args, ['name', 'food', 'item']),
+      );
+      if (!gone?.id) {
         return JSON.stringify({
           ok: false,
-          error: 'Missing id — call list_food_log first to get the entry id.',
+          error: `No matching food logged today. ${todayNames(meals)} Call delete_food_log with one of these names.`,
+          // Shown to the user if the model can't recover from this itself.
+          say: `I couldn't find that in today's food log. ${todayNames(meals)}`,
         });
       }
-      const ok = await store.removeFoodEntry(id);
+      const id = gone.id;
+      const ok = await deleteFoodEntry(id);
       if (!ok) {
         return JSON.stringify({
           ok: false,
@@ -311,36 +501,50 @@ export function makeFoodToolset(onLog: (summary: string) => void): FoodToolset {
             'Delete failed — the entry may no longer exist, or Health Connect is not connected.',
         });
       }
-      onLog('Deleted a food entry.');
-      return JSON.stringify({ ok: true });
+      const label = `${gone.name} (${Math.round(gone.kcal)} kcal)`;
+      onLog(`Deleted: ${label}.`);
+      return JSON.stringify({
+        ok: true,
+        confirm: `Deleted ${label} from today's food log.`,
+      });
     }
 
     if (name === 'update_food_log') {
-      const id = String(args.id ?? '');
-      if (!id) {
+      const meals = store.snapshot.nutrition?.meals ?? [];
+      const target = resolveEntry(
+        meals,
+        pickText(args, ['id', 'entryId']),
+        pickText(args, ['name', 'food', 'item']),
+      );
+      if (!target?.id) {
         return JSON.stringify({
           ok: false,
-          error: 'Missing id — call list_food_log first to get the entry id.',
+          error: `No matching food logged today. ${todayNames(meals)} Call update_food_log with one of these names.`,
+          // Shown to the user if the model can't recover from this itself.
+          say: `I couldn't find that in today's food log. ${todayNames(meals)}`,
         });
       }
-      const updated = toInput(args);
-      // No in-place update we rely on: delete the old data point, create anew.
-      const removed = await store.removeFoodEntry(id);
-      if (!removed) {
-        return JSON.stringify({
-          ok: false,
-          error: 'Could not remove the old entry to update it.',
-        });
-      }
-      const res = await store.logFoodEntry(updated);
+      const id = target.id;
+      const asked = toInput(args);
+      // The model names the food loosely ("Eggs" for "2 eggs"); that is how it
+      // FOUND the entry, not a rename — keep the original name then. A name that
+      // doesn't match the entry at all ("it was an apple") is a real rename.
+      const updated =
+        nameScore(target.name, asked.name) > 0
+          ? { ...asked, name: target.name }
+          : asked;
+      // Delete-old + create-new, keeping the entry's time, meal and tags.
+      const res = await replaceFoodEntry(id, updated);
       if (!res.ok) {
-        return JSON.stringify({
-          ok: false,
-          error: `Removed the old entry but failed to write the corrected one${res.error ? ` (${res.error})` : ''}.`,
-        });
+        return JSON.stringify({ ok: false, error: res.error });
       }
-      onLog(`Updated: ${summarize(updated)}`);
-      return JSON.stringify({ ok: true, id: res.name ?? null, ...updated });
+      onLog(`Updated: ${summarizeFood(updated)}`, loggedFood(updated, res.id));
+      return JSON.stringify({
+        ok: true,
+        id: res.id,
+        ...updated,
+        confirm: `Updated ${updated.name} — ${Math.round(updated.kcal)} kcal.`,
+      });
     }
 
     return JSON.stringify({ ok: false, error: `Unknown tool ${name}.` });

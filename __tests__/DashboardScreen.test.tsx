@@ -15,17 +15,22 @@ describe('DashboardScreen', () => {
   it('renders the brief cards and the recovery hero', async () => {
     await renderWithProviders(<DashboardScreen navigation={mockNav()} />);
 
-    // v4: sleep/HRV/RHR/load are a bordered metric grid; the fuel card leads
-    // with the "Body & fuel →" title.
+    // The recovery card carries the four overnight chips; then habits, the
+    // week's goals and body & food, each its own card.
     expect(screen.getByText('SLEEP')).toBeOnTheScreen();
     expect(screen.getByText('LOAD')).toBeOnTheScreen();
-    expect(screen.getByText('Body & fuel →')).toBeOnTheScreen();
-    expect(screen.getByText('Week')).toBeOnTheScreen();
-    // With no snapshot the recovery hero reads "not connected".
-    expect(screen.getByText('NOT CONNECTED')).toBeOnTheScreen();
+    expect(screen.getByText('Body & food')).toBeOnTheScreen();
+    expect(screen.getByText('This week')).toBeOnTheScreen();
+    expect(screen.getByText('Today’s habits')).toBeOnTheScreen();
+    // With no snapshot the recovery card says nothing is connected — and how
+    // to fix it.
+    expect(screen.getByText('Not connected')).toBeOnTheScreen();
+    expect(
+      screen.getByText('Connect a source in Me to start'),
+    ).toBeOnTheScreen();
   });
 
-  it('names what the recovery score was counted from', async () => {
+  it('shows the score, its meaning and the inputs it was counted from', async () => {
     const hrv = { value: 62, baseline: 55, delta: 7 };
     const rhr = { value: 54, baseline: 56, delta: -2 };
     // Seeded before mount, so no state update happens during render.
@@ -38,7 +43,11 @@ describe('DashboardScreen', () => {
       },
     });
     await renderWithProviders(<DashboardScreen navigation={mockNav()} />);
-    expect(screen.getByText('HRV 62 · RHR 54 · SLEEP 96% →')).toBeOnTheScreen();
+    expect(screen.getByText('Recovered')).toBeOnTheScreen();
+    expect(screen.getByText('Ready to add load today')).toBeOnTheScreen();
+    expect(screen.getByText('62')).toBeOnTheScreen(); // HRV chip
+    expect(screen.getByText('54')).toBeOnTheScreen(); // resting HR chip
+    expect(screen.getByText('▲7')).toBeOnTheScreen(); // HRV above baseline
   });
 
   it('deep-links into the recovery detail from the hero', async () => {
@@ -47,7 +56,9 @@ describe('DashboardScreen', () => {
 
     // The HRV/RHR grid cells also deep-link to Recovery; press the hero, which
     // carries the fuller "no recovery data" label when nothing is connected.
-    fireEvent.press(screen.getByLabelText(/Open recovery detail, no recovery data/));
+    fireEvent.press(
+      screen.getByLabelText(/Open recovery detail, no recovery data/),
+    );
     expect(nav.navigate).toHaveBeenCalledWith('Recovery');
   });
 
@@ -59,7 +70,13 @@ describe('DashboardScreen', () => {
     expect(nav.navigate).toHaveBeenCalledWith('Sleep');
   });
 
-  it('opens the Fuel tab from the fuel row', async () => {
+  it('says last night has not synced yet when connected but empty', async () => {
+    useHealthStore.setState({ snapshot: { ...EMPTY_SNAPSHOT, live: true } });
+    await renderWithProviders(<DashboardScreen navigation={mockNav()} />);
+    expect(screen.getByText('Not synced yet')).toBeOnTheScreen();
+  });
+
+  it('opens the Food tab from the body & food card', async () => {
     const nav = mockNav();
     await renderWithProviders(<DashboardScreen navigation={nav} />);
 

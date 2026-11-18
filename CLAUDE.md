@@ -9,8 +9,9 @@ obvious from any single file.
 **Healthy** (`healthapp`) is a privacy-first health companion for iOS + Android,
 built with **React Native 0.86 + Expo SDK 57** and TypeScript in **strict** mode.
 Everything runs on the device: health data is read from the OS store, the app
-database is local SQLite, and the AI coach runs a downloaded Gemma model through
-`llama.rn`. There is **no backend of our own** — see the privacy invariants below.
+database is local SQLite, and the AI coach runs on the OS's own on-device model —
+Gemini Nano (Android, AICore) / Apple Intelligence (iOS 26+) — via the local
+`modules/system-llm` Expo module (ADR-008). There is **no backend of our own** — see the privacy invariants below.
 
 Screens: Today (daily brief), Nutrition, Strength (lift), Trends, Settings, plus
 detail screens (Recovery, Cardio, Sleep) and a global Coach FAB/modal.
@@ -66,10 +67,10 @@ before touching them:
 - `plugins/withHealthConnect.js` — Android Health Connect read/write permissions,
   the `<queries>` entry, the permission-rationale intent-filter + Android 14
   `VIEW_PERMISSION_USAGE` alias, and `minSdkVersion 26`.
-- `plugins/withRnllamaGradleProps.js` — `rnllamaBuildFromSource=true` (required,
-  or the coach dies with "JSI bindings not installed"), ABI narrowing to
-  `arm64-v8a` (`RNLLAMA_EMULATOR=1` / `RNLLAMA_ABIS` to widen), opt-in ccache via
-  `RNLLAMA_CCACHE=1`, Gradle daemon tuning.
+- `plugins/withKotlinCompiler.js` — pins the Kotlin compiler to the
+  `kotlinVersion` in `app.json` (2.3.20). ML Kit's Gemini Nano library ships
+  Kotlin 2.3 metadata and RN 0.86 otherwise resolves the compiler to 2.1.20;
+  both settings are needed — see ADR-008.
 - `plugins/withNotifeeRepo.js` — points Gradle at Notifee's bundled local `.aar`
   repo, without which the Android build cannot resolve `app.notifee:core`.
 
@@ -80,6 +81,7 @@ App.tsx                    Root: theming, splash gate, store hydration, AppState
 index.ts                   Expo entry; installs the Buffer polyfill whisper.rn needs
 app.json / app.config.ts   Static Expo config + the dev-variant overlay
 plugins/                   Expo config plugins (see above)
+modules/system-llm/        Local Expo module: the OS on-device LLM (Kotlin + Swift)
 src/
   app/navigation/          RootStack (tabs + detail/modal screens), RootTabs, headers
   components/              Design-system primitives: brief.tsx, Card, Ring, Charts, Icon…
@@ -182,20 +184,28 @@ yours there if you introduce a new persisted domain.
   bounded tool-calling loop (`MAX_TOOL_ROUNDS`, `MAX_TOKENS`) and one wire-format
   loop per provider. Cloud providers still exist in `PROVIDERS`, but the shipping
   default is `ondevice` and Settings no longer offers the cloud ones.
-- `src/features/coach/ondevice/` — the on-device path:
-  - `models.ts` is deliberately **pure** (no `llama.rn`, no `expo-file-system`) so
-    it can be imported by `useAppStore` and unit-tested. It owns the Gemma model
-    registry, the chat-template renderer (Gemma has no system role and requires
-    strictly alternating turns), the GBNF `ACTION_GRAMMAR`, and `parseAction`.
-  - Small Gemma models are unreliable at native tool tokens, so output is
-    grammar-constrained to a single JSON action object (`{"tool":…}` or
-    `{"reply":…}`) which the runner parses. Prompt/protocol changes belong in
-    `buildSystemPreamble`.
-  - `runner.ts` takes an **injectable engine** so tests script a fake instead of
-    loading `llama.rn`. `llamaEngine.ts` `require`s the native module lazily.
-  - `useModelStore` / `useWhisperStore` own download, pause/resume (with a
-    `.part.json` resume sidecar) and on-disk status. `App.tsx` pauses in-flight
-    downloads on `background` (never `inactive`) and resumes on `active`.
+- `src/features/coach/ondevice/` — the on-device path (ADR-008):
+  - The model is the OS's: Gemini Nano via ML Kit GenAI Prompt API / AICore on
+    Android, Apple Intelligence via Foundation Models on iOS 26+. Native code is
+    `modules/system-llm` (autolinked local Expo module); `systemLlm.ts` wraps it
+    lazily (`requireOptionalNativeModule` — absent under Jest) behind the
+    injectable `SystemModelEngine`. **No fallback model**: unsupported phones
+    show the coach as unavailable with the reason.
+  - `models.ts` is deliberately **pure**: the JSON action protocol
+    (`buildSystemPreamble`), the plain-text transcript renderer with its ~4K-token
+    budget (`renderTranscript`), and the tolerant `parseAction` (no grammar on
+    the OS models — it extracts the first JSON object from prose/fences).
+  - `runner.ts` makes stateless `generate(instructions, transcript)` calls in a
+    bounded tool loop; prompt/protocol changes belong in `buildSystemPreamble`.
+  - `useModelStore` mirrors OS availability (`ready` / `downloadable` /
+    `downloading` / `unavailable`, plus Android's one-time Gemini Nano fetch);
+    the coach and daily brief gate on `status === 'ready'`. `useWhisperStore`
+    still owns the downloadable Whisper voice model (pause/resume with a
+    `.part.json` sidecar); `App.tsx` pauses it on `background` and resumes on
+    `active`.
+  - The Android build runs on Kotlin 2.3.20 because of ML Kit (see
+    `plugins/withKotlinCompiler.js` and ADR-008) — read those before touching
+    Kotlin versions.
 - Tools: `foodTool.ts` (log/list/update/delete food, bridged to the health store)
   and `workoutTool.ts`. `dataContext.ts` builds the null-safe text summary of the
   user's real numbers that grounds both the chat coach and the daily brief.
@@ -205,19 +215,22 @@ yours there if you introduce a new persisted domain.
 
 ## UI conventions
 
-- The design source of truth is the v3 "data brief" Open Design prototype (see
-  ADR-003). Screens are a flat editorial sheet: numbered sections divided by
-  hairlines, mono eyebrow rows, oversized mono hero numbers.
-- `src/components/brief.tsx` holds that vocabulary (`txt()` and the section
-  primitives). Prefer it for new v3 screens; `Card` and friends are the older
-  primitives still used by kept screens.
+- The design source of truth is the "friendly" redesign canvas (ADR-007):
+  white page, one idea per chunky rounded card (2px outline, 4px bottom edge),
+  Nunito throughout, big numbers, one colour per app area, pressable slab
+  buttons. Draw new screens on the canvas first. Screens not yet rebuilt still
+  carry v3 layouts on top of the new primitives.
+- `src/components/brief.tsx` holds that vocabulary (`txt()`, `chunky()`,
+  `toneColors()`, `Card`, `InkBand` = tinted hero card, `BriefButton`, …).
+  Header/hero colours come from `useBand()` (there is no dark band any more).
 - **Colors only from `src/theme/colors.ts`.** The palette carries both v3 names
   (`ink`, `mut`, `fnt`, `hair`, `track`, `sand`, `acc`, `grn`, `red`, `inv`,
   `scrim`) and legacy aliases (`bg`, `surface`, `fg`, `accent`…). RN cannot parse
   `oklch()`, so values are converted to sRGB hex. Read them through `useTheme()`,
   which resolves light/dark from `useColorScheme()`.
-- **Fonts via `sans(weight)` / `mono(weight)`**, never `fontWeight` with a custom
-  face — RN maps each weight to a distinct family name. Radii and spacing come
+- **Fonts via `sans(weight)` / `mono(weight)`** (both Nunito; `mono` = the
+  number face, one weight heavier), never `fontWeight` with a custom face — RN
+  maps each weight to a distinct family name. `txt()` floors sizes at 12px. Radii and spacing come
   from `radii` / `spacing` in `theme.ts`.
 - Navigation is **param-less**: screens read stores instead of route params
   (see `RootStackParamList` — every entry is `undefined`). Screens are typed
@@ -229,7 +242,7 @@ yours there if you introduce a new persisted domain.
 ## Testing
 
 - `jest-expo` preset; `jest/setup.js` stubs the native modules (safe-area,
-  Notifee, splash screen, `llama.rn`, `expo-audio`, `expo-file-system/legacy`),
+  Notifee, splash screen, `expo-audio`, `expo-file-system/legacy`),
   and `__mocks__/` provides in-memory `expo-sqlite` / `expo-secure-store`.
 - Render screens with `renderWithProviders(...)` from `jest/renderWithProviders`
   (it supplies synchronous safe-area insets — the real provider never measures
@@ -245,7 +258,8 @@ yours there if you introduce a new persisted domain.
 These are the product's core promise; do not weaken them without an ADR.
 
 1. Health data is read from the OS store on-device. Audio, PCM and health records
-   never leave the device. Only model *weights* are downloaded over HTTPS.
+   never leave the device. Only model *weights* are downloaded over HTTPS (the
+   Whisper voice model; the coach uses the OS's own model, ADR-008).
 2. There is no backend of ours. The cloud coach paths, if used, talk device↔provider
    directly with the user's own key; the key lives in SecureStore, never in plain
    storage or logs.
@@ -280,7 +294,7 @@ renumber them**.
   explain *why* a module exists and what invariant it protects, and inline
   comments record the landmine that motivated a line. **Match that density** —
   when you fix a non-obvious bug, leave the reason behind in a comment.
-- Native modules that may be absent (health, `llama.rn`, sharing, document picker)
+- Native modules that may be absent (health, `SystemLlm`, `whisper.rn`, sharing, document picker)
   are `require`d lazily at call time so importing a module never drags a native
   dependency into a test.
 
@@ -296,6 +310,9 @@ architectural change.
 | 003 | Keeping the app in sync with the design prototype | Current                |
 | 004 | Readiness heuristic (transparent, non-clinical)   | Current                |
 | 005 | Google Health cloud API as the data source        | **Superseded in code** |
+| 006 | Daily habits                                      | Current                |
+| 007 | The "friendly" redesign (design source of truth)  | Current — rolling out  |
+| 008 | Coach on the OS model (Gemini Nano / Apple Intel.) | Current                |
 
 ADR-005 no longer reflects reality: the app was moved back to on-device Health
 Connect / HealthKit (see `src/health/HealthSource.ts` and the `user_version` 2 and

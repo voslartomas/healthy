@@ -31,6 +31,7 @@ const READ_PERMISSIONS = [
   'ACTIVE_CALORIES_BURNED',
   'TOTAL_CALORIES_BURNED',
   'NUTRITION',
+  'HYDRATION',
   'WEIGHT',
   'BODY_FAT',
 ].map(t => `android.permission.health.READ_${t}`);

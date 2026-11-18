@@ -10,6 +10,7 @@ import {
   ExerciseRecord,
   GoalWeekData,
   HealthSnapshot,
+  HydrationRecord,
   InstantSample,
   MetricWithBaseline,
   NutritionEntry,
@@ -205,18 +206,27 @@ function baselineNights(entries: [number, number][]): number[] {
 }
 
 /**
- * How recent a nightly reading has to be to count as the CURRENT one — used for
- * the "last night" sleep period and for the HRV / resting-HR values shown beside
- * it. Long enough that someone opening the app late in the evening still sees
- * last night, short enough never to reach the night before that.
+ * The night the app calls "last night" at `now`: the one that ended on the
+ * morning of the current LOCAL calendar day. Sleep, HRV and resting HR are only
+ * shown for this night; anything older reads as absent ("not synced yet"), never
+ * as today's.
  *
- * This is also what stops the SQLite cache passing an old night off as the
- * current one on the first open of the morning. That cache was written before
- * last night happened, so the newest reading in it is from the night BEFORE
- * last; unbounded, "most recent sample" surfaced it as today's HRV, and "most
- * recent sleep period" as last night's sleep — both unqualified.
+ * This replaced a 36-hour age window, which was the "yesterday's data in the
+ * morning" bug: at 07:00, before the wearable had pushed last night to the
+ * store, the night before (ended ~24 h earlier) was still inside the window, so
+ * Today showed yesterday's sleep, HRV and the readiness built from them as if
+ * they were this morning's. An age window cannot tell "last night, a bit late"
+ * from "the night before" — only the calendar can.
+ *
+ * `nightIndex(startOfLocalDay(now))` is exactly that night: the noon→noon bucket
+ * labelled by the morning it ends on (see {@link nightIndex}). It is stable all
+ * day — from 00:00 to 23:59 it names the same night — so the late-evening open
+ * still shows last night, and it flips at midnight, when "last night" really
+ * does become a different night.
  */
-const NIGHTLY_FRESH_WINDOW_MS = 36 * 60 * 60 * 1000;
+export function currentNight(now: number): number {
+  return nightIndex(startOfLocalDay(now));
+}
 
 /** Most recent sample from the highest-priority source that has any samples. */
 export function latestFromPrimary(
@@ -242,9 +252,12 @@ function dailyBaseline(samples: InstantSample[]): number {
 
 /**
  * Latest value + self-calibrating baseline. When `now` is given the VALUE must
- * fall inside {@link NIGHTLY_FRESH_WINDOW_MS} of it, or the metric reads as absent
- * — see {@link hrvMetric} for why. The baseline always spans every sample we
- * have, stale or not; it is a 30-day median and does not go wrong overnight.
+ * belong to the {@link currentNight} or later, or the metric reads as absent —
+ * see {@link hrvMetric} for why. "Or later" because sources stamp a day's resting
+ * HR anywhere from local midnight to the evening, which buckets into this night
+ * or the next; what must never pass is a value stamped YESTERDAY. The baseline
+ * always spans every sample we have; it is a 30-day median and does not go wrong
+ * overnight.
  */
 function metricWithBaseline(
   samples: InstantSample[],
@@ -252,7 +265,7 @@ function metricWithBaseline(
 ): MetricWithBaseline | null {
   const latest = latestFromPrimary(samples);
   if (!latest) return null;
-  if (now != null && now - latest.time > NIGHTLY_FRESH_WINDOW_MS) return null;
+  if (now != null && nightIndex(latest.time) < currentNight(now)) return null;
   const baseline = dailyBaseline(samples) || latest.value;
   return {
     value: latest.value,
@@ -309,31 +322,16 @@ export function hrvMetric(
 ): MetricWithBaseline | null {
   const byNight = nightlyAverage(samples);
   if (byNight.size === 0) return null;
-  const latestNight = Math.max(...byNight.keys());
-  // With a reference time, that night has to be a CURRENT one
-  // ({@link NIGHTLY_FRESH_WINDOW_MS}). Unbounded, the first open of the morning
-  // — still showing the SQLite cache, which predates last night — surfaced the
-  // night-before-last's RMSSD as this morning's, and the recovery hero derived
-  // from it as today's readiness. The baseline still uses every night we have.
-  //
-  // Judged on the AGE of the night's newest sample, not by comparing night
-  // indices: the buckets cut at local noon, so `now` and a reading 40 hours
-  // earlier can land in adjacent buckets or the same one depending on the hour
-  // the app happens to be opened. Sample age is the same test `metricWithBaseline`
-  // applies, and does not shift with the time of day.
-  if (now != null) {
-    const primary = primarySource(samples);
-    const newest = samples.reduce(
-      (max, s) =>
-        (primary == null || s.source === primary) &&
-        nightIndex(s.time) === latestNight
-          ? Math.max(max, s.time)
-          : max,
-      -Infinity,
-    );
-    if (now - newest > NIGHTLY_FRESH_WINDOW_MS) return null;
-  }
-  const value = byNight.get(latestNight) as number;
+  // With a reference time, the value shown is LAST NIGHT's — the
+  // {@link currentNight} — or nothing. Taking "the newest night we have" instead
+  // surfaced the night-before-last's RMSSD as this morning's whenever last night
+  // had not synced yet (the SQLite cache on first open, or simply a wearable that
+  // pushes late), and the recovery hero derived from it as today's readiness.
+  // Daytime spot readings file under the NEXT night and are deliberately not
+  // "last night". The baseline still uses every night we have.
+  const night = now != null ? currentNight(now) : Math.max(...byNight.keys());
+  const value = byNight.get(night);
+  if (value == null) return null;
   const baseline = median(baselineNights([...byNight.entries()])) || value;
   return { value, baseline, delta: value - baseline };
 }
@@ -727,6 +725,7 @@ export function humanizeExerciseType(type: string): string {
 
 /** Map one exercise record to the display / goal-matching summary shape. */
 function toSummary(e: ExerciseRecord): ActivitySummary {
+  const load = sessionLoad(e);
   return {
     name: e.displayName ?? humanizeExerciseType(e.typeName),
     type: e.typeName,
@@ -734,6 +733,13 @@ function toSummary(e: ExerciseRecord): ActivitySummary {
     durationMin: Math.round(e.durationMin),
     energyKcal: e.energyKcal != null ? Math.round(e.energyKcal) : null,
     start: e.start,
+    end: e.end,
+    key: exerciseKey(e),
+    source: e.source,
+    hrZones: e.hrZones ?? null,
+    load: load ? Math.round(load.value) : null,
+    loadEstimated: load?.estimated ?? false,
+    zone2PlusMin: Math.round(zone2PlusMinutes(e)),
   };
 }
 
@@ -839,6 +845,25 @@ function zoneLoad(z: CardioZones): number {
 }
 
 /**
+ * One session's cardio training load: the HR-zone-weighted minute blend when the
+ * session has zones, else — for a CARDIO session whose source exposed no
+ * in-session heart rate (e.g. Fitbit via Health Connect) — an estimate from its
+ * duration at the moderate weight, flagged `estimated`. Null for a non-cardio
+ * session without zones (strength, core, walking), which carries no cardio load.
+ *
+ * The single definition behind both the cardio screen's daily totals and the
+ * per-workout figure on the workout detail screen, so the two always agree.
+ */
+export function sessionLoad(
+  s: Pick<ExerciseRecord, 'hrZones' | 'exerciseType' | 'durationMin'>,
+): { value: number; estimated: boolean } | null {
+  if (s.hrZones) return { value: zoneLoad(s.hrZones), estimated: false };
+  if (NON_CARDIO_TYPES.has(s.exerciseType)) return null;
+  const est = s.durationMin * CARDIO_ZONE_WEIGHTS.moderate;
+  return est > 0 ? { value: est, estimated: true } : null;
+}
+
+/**
  * Cardio training load from the last 7 days (rolling, ending `now` — matches the
  * screen's day strip). `load` is an HR-zone-weighted minute blend summed per
  * day; `zones7d` totals minutes per Google HR zone. Sessions without HR-zone
@@ -874,20 +899,17 @@ export function cardioFromExercise(
       zones7d.moderateMin += s.hrZones.moderateMin;
       zones7d.vigorousMin += s.hrZones.vigorousMin;
       zones7d.peakMin += s.hrZones.peakMin;
-      loadByDay.set(day, (loadByDay.get(day) ?? 0) + zoneLoad(s.hrZones));
-    } else if (!NON_CARDIO_TYPES.has(s.exerciseType)) {
-      // A CARDIO session with no readable HR samples — e.g. Fitbit writes the
-      // ExerciseSession to Health Connect but not its per-second HeartRate, so
-      // we can't bin zones. Rather than let it read as 0 load (the "cardio load
-      // shows 0 for Fitbit" bug), estimate a load from its duration at a
-      // moderate-intensity weight. It contributes to the load number only, never
-      // the (honest, HR-derived) zone breakdown. Non-cardio types (strength,
-      // core, walking) are excluded so they don't inflate cardio load.
-      const est = s.durationMin * CARDIO_ZONE_WEIGHTS.moderate;
-      if (est > 0) {
-        hasFallbackLoad = true;
-        loadByDay.set(day, (loadByDay.get(day) ?? 0) + est);
-      }
+    }
+    // A CARDIO session with no readable HR samples — e.g. Fitbit writes the
+    // ExerciseSession to Health Connect but not its per-second HeartRate, so we
+    // can't bin zones — gets a duration-based estimate rather than reading as 0
+    // load (the "cardio load shows 0 for Fitbit" bug). It contributes to the load
+    // number only, never the (honest, HR-derived) zone breakdown; non-cardio
+    // types don't inflate it. See sessionLoad.
+    const load = sessionLoad(s);
+    if (load) {
+      if (load.estimated) hasFallbackLoad = true;
+      loadByDay.set(day, (loadByDay.get(day) ?? 0) + load.value);
     }
   }
 
@@ -975,32 +997,29 @@ export function sleepPeriods(sleep: SleepRecord[]): SleepRecord[] {
 }
 
 /**
- * The night the app calls "last night": the LONGEST sleep period to end within
- * {@link NIGHTLY_FRESH_WINDOW_MS}, or null when nothing is that fresh.
+ * The night the app calls "last night": the {@link currentNight}'s sleep (every
+ * period ending in that night's noon→noon bucket, summed by
+ * {@link mainSleepByNight}), or null when that night has not synced.
  *
  * Not simply the latest-ending session, which was wrong twice over: it showed
  * one block of a night written as several sessions, and it let a twenty-minute
  * afternoon nap replace the previous night's seven hours purely because the nap
- * ends later.
+ * ends later. (An afternoon nap ends after local noon, so it files under the
+ * NEXT night and never displaces this one.)
  *
- * There is deliberately NO fallback to "the most recent period we have". That
- * fallback is how the SQLite cache came to show the night-before-last's seven
- * hours as last night's on the first open of the morning, at full confidence and
- * with a "% NEED" score attached. A night we cannot vouch for is absent, and the
- * UI renders "——" for it — the same contract as every other missing metric.
+ * There is deliberately NO fallback to "the most recent night we have". That
+ * fallback — and later a 36-hour freshness window, which amounted to the same
+ * thing before the wearable synced — is how the night-before-last's seven hours
+ * showed as last night's on the morning open, at full confidence and with a
+ * "% NEED" score attached. A night we cannot vouch for is absent, and the UI
+ * says it has not synced yet — the same contract as every other missing metric.
  */
 function lastSleep(
   sleep: SleepRecord[],
   now: number,
   agg?: { night: number; minutes: number }[] | null,
 ): SleepRecord | null {
-  const byNight = mainSleepByNight(sleep, agg);
-  const periods = [...byNight.values()].sort((a, b) => a.end - b.end);
-  if (periods.length === 0) return null;
-  const longest = (xs: SleepRecord[]) =>
-    xs.reduce((a, b) => (b.durationMin > a.durationMin ? b : a));
-  const recent = periods.filter(p => now - p.end <= NIGHTLY_FRESH_WINDOW_MS);
-  return recent.length > 0 ? longest(recent) : null;
+  return mainSleepByNight(sleep, agg).get(currentNight(now)) ?? null;
 }
 
 /**
@@ -1295,6 +1314,9 @@ export function nutritionToday(
       name: e.name,
       mealType: e.mealType,
       kcal: Math.round(e.kcal ?? 0),
+      proteinG: e.proteinG,
+      carbsG: e.carbsG,
+      fatG: e.fatG,
       time: e.start,
       id: e.id ?? null,
     }))
@@ -1307,6 +1329,32 @@ export function nutritionToday(
     fatG: Math.round(fatG),
     meals,
   };
+}
+
+/**
+ * Water drunk today (ml), summed from today's hydration records.
+ *
+ * Unlike food, water is commonly written by a third-party tracker that ALSO
+ * mirrors into another app syncing to the same store (e.g. a reminder app and
+ * Samsung Health both writing the same glass), so overlapping records from
+ * different origins are de-duplicated by source priority like every other
+ * multi-source interval. Equal-priority or non-overlapping records are distinct
+ * drinks and all count. A record belongs to the day its drink STARTED in.
+ *
+ * Returns null — not 0 — when nothing was logged today, so the UI renders "-"
+ * instead of claiming the user drank nothing (they may just not track water).
+ */
+export function waterToday(
+  records: HydrationRecord[] | undefined,
+  now: number,
+): number | null {
+  const startOfToday = startOfLocalDay(now);
+  const today = (records ?? []).filter(
+    r => r.start >= startOfToday && r.start <= now && r.ml > 0,
+  );
+  if (today.length === 0) return null;
+  const total = dedupeIntervals(today).reduce((sum, r) => sum + r.ml, 0);
+  return Math.round(total);
 }
 
 /** How many days of energy-balance history we surface (bounded by the
@@ -1695,6 +1743,14 @@ export function mergeRaw(
       // The source's own record id when it gave one; otherwise the natural key.
       n => n.id ?? `${n.start}|${n.name}|${n.source}`,
     ),
+    // `?? []`: a cache written before hydration was read has no `water` array.
+    water: spliceByKey(
+      history.water ?? [],
+      recent.water ?? [],
+      metricsCutoff,
+      w => w.start,
+      w => w.id ?? `${w.start}|${w.end}|${w.source}`,
+    ),
     exercise: spliceByKey(
       history.exercise,
       recent.exercise,
@@ -1752,6 +1808,7 @@ export function pruneRaw(
     bodyFat: keepInstant(raw.bodyFat),
     sleep: keepFrom(raw.sleep),
     nutrition: keepFrom(raw.nutrition),
+    water: keepFrom(raw.water ?? []),
     steps: keepFrom(raw.steps),
     exercise: keepFrom(raw.exercise),
     activeEnergy: keepFrom(raw.activeEnergy),
@@ -1765,7 +1822,7 @@ export function deriveSnapshot(
   now: number,
 ): HealthSnapshot {
   // `now` is passed so a value too old to be "current" reads as absent rather
-  // than as this morning's — see NIGHTLY_FRESH_WINDOW_MS.
+  // than as this morning's — see currentNight.
   const hrvBase = hrvMetric(raw.hrvRmssd, now);
   // Tag with the algorithm the source actually measured: Health Connect reports
   // RMSSD (Android), HealthKit reports SDNN (iOS). These are NOT numerically
@@ -1816,6 +1873,7 @@ export function deriveSnapshot(
     stepsThisWeek: stepsInWindow(raw.steps, now - WEEK_MS, now),
     readiness: readiness(hrv, restingHr, sleep),
     nutrition: nutritionToday(raw.nutrition, now),
+    waterTodayMl: waterToday(raw.water, now),
     // Prefer Health Connect's own cross-source aggregate (matches the Google
     // Health UI exactly); fall back to the single-source record computation on
     // platforms/reads without it (iOS/HealthKit, tests, aggregate failure).

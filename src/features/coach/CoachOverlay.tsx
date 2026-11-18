@@ -10,7 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { navigate, navigationRef } from '../../app/navigation/navigationRef';
 import { fabBottom } from '../../app/navigation/tabBarLayout';
-import { BRIEF_MAX_WIDTH, M } from '../../components/brief';
+import { BRIEF_MAX_WIDTH, S } from '../../components/brief';
 import { Icon, IconName } from '../../components/Icon';
 import { useTheme } from '../../theme/theme';
 import { COACH_INTENTS } from './intents';
@@ -97,6 +97,7 @@ export function CoachOverlay() {
           ? COACH_INTENTS.map(it => (
               <MenuItem
                 key={it.key}
+                intentKey={it.key}
                 label={it.label}
                 icon={it.icon}
                 onPress={() => openCoach(it.key)}
@@ -112,7 +113,11 @@ export function CoachOverlay() {
           accessibilityHint="Long-press for quick actions"
           style={[
             styles.fab,
-            { backgroundColor: c.accSolid, shadowColor: c.scrim },
+            {
+              backgroundColor: c.accSolid,
+              borderBottomColor: c.accEdge,
+              shadowColor: c.scrim,
+            },
           ]}
         >
           <Icon
@@ -127,18 +132,28 @@ export function CoachOverlay() {
   );
 }
 
-/** One row of the long-press menu: an outlined pill on the card surface, right
- * aligned above the FAB. */
+/** One row of the long-press menu: a chunky pill (2px outline, 4px bottom
+ * edge, ADR-007) on the card surface, right aligned above the FAB. The icon
+ * sits in a small tinted disc in its area's colour — food orange for logging a
+ * meal, lift violet for a workout — so the two read apart at a glance. */
 function MenuItem({
+  intentKey,
   label,
   icon,
   onPress,
 }: {
+  intentKey: string;
   label: string;
   icon: IconName;
   onPress: () => void;
 }) {
   const c = useTheme().colors;
+  const tone =
+    intentKey === 'food'
+      ? { tint: c.foodTint, fg: c.foodText }
+      : intentKey === 'workout'
+        ? { tint: c.liftTint, fg: c.liftText }
+        : { tint: c.accTint, fg: c.acc };
   return (
     <Pressable
       onPress={onPress}
@@ -153,10 +168,10 @@ function MenuItem({
         },
       ]}
     >
-      <Icon name={icon} color={c.acc} size={15} strokeWidth={1.9} />
-      <Text style={M(700, 10.5, { ls: 0.8, upper: true, color: c.ink })}>
-        {label}
-      </Text>
+      <View style={[styles.menuIcon, { backgroundColor: tone.tint }]}>
+        <Icon name={icon} color={tone.fg} size={16} strokeWidth={2.2} />
+      </View>
+      <Text style={S(900, 16, { color: c.ink })}>{label}</Text>
     </Pressable>
   );
 }
@@ -176,10 +191,12 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     gap: 10,
   },
+  // The chunky-button look (ADR-007): a darker bottom edge so it reads pressable.
   fab: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    borderBottomWidth: 4,
     alignItems: 'center',
     justifyContent: 'center',
     shadowOffset: { width: 0, height: 10 },
@@ -190,14 +207,24 @@ const styles = StyleSheet.create({
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    paddingVertical: 9,
-    paddingHorizontal: 14,
+    gap: 10,
+    minHeight: 52,
+    paddingVertical: 6,
+    paddingLeft: 8,
+    paddingRight: 18,
     borderRadius: 999,
-    borderWidth: 1,
+    borderWidth: 2,
+    borderBottomWidth: 4,
     shadowOffset: { width: 0, height: 6 },
     shadowOpacity: 0.3,
     shadowRadius: 16,
     elevation: 6,
+  },
+  menuIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

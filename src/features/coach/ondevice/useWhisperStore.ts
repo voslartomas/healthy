@@ -2,11 +2,11 @@
  * Download lifecycle for the on-device Whisper speech-to-text model, plus the
  * transcription entry point.
  *
- * Owns the model file on disk (under `documentDirectory/models/`, alongside the
- * Gemma model) and the UI state for the Settings voice-input card: absent /
- * downloading / ready / errored, and live progress. Streams via
- * `expo-file-system`'s `createDownloadResumable`, exactly like the Gemma
- * {@link ./useModelStore}. The one extra responsibility over that store is
+ * Owns the model file on disk (under `documentDirectory/models/` — where the
+ * llama.rn build also kept Gemma, which is why `removeLegacyModelFiles` deletes
+ * exact files rather than the directory) and the UI state for the Settings
+ * voice-input card: absent / downloading / ready / errored, and live progress.
+ * Streams via `expo-file-system`'s `createDownloadResumable`. The one extra responsibility over that store is
  * {@link WhisperState.transcribe}, which lazy-loads the model into
  * {@link ./whisperEngine} on first use and decodes an audio file to text.
  *
@@ -22,11 +22,7 @@ import { whisperEngine } from './whisperEngine';
 import { WHISPER_MODEL } from './whisperModels';
 
 export type WhisperStatus =
-  | 'absent'
-  | 'downloading'
-  | 'paused'
-  | 'ready'
-  | 'error';
+  'absent' | 'downloading' | 'paused' | 'ready' | 'error';
 
 const MODELS_DIR = `${FS.documentDirectory ?? ''}models/`;
 const MODEL_PATH = MODELS_DIR + WHISPER_MODEL.filename;
@@ -174,7 +170,9 @@ export const useWhisperStore = create<WhisperState>((set, get) => ({
       return;
     }
     // Nothing resumable: sweep any stray partial + sidecar and report absent.
-    await FS.deleteAsync(PART_PATH, { idempotent: true }).catch(() => undefined);
+    await FS.deleteAsync(PART_PATH, { idempotent: true }).catch(
+      () => undefined,
+    );
     await clearResumeState();
     set({ status: 'absent', progress: 0, bytesWritten: 0 });
   },

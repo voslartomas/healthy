@@ -20,6 +20,7 @@ import {
   pruneRaw,
   RawHealthData,
   removeFoodEntry,
+  startOfLocalDay,
   ZoneReuse,
 } from '../health';
 import { syncDailyEnergy } from './dailyEnergyService';
@@ -112,7 +113,8 @@ interface HealthState {
   /** When a snapshot derived from a LIVE read was last applied (epoch ms).
    * Stays null while the app is showing the SQLite cache, which on a morning
    * open still holds yesterday's numbers — anything that must reason about
-   * today (the daily brief) waits on this rather than on `status`. */
+   * today (the daily brief) waits on this rather than on `status`. Only counts
+   * as fresh on the local day it was taken: see {@link whenHealthFresh}. */
   freshAt: number | null;
   /** Guards against overlapping background full-history pulls. */
   fullInFlight: boolean;
@@ -280,6 +282,9 @@ export const useHealthStore = create<HealthState>((set, get) => {
       try {
         // First call this launch: hydrate the cached history from SQLite and
         // paint it immediately so the app opens with data instead of a spinner.
+        // Set when the SQLite hydrate below already derived against `now`, so
+        // the day-turn re-derive after it doesn't redo the same work.
+        let derivedNow = false;
         if (!get().cacheChecked) {
           set({ cacheChecked: true });
           try {
@@ -294,10 +299,32 @@ export const useHealthStore = create<HealthState>((set, get) => {
                 snapshot: deriveSnapshot(withPending(cached.raw, now), now),
                 status: 'ready',
               });
+              derivedNow = true;
             }
           } catch (err) {
             console.warn('Failed to load health cache', err);
           }
+        }
+
+        // The day has turned since the snapshot on screen was derived — the app
+        // was left alive overnight and is being foregrounded in the morning.
+        // That snapshot was computed against YESTERDAY's `now`, so its "last
+        // night", HRV and readiness are yesterday's, and they would stay on
+        // screen until the read below lands (or forever, if it fails or the
+        // wearable has not synced). Re-derive from what we hold against today
+        // first: it is pure and local, and `deriveSnapshot` then shows those
+        // values as absent ("not synced yet") instead of passing them off as
+        // this morning's. Deliberately not `applySnapshot` — nothing new was
+        // read, so `freshAt` must not move.
+        const shown = get().snapshot;
+        const held = get().cachedRaw;
+        if (
+          !derivedNow &&
+          held &&
+          shown !== EMPTY_SNAPSHOT &&
+          startOfLocalDay(shown.readAt) !== startOfLocalDay(now)
+        ) {
+          set({ snapshot: deriveSnapshot(withPending(held, now), now) });
         }
 
         const { cachedRaw, cacheAt } = get();
@@ -401,16 +428,23 @@ export async function initHealth(): Promise<void> {
 }
 
 /**
- * Resolve once a snapshot from a LIVE read has landed this session — i.e. the
- * numbers on screen are today's, not the cache's. Resolves `true` when fresh
- * data arrived, `false` if `timeoutMs` elapses first (offline, no permission, no
- * source), so callers degrade instead of hanging.
+ * Resolve once a snapshot from a LIVE read TAKEN TODAY has landed — i.e. the
+ * numbers on screen are today's, not the cache's or yesterday's. Resolves `true`
+ * when fresh data arrived, `false` if `timeoutMs` elapses first (offline, no
+ * permission, no source), so callers degrade instead of hanging.
  *
  * The daily brief uses this: it is written once per day and cached, so writing
  * it from a stale snapshot would pin yesterday's numbers to the whole day.
+ *
+ * "Today" matters: `freshAt` used to count once per SESSION, so an app left
+ * alive overnight resolved this immediately on the morning open — with
+ * yesterday evening's snapshot still on screen — and the brief was written
+ * from it before the foreground read could land.
  */
 export function whenHealthFresh(timeoutMs = 20_000): Promise<boolean> {
-  if (useHealthStore.getState().freshAt != null) return Promise.resolve(true);
+  const isFresh = (at: number | null) =>
+    at != null && startOfLocalDay(at) === startOfLocalDay(Date.now());
+  if (isFresh(useHealthStore.getState().freshAt)) return Promise.resolve(true);
   return new Promise(resolve => {
     let done = false;
     const finish = (ok: boolean) => {
@@ -422,7 +456,7 @@ export function whenHealthFresh(timeoutMs = 20_000): Promise<boolean> {
     };
     const timer = setTimeout(() => finish(false), timeoutMs);
     const unsub = useHealthStore.subscribe(state => {
-      if (state.freshAt != null) finish(true);
+      if (isFresh(state.freshAt)) finish(true);
     });
   });
 }

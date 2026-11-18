@@ -7,7 +7,7 @@
 import React from 'react';
 import { Text } from 'react-native';
 
-import { BAND, M } from '../../components/brief';
+import { S, useBand } from '../../components/brief';
 import { buildMetrics } from '../../features/trends/metrics';
 import {
   activeCalorieGoal,
@@ -59,28 +59,23 @@ function signed(n: number): string {
   return '0';
 }
 
-/** The left eyebrow — uppercase mono context. */
+/** The header title: what this screen is about, in plain words. (v3 drew an
+ * uppercase mono eyebrow here; ADR-007 reads it as a normal bold title.) */
 function Eyebrow({ text }: { text: string }) {
-  const c = BAND;
+  const c = useBand();
   return (
-    <Text
-      numberOfLines={1}
-      style={M(700, 11, { ls: 1.4, upper: true, color: c.ink })}
-    >
+    <Text numberOfLines={1} style={S(900, 19, { color: c.ink })}>
       {text}
     </Text>
   );
 }
 
-/** The right status — uppercase mono stat, coloured. */
+/** The right status — a short coloured word or number. */
 function Status({ text, color }: { text: string; color: string }) {
   return (
     <Text
       numberOfLines={1}
-      style={[
-        M(700, 10.5, { ls: 1.4, upper: true, color }),
-        { marginRight: 16 },
-      ]}
+      style={[S(900, 14.5, { color }), { marginRight: 16 }]}
     >
       {text}
     </Text>
@@ -90,7 +85,7 @@ function Status({ text, color }: { text: string; color: string }) {
 // ── Today ────────────────────────────────────────────────────────────────────
 export const TodayTitle = () => <Eyebrow text={dateLabel()} />;
 export function TodayRight() {
-  const c = BAND;
+  const c = useBand();
   const live = useHealthStore(s => s.snapshot.live);
   return (
     <Status text={live ? 'Live' : 'No data'} color={live ? c.acc : c.fnt} />
@@ -100,7 +95,7 @@ export function TodayRight() {
 // ── Fuel ─────────────────────────────────────────────────────────────────────
 export const FuelTitle = () => <Eyebrow text={dateLabel()} />;
 export function FuelRight() {
-  const c = BAND;
+  const c = useBand();
   const snap = useHealthStore(s => s.snapshot);
   const goals = useCalorieGoalsStore(s => s.goals);
   const goal = activeCalorieGoal(goals);
@@ -121,7 +116,7 @@ export function FuelRight() {
 // ── Strength ─────────────────────────────────────────────────────────────────
 export const StrengthTitle = () => <Eyebrow text="Strength" />;
 export function StrengthRight() {
-  const c = BAND;
+  const c = useBand();
   const count = useStrengthStore(s => s.workouts.length);
   if (count > 0) {
     return (
@@ -140,7 +135,7 @@ export const WorkoutSummaryTitle = () => <Eyebrow text="Session complete" />;
 
 /** Live "exercise x/N" progress in the runner header. */
 export function WorkoutRunRight() {
-  const c = BAND;
+  const c = useBand();
   const session = useStrengthStore(s => s.session);
   if (!session || session.plan.length === 0) {
     return <Status text="—" color={c.fnt} />;
@@ -159,7 +154,7 @@ export function TrendsTitle() {
   return <Eyebrow text={`Last ${rangeDays} days`} />;
 }
 export function TrendsRight() {
-  const c = BAND;
+  const c = useBand();
   const trends = useHealthStore(s => s.snapshot.trends);
   const activeKey = useTrendsStore(s => s.activeKey);
   const rangeDays = useTrendsStore(s => s.rangeDays);
@@ -172,7 +167,7 @@ export function TrendsRight() {
 // ── Setup ────────────────────────────────────────────────────────────────────
 export const SetupTitle = () => <Eyebrow text="Coach & sources" />;
 export function SetupRight() {
-  const c = BAND;
+  const c = useBand();
   const live = useHealthStore(s => s.snapshot.live);
   return (
     <Status
@@ -185,7 +180,7 @@ export function SetupRight() {
 // ── Recovery ─────────────────────────────────────────────────────────────────
 export const RecoveryTitle = () => <Eyebrow text="Readiness" />;
 export function RecoveryRight() {
-  const c = BAND;
+  const c = useBand();
   const readiness = useHealthStore(s => s.snapshot.readiness);
   if (readiness) return <Status text={readiness.state} color={c.acc} />;
   return <Status text="No data" color={c.fnt} />;
@@ -193,8 +188,9 @@ export function RecoveryRight() {
 
 // ── Cardio ───────────────────────────────────────────────────────────────────
 export const CardioTitle = () => <Eyebrow text="Cardio load" />;
+export const WorkoutDetailTitle = () => <Eyebrow text="Workout" />;
 export function CardioRight() {
-  const c = BAND;
+  const c = useBand();
   const cardio = useHealthStore(s => s.snapshot.cardio);
   if (cardio.hasZoneData) {
     return <Status text={`Week ${cardio.weekLoad}`} color={c.acc} />;

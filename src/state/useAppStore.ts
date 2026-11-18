@@ -3,7 +3,6 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { IconName } from '../components/Icon';
-import { GEMMA_MODELS } from '../features/coach/ondevice/models';
 
 /** Selectable AI coach providers, mirroring the design's provider list. */
 export type AiProvider = 'anthropic' | 'openai' | 'gemini' | 'ondevice';
@@ -45,10 +44,13 @@ export const PROVIDERS: Record<AiProvider, ProviderInfo> = {
   },
   ondevice: {
     key: 'ondevice',
-    name: 'On-device Gemma',
+    // The OS's own model — Gemini Nano (Android) / Apple Intelligence (iOS),
+    // ADR-008. One entry: the platform decides which model it is, and the
+    // Settings card shows the name the OS reports.
+    name: 'On-device AI',
     tagline: 'Private · runs on your phone · no key',
     icon: 'ondevice',
-    models: GEMMA_MODELS.map(m => m.label),
+    models: ['On-device AI'],
     keyPlaceholder: '',
   },
 };
@@ -109,8 +111,8 @@ const secureStorage = {
 export const useAppStore = create<AppState>()(
   persist(
     set => ({
-      // The coach runs fully on-device (Gemma via llama.rn) — no cloud provider,
-      // no API key. Cloud providers remain in PROVIDERS for the client but are
+      // The coach runs fully on-device (the OS model, ADR-008) — no cloud
+      // provider, no API key. Cloud providers remain in PROVIDERS for the client but are
       // no longer offered in Settings.
       aiProvider: 'ondevice',
       model: PROVIDERS.ondevice.models[0],

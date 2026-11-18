@@ -6,12 +6,14 @@ import { mono, sans } from '../../theme/fonts';
 import { useTheme } from '../../theme/theme';
 
 /**
- * Renders an AI coach reply as Markdown, mapped onto the app's v3 type ramp
- * (Archivo for prose, Oswald for code/numerals) and theme colours.
+ * Renders an AI coach reply as Markdown, mapped onto the friendly type ramp
+ * (ADR-007: Nunito throughout — `sans()` for prose, the heavier `mono()` number
+ * face for code) and theme colours. The reply sits in a soft-filled bubble, so
+ * prose is 16/22 Bold like the rest of the coach's copy.
  *
  * Every leaf is styled through a single `text` render rule keyed on its ancestry
- * rather than the library's default element styles. This is deliberate: the v3
- * faces encode weight in the *family name* (e.g. `Archivo_700Bold`), so a
+ * rather than the library's default element styles. This is deliberate: our
+ * faces encode weight in the *family name* (e.g. `Nunito_700Bold`), so a
  * weighted family paired with an inherited `fontWeight`/`fontStyle` silently
  * falls back to the system font on iOS. The library's defaults set exactly those
  * props on `strong`/`em`, so we render with `mergeStyle={false}`, blank those
@@ -23,27 +25,27 @@ export function CoachMarkdown({ text }: { text: string }) {
   const { block, rules } = useMemo(() => {
     const leaf = StyleSheet.create({
       base: {
-        fontFamily: sans(400),
-        fontSize: 13,
-        lineHeight: 19,
+        fontFamily: sans(700),
+        fontSize: 16,
+        lineHeight: 22,
         color: c.ink,
       },
       strong: {
-        fontFamily: sans(700),
-        fontSize: 13,
-        lineHeight: 19,
+        fontFamily: sans(900),
+        fontSize: 16,
+        lineHeight: 22,
         color: c.ink,
       },
-      em: { fontFamily: sans(500), fontSize: 13, lineHeight: 19, color: c.mut },
+      em: { fontFamily: sans(600), fontSize: 16, lineHeight: 22, color: c.mut },
       link: {
-        fontFamily: sans(500),
-        fontSize: 13,
-        lineHeight: 19,
+        fontFamily: sans(800),
+        fontSize: 16,
+        lineHeight: 22,
         color: c.acc,
       },
-      h1: { fontFamily: sans(800), fontSize: 19, lineHeight: 25, color: c.ink },
-      h2: { fontFamily: sans(800), fontSize: 16, lineHeight: 22, color: c.ink },
-      h3: { fontFamily: sans(700), fontSize: 14, lineHeight: 20, color: c.ink },
+      h1: { fontFamily: sans(900), fontSize: 20, lineHeight: 25, color: c.ink },
+      h2: { fontFamily: sans(900), fontSize: 18, lineHeight: 23, color: c.ink },
+      h3: { fontFamily: sans(900), fontSize: 16, lineHeight: 22, color: c.ink },
     });
 
     // Later branches lose to earlier ones, so order matters: a bold word inside
@@ -119,63 +121,69 @@ export function CoachMarkdown({ text }: { text: string }) {
       bullet_list_icon: {
         marginLeft: 0,
         marginRight: 8,
-        color: c.acc,
-        fontFamily: sans(700),
-        fontSize: 13,
-        lineHeight: 19,
+        color: c.accSolid,
+        fontFamily: sans(900),
+        fontSize: 16,
+        lineHeight: 22,
       },
       ordered_list_icon: {
         marginLeft: 0,
         marginRight: 8,
         color: c.mut,
-        fontFamily: mono(600),
-        fontSize: 12,
-        lineHeight: 19,
+        fontFamily: mono(800),
+        fontSize: 15,
+        lineHeight: 22,
       },
       bullet_list_content: { flex: 1 },
       ordered_list_content: { flex: 1 },
+      // Code sits on the card colour: the bubble is already the soft fill, so
+      // `track` (v3's code well) barely separated from it.
       code_inline: {
-        fontFamily: mono(500),
-        fontSize: 12,
+        fontFamily: mono(700),
+        fontSize: 14,
         color: c.ink,
-        backgroundColor: c.track,
-        borderRadius: 4,
+        backgroundColor: c.card,
+        borderRadius: 6,
         paddingHorizontal: 4,
       },
       code_block: {
-        fontFamily: mono(400),
-        fontSize: 12,
+        fontFamily: mono(600),
+        fontSize: 14,
         color: c.ink,
-        backgroundColor: c.track,
-        borderRadius: 8,
+        backgroundColor: c.card,
+        borderColor: c.hair,
+        borderWidth: 2,
+        borderRadius: 14,
         padding: 12,
         marginVertical: 4,
       },
       fence: {
-        fontFamily: mono(400),
-        fontSize: 12,
+        fontFamily: mono(600),
+        fontSize: 14,
         color: c.ink,
-        backgroundColor: c.track,
-        borderRadius: 8,
+        backgroundColor: c.card,
+        borderColor: c.hair,
+        borderWidth: 2,
+        borderRadius: 14,
         padding: 12,
         marginVertical: 4,
       },
       blockquote: {
         backgroundColor: 'transparent',
         borderLeftColor: c.hair,
-        borderLeftWidth: 3,
+        borderLeftWidth: 4,
         marginVertical: 4,
         paddingLeft: 10,
       },
       hr: {
         backgroundColor: c.hair,
-        height: StyleSheet.hairlineWidth,
+        height: 2,
         marginVertical: 10,
       },
       table: {
         borderColor: c.hair,
-        borderWidth: 1,
-        borderRadius: 6,
+        borderWidth: 2,
+        borderRadius: 12,
         marginVertical: 4,
       },
       thead: {},
@@ -183,7 +191,7 @@ export function CoachMarkdown({ text }: { text: string }) {
       th: { flex: 1, padding: 6 },
       tr: {
         borderBottomColor: c.hair,
-        borderBottomWidth: 1,
+        borderBottomWidth: 2,
         flexDirection: 'row',
       },
       td: { flex: 1, padding: 6 },

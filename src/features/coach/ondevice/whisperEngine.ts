@@ -9,8 +9,9 @@
  * importing this module is inert on web and under Jest.
  *
  * A single `WhisperContext` is held and reused; loading the same model twice is
- * a no-op, and switching models releases the previous context first. Mirrors the
- * inference-side {@link ./llamaEngine} for the coach's language model.
+ * a no-op, and switching models releases the previous context first. (The
+ * coach's language model needs no such holder — it's the OS's, see
+ * {@link ./systemLlm}.)
  */
 
 /**
@@ -91,7 +92,8 @@ class WhisperEngine implements SpeechToText {
     audioPath: string,
     opts: { language?: string } = {},
   ): Promise<string> {
-    if (!this.ctx) throw new Error('No speech model loaded — call load() first.');
+    if (!this.ctx)
+      throw new Error('No speech model loaded — call load() first.');
     const { promise } = this.ctx.transcribe(audioPath, {
       language: opts.language ?? 'auto',
       // Deterministic decoding plus a small beam search: both lift accuracy on

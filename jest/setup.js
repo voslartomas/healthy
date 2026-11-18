@@ -34,19 +34,13 @@ jest.mock('expo-splash-screen', () => ({
   hideAsync: jest.fn(() => Promise.resolve()),
 }));
 
-// On-device coach native stack. The engine (llama.rn) is only ever `require`d
-// lazily inside llamaEngine.load(), but stub it so any accidental import is
-// inert. expo-file-system/legacy backs the model download store; the default
+// On-device coach: the model is the OS's own (ADR-008), reached through the
+// local SystemLlm Expo module, which is resolved lazily with
+// requireOptionalNativeModule — absent under Jest, so it needs no stub and the
+// coach reports "unavailable" unless a test injects a fake engine.
+// expo-file-system/legacy backs the voice-model download store; the default
 // mock reports "no model on disk" and a no-op resumable — individual tests that
 // exercise download progress override createDownloadResumable themselves.
-jest.mock('llama.rn', () => ({
-  initLlama: jest.fn(() =>
-    Promise.resolve({
-      completion: jest.fn(() => Promise.resolve({ text: '{"reply":"ok"}' })),
-      release: jest.fn(() => Promise.resolve()),
-    }),
-  ),
-}));
 
 // Voice input: expo-audio's recorder is a native module with no Jest backing,
 // so importing it throws. Stub the recorder + the enums/presets the composer

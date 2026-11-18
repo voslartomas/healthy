@@ -6,11 +6,14 @@ import { NutritionScreen } from '../src/features/nutrition/NutritionScreen';
 import { useHealthStore } from '../src/state/useHealthStore';
 
 describe('NutritionScreen', () => {
-  it('renders the fuel brief and reveals the log-food form on tap', async () => {
+  it('renders the food screen and reveals the log-food form on tap', async () => {
     await renderWithProviders(<NutritionScreen navigation={mockNav()} />);
 
-    expect(screen.getByText('Energy')).toBeOnTheScreen();
+    // The energy balance lives in the hero card's chips now.
+    expect(screen.getByText('EATEN')).toBeOnTheScreen();
+    expect(screen.getByText('Quick add')).toBeOnTheScreen();
     expect(screen.getByText('Macros')).toBeOnTheScreen();
+    expect(screen.getByText('Eaten today')).toBeOnTheScreen();
 
     // Form is hidden until the user taps "Log food".
     expect(screen.queryByPlaceholderText('Food name')).toBeNull();

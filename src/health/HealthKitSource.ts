@@ -12,6 +12,7 @@ import {
   CardioZones,
   EnergyRecord,
   ExerciseRecord,
+  HydrationRecord,
   InstantSample,
   NutritionEntry,
   RawHealthData,
@@ -191,6 +192,7 @@ const ID = {
   dietaryProtein: 'HKQuantityTypeIdentifierDietaryProtein',
   dietaryCarbs: 'HKQuantityTypeIdentifierDietaryCarbohydrates',
   dietaryFat: 'HKQuantityTypeIdentifierDietaryFatTotal',
+  dietaryWater: 'HKQuantityTypeIdentifierDietaryWater',
   sleep: 'HKCategoryTypeIdentifierSleepAnalysis',
   workout: 'HKWorkoutTypeIdentifier',
   dateOfBirth: 'HKCharacteristicTypeIdentifierDateOfBirth',
@@ -213,6 +215,8 @@ const UNIT: Record<string, string> = {
   [ID.dietaryProtein]: 'g',
   [ID.dietaryCarbs]: 'g',
   [ID.dietaryFat]: 'g',
+  // Preferred unit would be fl oz on a US locale; the snapshot is ml everywhere.
+  [ID.dietaryWater]: 'mL',
 };
 
 /** Custom metadata key stamped on every sample we write for one food entry, so
@@ -234,6 +238,7 @@ const READ_TYPES: string[] = [
   ID.dietaryProtein,
   ID.dietaryCarbs,
   ID.dietaryFat,
+  ID.dietaryWater,
   ID.sleep,
   ID.workout,
   // NOTE: no characteristic type (date of birth) and no correlation type here.
@@ -479,6 +484,7 @@ export class HealthKitSource implements HealthSource {
       dietProteinS,
       dietCarbsS,
       dietFatS,
+      waterS,
     ] = await Promise.all([
       this.qs(mod, ID.hrvSdnn, hrvFrom, to),
       this.qs(mod, ID.restingHr, metricsFrom, to),
@@ -491,6 +497,7 @@ export class HealthKitSource implements HealthSource {
       this.qs(mod, ID.dietaryProtein, metricsFrom, to),
       this.qs(mod, ID.dietaryCarbs, metricsFrom, to),
       this.qs(mod, ID.dietaryFat, metricsFrom, to),
+      this.qs(mod, ID.dietaryWater, metricsFrom, to),
     ]);
 
     const track = (arr: InstantSample[]): InstantSample[] => {
@@ -551,6 +558,18 @@ export class HealthKitSource implements HealthSource {
       sources,
     );
 
+    // Water: read-only, one sample per logged drink.
+    const water: HydrationRecord[] = [];
+    for (const s of waterS) {
+      const start = toMs(s.startDate);
+      const end = toMs(s.endDate) ?? start;
+      const ml = quantityOf(s);
+      if (start == null || end == null || ml == null || ml <= 0) continue;
+      const source = sourceOf(s);
+      sources.add(source);
+      water.push({ ml, start, end, id: s.uuid ?? null, source });
+    }
+
     return {
       hrvRmssd,
       hrvAlgorithm: 'SDNN',
@@ -561,6 +580,7 @@ export class HealthKitSource implements HealthSource {
       activeEnergy,
       totalEnergy,
       nutrition,
+      water,
       weight,
       bodyFat,
       sources: [...sources],
@@ -875,6 +895,32 @@ export class HealthKitSource implements HealthSource {
     } catch (err) {
       console.warn('[HealthKit] food write failed', err);
       return { ok: false, error: String((err as Error)?.message ?? err) };
+    }
+  }
+
+  async readHeartRate(
+    start: number,
+    end: number,
+  ): Promise<HeartRateSample[] | null> {
+    const mod = loadModule();
+    if (!mod) return null;
+    if (!(await healthDataAvailable(mod))) return null;
+    try {
+      const hr =
+        (await mod.queryQuantitySamples?.(
+          ID.heartRate,
+          windowOptions(ID.heartRate, new Date(start), new Date(end)),
+        )) ?? [];
+      const out: HeartRateSample[] = [];
+      for (const s of hr) {
+        const time = toMs(s.startDate);
+        const bpm = quantityOf(s);
+        if (time != null && bpm != null) out.push({ time, bpm });
+      }
+      return out.sort((a, b) => a.time - b.time);
+    } catch (err) {
+      console.warn('[HealthKit] query heart-rate failed', err);
+      return null;
     }
   }
 

@@ -7,7 +7,8 @@ import React from 'react';
 import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { BRIEF_MAX_WIDTH, M } from '../../components/brief';
+import { BRIEF_MAX_WIDTH, S } from '../../components/brief';
+import { Icon, IconName } from '../../components/Icon';
 import { DashboardScreen } from '../../features/dashboard/DashboardScreen';
 import { NutritionScreen } from '../../features/nutrition/NutritionScreen';
 import { SettingsScreen } from '../../features/settings/SettingsScreen';
@@ -32,20 +33,23 @@ import { asScreen, RootTabParamList } from './types';
 
 const Tab = createBottomTabNavigator<RootTabParamList>();
 
-/** Numbered mono labels for each tab, matching the v3 tab bar (01 TODAY …). */
-const TABS: Record<keyof RootTabParamList, { num: string; label: string }> = {
-  Today: { num: '01', label: 'TODAY' },
-  Nutrition: { num: '02', label: 'FUEL' },
-  Strength: { num: '03', label: 'LIFT' },
-  Trends: { num: '04', label: 'TRENDS' },
-  Settings: { num: '05', label: 'SETUP' },
-};
+/** Icon + plain word per tab (ADR-007). The v3 bar's numbered mono labels
+ * (01 TODAY, 02 FUEL …) were replaced, and two tabs renamed for readability:
+ * Fuel → Food, Trends → Progress, Setup → Me. Route names are unchanged. */
+const TABS: Record<keyof RootTabParamList, { icon: IconName; label: string }> =
+  {
+    Today: { icon: 'today', label: 'Today' },
+    Nutrition: { icon: 'nutrition', label: 'Food' },
+    Strength: { icon: 'strength', label: 'Lift' },
+    Trends: { icon: 'trends', label: 'Progress' },
+    Settings: { icon: 'settings', label: 'Me' },
+  };
 
 /**
  * The floating glass tab pill.
  *
- * It keeps the design's numbered 01–05 identity but detaches from the bottom
- * edge and frosts whatever scrolls beneath it. Being absolutely positioned, it
+ * Icon-and-word tabs, the focused one on a soft accent tile; it detaches from
+ * the bottom edge and frosts whatever scrolls beneath it. Being absolutely positioned, it
  * takes no layout space — the screens run full height and their content passes
  * under the pill, which is the whole point of the effect. `box-none` on the
  * container means only the pill itself catches touches, not the full-width strip
@@ -109,7 +113,7 @@ function BriefTabBar({ state, navigation }: BottomTabBarProps) {
           {state.routes.map((route, i) => {
             const focused = state.index === i;
             const meta = TABS[route.name as keyof RootTabParamList];
-            const color = focused ? c.acc : c.fnt;
+            const color = focused ? c.acc : c.mut;
             const onPress = () => {
               const event = navigation.emit({
                 type: 'tabPress',
@@ -126,10 +130,13 @@ function BriefTabBar({ state, navigation }: BottomTabBarProps) {
                 accessibilityRole="button"
                 accessibilityState={{ selected: focused }}
                 accessibilityLabel={meta.label}
-                style={styles.tab}
+                style={[
+                  styles.tab,
+                  focused ? { backgroundColor: c.accTint } : null,
+                ]}
               >
-                <Text style={M(700, 13, { color })}>{meta.num}</Text>
-                <Text style={M(700, 8, { ls: 1.2, color })}>{meta.label}</Text>
+                <Icon name={meta.icon} size={22} color={color} />
+                <Text style={S(800, 12, { lh: 14, color })}>{meta.label}</Text>
               </Pressable>
             );
           })}
@@ -195,7 +202,8 @@ const styles = StyleSheet.create({
     maxWidth: BRIEF_MAX_WIDTH - TAB_PILL.sideGutter * 2,
     height: TAB_PILL.height,
     borderRadius: TAB_PILL.radius,
-    borderWidth: 1,
+    borderWidth: 2,
+    borderBottomWidth: 4,
     // Required for the blur to clip to the rounded corners.
     overflow: 'hidden',
     justifyContent: 'center',
@@ -204,11 +212,13 @@ const styles = StyleSheet.create({
     shadowRadius: 20,
     elevation: 10,
   },
-  row: { flexDirection: 'row', alignItems: 'center' },
+  row: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 6 },
   tab: {
     flex: 1,
     alignItems: 'center',
-    gap: 3,
-    paddingVertical: 2,
+    gap: 1,
+    paddingVertical: 5,
+    marginHorizontal: 2,
+    borderRadius: 999,
   },
 });

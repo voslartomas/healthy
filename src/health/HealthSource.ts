@@ -5,6 +5,7 @@ import {
   FoodLogResult,
   RawFetchWindows,
 } from './fetchWindows';
+import { HeartRateSample } from './hrZones';
 import { CardioZones, RawHealthData } from './types';
 
 /**
@@ -81,6 +82,14 @@ export interface HealthSource {
     windows: RawFetchWindows,
     reuse?: ZoneReuse,
   ): Promise<RawHealthData | null>;
+
+  /** Read the heart-rate samples recorded in `[start, end]` (one workout), oldest
+   * first, or null when unavailable/unauthorized. Read on demand by the workout
+   * detail screen: the routine read bins each session's heart rate into zone
+   * minutes and keeps only those, because holding every session's full stream
+   * (thousands of samples each, across 12 weeks) in memory and in the SQLite
+   * cache is not worth it for the one workout someone opens. Read-only. */
+  readHeartRate(start: number, end: number): Promise<HeartRateSample[] | null>;
 
   /** Write one user-authored food entry to the OS nutrition store, returning the
    * created record's id when available (for later edit/delete). Only nutrition

@@ -11,6 +11,7 @@ import {
   RawFetchWindows,
 } from './fetchWindows';
 import type { ZoneReuse } from './HealthSource';
+import type { HeartRateSample } from './hrZones';
 import { HealthSnapshot, RawHealthData } from './types';
 
 export * from './types';
@@ -22,6 +23,7 @@ export {
   startOfLocalDay,
 } from './derive';
 export type { ZoneReuse } from './HealthSource';
+export type { HeartRateSample } from './hrZones';
 export { FULL_METRICS_DAYS, FULL_WINDOWS, LIGHT_WINDOWS } from './fetchWindows';
 export type {
   ExerciseLogResult,
@@ -44,6 +46,7 @@ export const EMPTY_SNAPSHOT: HealthSnapshot = {
   stepsThisWeek: 0,
   readiness: null,
   nutrition: null,
+  waterTodayMl: null,
   energyBurnedToday: 0,
   activities: [],
   cardio: {
@@ -94,6 +97,15 @@ export function disconnectHealthSource(): Promise<void> {
 /** Whether we currently hold the read permissions needed to produce data. */
 export function isHealthSourceConnected(): Promise<boolean> {
   return activeHealthSource().isConnected();
+}
+
+/** One workout's heart-rate samples from the active source, oldest first; null
+ * when the source is unavailable. See `HealthSource.readHeartRate`. */
+export function readWorkoutHeartRate(
+  start: number,
+  end: number,
+): Promise<HeartRateSample[] | null> {
+  return activeHealthSource().readHeartRate(start, end);
 }
 
 /** Human label for the active platform's health store, for UI copy:

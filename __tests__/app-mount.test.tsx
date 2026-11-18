@@ -8,16 +8,14 @@ describe('App', () => {
     render(<App />);
 
     // The launch splash shows first, branded "Healthy".
-    await waitFor(() =>
-      expect(screen.getByText('Healthy')).toBeOnTheScreen(),
-    );
+    await waitFor(() => expect(screen.getByText('Healthy')).toBeOnTheScreen());
 
     // After the splash beat, a fresh install (not onboarded) lands on the
     // Welcome screen with its connect call-to-action.
     await waitFor(
       () =>
         expect(
-          screen.getByText(/CONNECT (APPLE HEALTH|HEALTH CONNECT)/),
+          screen.getByText(/Connect (Apple Health|Health Connect)/),
         ).toBeOnTheScreen(),
       { timeout: 3000 },
     );

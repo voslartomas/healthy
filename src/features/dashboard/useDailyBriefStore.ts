@@ -1,7 +1,7 @@
 /**
  * The "Today" daily brief — a short, AI-written paragraph about how the user is
  * doing, generated from their live health data ({@link buildDataContext}) via
- * the configured coach provider (on-device Gemma or a cloud model).
+ * the configured coach provider (the OS's on-device model, or a cloud model).
  *
  * Generated at most once per calendar day (guarded by date) so it doesn't re-run
  * on every Today visit, with a manual refresh. The date + text are persisted, so
@@ -16,7 +16,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 
 import { useAppStore } from '../../state/useAppStore';
-import { whenHealthFresh } from '../../state/useHealthStore';
+import { useHealthStore, whenHealthFresh } from '../../state/useHealthStore';
 import { CoachError, runCoach } from '../coach/aiClient';
 import { buildDataContext } from '../coach/dataContext';
 import { languageDirective } from '../coach/languages';
@@ -48,6 +48,16 @@ export type BriefStatus = 'idle' | 'syncing' | 'loading' | 'ready' | 'error';
 function todayKey(): string {
   const d = new Date();
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
+
+/**
+ * Whether the snapshot carries LAST NIGHT (sleep or HRV). A brief written before
+ * the wearable synced can only say "no data yet"; this is what lets it be
+ * rewritten once the night lands instead of saying so until midnight.
+ */
+export function snapshotHasNight(): boolean {
+  const snap = useHealthStore.getState().snapshot;
+  return snap.sleep != null || snap.hrv != null;
 }
 
 /** Whether the selected coach provider is usable right now. */
@@ -93,6 +103,8 @@ interface DailyBriefState {
   /** Date key the current text was generated for. */
   date: string;
   text: string;
+  /** Whether last night's data had synced when {@link text} was written. */
+  hadNight: boolean;
   status: BriefStatus;
   error: string | null;
   /** Generate today's brief if not already done (called on Today mount). */
@@ -117,8 +129,14 @@ export const useDailyBriefStore = create<DailyBriefState>()(
         }
         set({ status: 'loading', error: null });
         try {
+          const hadNight = snapshotHasNight();
           const text = await generateBrief();
-          set({ date: todayKey(), text, status: text ? 'ready' : 'idle' });
+          set({
+            date: todayKey(),
+            text,
+            hadNight,
+            status: text ? 'ready' : 'idle',
+          });
         } catch (err) {
           set({
             status: 'error',
@@ -133,13 +151,20 @@ export const useDailyBriefStore = create<DailyBriefState>()(
       return {
         date: '',
         text: '',
+        hadNight: false,
         status: 'idle',
         error: null,
         ensure: async () => {
+          // Re-entered when last night lands mid-generation (Today re-runs this
+          // on that change); the run already under way owns the brief.
+          if (get().status === 'loading' || get().status === 'syncing') return;
           // Wait for the persisted brief to load before deciding, so today's
           // stored brief from an earlier launch is reused, not regenerated.
           await hydrated;
-          if (get().date === todayKey() && get().text) {
+          // Today's brief is reused — unless it was written before last night
+          // synced and the night is here now, in which case it is out of date.
+          const outdated = !get().hadNight && snapshotHasNight();
+          if (get().date === todayKey() && get().text && !outdated) {
             if (get().status !== 'ready') set({ status: 'ready' });
             return;
           }
@@ -174,7 +199,11 @@ export const useDailyBriefStore = create<DailyBriefState>()(
       name: 'daily-brief',
       storage: createJSONStorage(() => briefStorage),
       // Only the day's content is worth keeping; status/error are transient.
-      partialize: state => ({ date: state.date, text: state.text }),
+      partialize: state => ({
+        date: state.date,
+        text: state.text,
+        hadNight: state.hadNight,
+      }),
       // Fires after hydration finishes (with state, or on failure) — either way
       // release ensure()'s gate so a fresh install still generates.
       onRehydrateStorage: () => () => markHydrated(),

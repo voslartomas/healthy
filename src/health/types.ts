@@ -103,6 +103,22 @@ export interface NutritionEntry {
 }
 
 /**
+ * One logged drink — Health Connect `Hydration`, HealthKit `DietaryWater`.
+ * Read-only: the app never writes water, it only surfaces what the user's water
+ * tracker (or the OS app) recorded. `ml` is the record's volume in millilitres;
+ * Health Connect stores hydration as an interval, so `start`/`end` bound it
+ * (HealthKit samples are usually instantaneous, start === end).
+ */
+export interface HydrationRecord {
+  ml: number;
+  start: number;
+  end: number;
+  /** Source record id, when the platform provided one (splice key). */
+  id?: string | null;
+  source: string;
+}
+
+/**
  * Everything the native module reads in one pass, normalized to the units above
  * but NOT yet deduped or aggregated. This is the boundary between native and TS.
  */
@@ -129,6 +145,12 @@ export interface RawHealthData {
   weight: InstantSample[];
   /** Body-fat samples (percentage 0–100); occasional, not daily. */
   bodyFat: InstantSample[];
+  /**
+   * Logged water intake. Optional ONLY because raw reads cached in SQLite
+   * (`health_cache`) before hydration was read do not carry it — every live
+   * adapter read sets it. Consumers treat a missing array as "no records".
+   */
+  water?: HydrationRecord[];
   /**
    * Per-day burned-calorie totals from Health Connect's OWN grouped aggregate
    * (local calendar days), when the platform provided them. Deduped across
@@ -226,6 +248,11 @@ export interface MealSummary {
   name: string;
   mealType: string | null;
   kcal: number;
+  /** Macros in grams; null when the entry didn't record them. Carried so the
+   * food editor can open on the entry's real values. */
+  proteinG?: number | null;
+  carbsG?: number | null;
+  fatG?: number | null;
   time: number;
   /** Resource id for editing/deleting the entry; null when unknown. */
   id?: string | null;
@@ -308,6 +335,26 @@ export interface ActivitySummary {
   durationMin: number;
   energyKcal: number | null;
   start: number;
+  /** Session end (epoch ms) — bounds the on-demand heart-rate read on the
+   * workout detail screen. */
+  end: number;
+  /** Stable identity (`derive.exerciseKey`), so a screen can be handed one
+   * session and find it again in the snapshot. */
+  key: string;
+  /** Writing app (package / bundle id), shown as "Recorded by". */
+  source: string;
+  /** Minutes per HR zone for this session; null when the source recorded no
+   * in-session heart rate (or no usable HRmax). */
+  hrZones: CardioZones | null;
+  /** This session's cardio training load — the same HR-zone-weighted blend the
+   * cardio screen sums — or null when it contributes none (a non-cardio session
+   * without HR zones). */
+  load: number | null;
+  /** True when {@link load} was estimated from duration because the session has
+   * no HR zones (see `derive.sessionLoad`). */
+  loadEstimated: boolean;
+  /** Minutes counted toward the "Zone 2 minutes" goal (zone 2 and above). */
+  zone2PlusMin: number;
 }
 
 /**
@@ -425,6 +472,9 @@ export interface HealthSnapshot {
   readiness: ReadinessMetric | null;
   /** Today's logged nutrition, null when nothing has been logged today. */
   nutrition: NutritionSummary | null;
+  /** Water drunk today (ml), summed from today's hydration records; null when
+   * nothing was logged today — the UI renders "-", never a fabricated 0. */
+  waterTodayMl: number | null;
   /** Active energy burned today (kcal), from the calories rollup. */
   energyBurnedToday: number;
   /** Recent recorded workouts (last 7 days), newest first. */
