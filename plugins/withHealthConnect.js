@@ -41,11 +41,21 @@ const WRITE_PERMISSIONS = [
   'android.permission.health.WRITE_EXERCISE',
 ];
 
-const ALL_PERMISSIONS = [...READ_PERMISSIONS, ...WRITE_PERMISSIONS];
+// Lets the Android widget read today's numbers with the app closed (ADR-010).
+// Requested only once a widget is placed; Health Connect ignores it on
+// versions without the feature.
+const BACKGROUND_PERMISSIONS = [
+  'android.permission.health.READ_HEALTH_DATA_IN_BACKGROUND',
+];
+
+const ALL_PERMISSIONS = [
+  ...READ_PERMISSIONS,
+  ...WRITE_PERMISSIONS,
+  ...BACKGROUND_PERMISSIONS,
+];
 
 const HC_PROVIDER_PACKAGE = 'com.google.android.apps.healthdata';
-const RATIONALE_ACTION =
-  'androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE';
+const RATIONALE_ACTION = 'androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE';
 const VIEW_PERMISSION_USAGE = 'android.intent.action.VIEW_PERMISSION_USAGE';
 const HEALTH_PERMISSIONS_CATEGORY =
   'android.intent.category.HEALTH_PERMISSIONS';
@@ -86,9 +96,7 @@ function addRationaleHandlers(application) {
   if (mainActivity) {
     mainActivity['intent-filter'] = mainActivity['intent-filter'] ?? [];
     const already = mainActivity['intent-filter'].some(f =>
-      (f.action ?? []).some(
-        a => a.$?.['android:name'] === RATIONALE_ACTION,
-      ),
+      (f.action ?? []).some(a => a.$?.['android:name'] === RATIONALE_ACTION),
     );
     if (!already) {
       mainActivity['intent-filter'].push({

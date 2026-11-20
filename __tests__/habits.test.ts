@@ -344,3 +344,78 @@ describe('dayRangeThrough', () => {
     expect(dayRangeThrough(day(-6), TODAY)).toEqual(dayRange(TODAY, 7));
   });
 });
+
+describe('water habits ("drink 3 L a day")', () => {
+  const water = (over: Partial<Habit> = {}): Habit => ({
+    id: 'w1',
+    name: 'Drink 3 L a day',
+    type: 'water',
+    auto: true,
+    allowance: 'never',
+    targetMl: 3000,
+    createdAt: TODAY,
+    ...over,
+  });
+  const ml = (entries: [number, number][]) => new Map(entries);
+
+  it('holds the day the moment the target is reached — today included', () => {
+    const [st] = evaluateHabit(
+      water(),
+      [TODAY],
+      ctx({
+        waterMl: ml([[TODAY, 3100]]),
+      }),
+    );
+    expect(st).toBe('auto');
+  });
+
+  it('keeps today open while short, and breaks a finished short day', () => {
+    const habit = water({ createdAt: day(-5) });
+    const out = evaluateHabit(
+      habit,
+      [day(-1), TODAY],
+      ctx({
+        waterMl: ml([
+          [day(-1), 1800],
+          [TODAY, 1200],
+        ]),
+      }),
+    );
+    expect(out).toEqual(['miss', 'open']);
+  });
+
+  it('back-fills from the data before the habit existed, like sleep', () => {
+    const out = evaluateHabit(
+      water(),
+      [day(-3), day(-2), day(-1)],
+      ctx({
+        // -3 met, -2 short, -1 nothing logged
+        waterMl: ml([
+          [day(-3), 3200],
+          [day(-2), 900],
+        ]),
+      }),
+    );
+    expect(out).toEqual(['auto', 'miss', 'none']);
+  });
+
+  it('counts a day with nothing logged after creation as not reached', () => {
+    const out = evaluateHabit(water({ createdAt: day(-5) }), [day(-1)], ctx());
+    expect(out).toEqual(['miss']);
+  });
+
+  it('keeps a frozen held day once the records age out, and a tap still wins', () => {
+    const habit = water({ createdAt: day(-30) });
+    const out = evaluateHabit(
+      habit,
+      [day(-20), day(-19)],
+      ctx({
+        recorded: new Map<number, HabitDayStatus>([
+          [day(-20), 'auto'],
+          [day(-19), 'held'],
+        ]),
+      }),
+    );
+    expect(out).toEqual(['auto', 'held']);
+  });
+});

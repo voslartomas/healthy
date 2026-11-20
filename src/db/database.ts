@@ -152,6 +152,7 @@ async function ensureSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       allowance   TEXT NOT NULL DEFAULT 'never',
       tag         TEXT,
       before_time TEXT,
+      target_ml   INTEGER,
       sort_order  INTEGER NOT NULL DEFAULT 0,
       created_at  INTEGER NOT NULL,
       updated_at  INTEGER NOT NULL
@@ -162,6 +163,25 @@ async function ensureSchema(db: SQLite.SQLiteDatabase): Promise<void> {
       status     TEXT NOT NULL,
       updated_at INTEGER NOT NULL,
       PRIMARY KEY (habit_id, day_start)
+    );
+    -- What the Android home-screen widget renders (ADR-010): key 'data' holds
+    -- the WidgetData JSON the app writes after a live read; 'view:<widgetId>'
+    -- holds which view each placed widget is on. Derived and per-device, so it
+    -- is deliberately NOT part of backups.
+    CREATE TABLE IF NOT EXISTS widget_state (
+      key        TEXT PRIMARY KEY NOT NULL,
+      value      TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS journal_days (
+      day_start  INTEGER PRIMARY KEY NOT NULL,
+      tags       TEXT NOT NULL DEFAULT '',
+      ended      TEXT NOT NULL DEFAULT '',
+      note       TEXT NOT NULL DEFAULT '',
+      remote_id  TEXT,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS strength_session_sets (
       id           TEXT PRIMARY KEY NOT NULL,
@@ -177,6 +197,7 @@ async function ensureSchema(db: SQLite.SQLiteDatabase): Promise<void> {
   await ensureGoalColumns(db);
   await ensureCommonFoodColumns(db);
   await ensureStrengthColumns(db);
+  await ensureHabitColumns(db);
   await runMigrations(db);
 }
 
@@ -286,6 +307,20 @@ async function ensureCommonFoodColumns(
  * `set_targets`; add it idempotently (guarded, since SQLite has no `ADD COLUMN
  * IF NOT EXISTS`). New installs already have it from the DDL above.
  */
+/**
+ * `habits.target_ml` arrived with water habits ("drink 3 L a day"). Guarded —
+ * SQLite has no ADD COLUMN IF NOT EXISTS — so DBs from earlier builds pick it
+ * up; new installs have it from the DDL above.
+ */
+async function ensureHabitColumns(db: SQLite.SQLiteDatabase): Promise<void> {
+  const cols = await db.getAllAsync<{ name: string }>(
+    'PRAGMA table_info(habits);',
+  );
+  if (!new Set(cols.map(c => c.name)).has('target_ml')) {
+    await db.execAsync('ALTER TABLE habits ADD COLUMN target_ml INTEGER;');
+  }
+}
+
 async function ensureStrengthColumns(db: SQLite.SQLiteDatabase): Promise<void> {
   const exCols = await db.getAllAsync<{ name: string }>(
     'PRAGMA table_info(strength_workout_exercises);',

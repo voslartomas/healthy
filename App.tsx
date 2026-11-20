@@ -30,7 +30,8 @@ import { initDailyEnergy } from './src/state/dailyEnergyService';
 import { initFoodTags } from './src/state/foodTagsService';
 import { initGoalHistory } from './src/state/goalHistoryService';
 import { initGoals } from './src/state/goalsService';
-import { initHabits, recordSleepOutcomes } from './src/state/habitsService';
+import { initHabits, recordHabitOutcomes } from './src/state/habitsService';
+import { initJournal } from './src/state/journalService';
 import { initProfile } from './src/state/profileService';
 import { initStrength } from './src/state/strengthService';
 import { useAppStore } from './src/state/useAppStore';
@@ -39,6 +40,7 @@ import { initWorkoutNotifications } from './src/state/workoutNotifications';
 import { colors } from './src/theme/colors';
 import { useAppFonts } from './src/theme/fonts';
 import { useResolvedScheme } from './src/theme/theme';
+import { startWidgetSync } from './src/widget/widgetSync';
 
 const lightTheme = {
   ...DefaultTheme,
@@ -124,10 +126,11 @@ export default function App() {
       console.warn('Failed to load daily energy', err),
     );
     initFoodTags().catch(err => console.warn('Failed to load food tags', err));
-    // Habits must be loaded before `recordSleepOutcomes`, which freezes the
-    // verdict of every night the snapshot can still see.
+    initJournal().catch(err => console.warn('Failed to load journal', err));
+    // Habits must be loaded before `recordHabitOutcomes`, which freezes the
+    // verdict of every night (and every met water day) the snapshot can see.
     initHabits()
-      .then(() => recordSleepOutcomes())
+      .then(() => recordHabitOutcomes())
       .catch(err => console.warn('Failed to load habits', err));
     initGoalHistory().catch(err =>
       console.warn('Failed to load goal history', err),
@@ -142,22 +145,27 @@ export default function App() {
     initWorkoutNotifications();
   }, []);
 
+  // Keep the Android home-screen widget in step with live reads, the journal,
+  // the water habit and the calorie goal (ADR-010). No-op off Android.
+  useEffect(() => startWidgetSync(), []);
+
   // Freeze the sleep habits' verdicts whenever the set of readable nights
-  // changes — a new night, or a deeper read that reached further back. A night's
+  // changes — a new night, or a deeper read that reached further back (and the
+  // water habits' met days when the set of water days changes). A night's
   // onset is only in the snapshot while the platform's window still covers it,
   // so a verdict we don't write down while we can see it is lost to the 12-week
   // grid for good. Keying on the nights themselves keeps this to the reads that
   // actually brought something new.
   useEffect(() => {
     const signature = (state: ReturnType<typeof useHealthStore.getState>) =>
-      `${state.snapshot.sleepNights?.length ?? 0}:${state.snapshot.sleep?.lastSessionStart ?? ''}`;
+      `${state.snapshot.sleepNights?.length ?? 0}:${state.snapshot.sleep?.lastSessionStart ?? ''}:${state.snapshot.waterDays?.length ?? 0}`;
     let last = signature(useHealthStore.getState());
     return useHealthStore.subscribe(state => {
       const next = signature(state);
       if (next === last) return;
       last = next;
-      void recordSleepOutcomes().catch(err =>
-        console.warn('Failed to record sleep habits', err),
+      void recordHabitOutcomes().catch(err =>
+        console.warn('Failed to record habit outcomes', err),
       );
     });
   }, []);

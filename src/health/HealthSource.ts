@@ -68,6 +68,17 @@ export interface HealthSource {
   /** Whether we currently hold the read permissions needed to produce data. */
   isConnected(): Promise<boolean>;
 
+  /**
+   * Whether reads also work while the app is NOT in the foreground — what the
+   * Android widget needs to show live numbers (ADR-010). Health Connect gates
+   * this behind its own READ_HEALTH_DATA_IN_BACKGROUND grant (Android 14+ / a
+   * recent Health Connect). Optional: HealthKit has no such widget path here.
+   */
+  canReadInBackground?(): Promise<boolean>;
+
+  /** Ask for background reads; true once granted. Needs the app in front. */
+  requestBackgroundRead?(): Promise<boolean>;
+
   /** Read raw multi-source records over `windows`, mapped to {@link RawHealthData},
    * or null when unavailable/unauthorized. Returning raw (not a derived
    * snapshot) is what lets the store cache deep history and splice a light

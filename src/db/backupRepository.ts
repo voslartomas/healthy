@@ -33,6 +33,8 @@ export const BACKUP_TABLES = [
   'strength_workout_exercises',
   'strength_sessions',
   'strength_session_sets',
+  // The journal is the user's own writing (ADR-009).
+  'journal_days',
 ] as const;
 
 /** Bumped only if the backup envelope shape (not the table columns) changes. */

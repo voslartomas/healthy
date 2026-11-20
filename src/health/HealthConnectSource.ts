@@ -54,6 +54,9 @@ import {
 
 type Permission = { accessType: 'read' | 'write'; recordType: string };
 
+/** The library's pseudo record type for READ_HEALTH_DATA_IN_BACKGROUND. */
+const BACKGROUND_READ = 'BackgroundAccessPermission';
+
 interface HealthConnectModule {
   initialize(): Promise<boolean>;
   getSdkStatus?(): Promise<number>;
@@ -531,6 +534,36 @@ export class HealthConnectSource implements HealthSource {
       );
       return CORE_READ_TYPES.some(t => readGranted.has(t));
     } catch {
+      return false;
+    }
+  }
+
+  async canReadInBackground(): Promise<boolean> {
+    const mod = await this.ensureInitialized();
+    if (!mod) return false;
+    try {
+      const granted = await mod.getGrantedPermissions();
+      return granted.some(
+        p => p.accessType === 'read' && p.recordType === BACKGROUND_READ,
+      );
+    } catch {
+      return false;
+    }
+  }
+
+  async requestBackgroundRead(): Promise<boolean> {
+    const mod = await this.ensureInitialized();
+    if (!mod) return false;
+    try {
+      // Asked on its own, not with the connect sheet: on a Health Connect
+      // without the feature the grant can't be offered, and it must never
+      // take the core read permissions down with it.
+      await mod.requestPermission([
+        { accessType: 'read', recordType: BACKGROUND_READ },
+      ]);
+      return this.canReadInBackground();
+    } catch (err) {
+      console.warn('[HealthConnect] background permission failed', err);
       return false;
     }
   }

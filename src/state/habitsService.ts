@@ -12,6 +12,7 @@ import { startOfLocalDay } from '../health';
 import {
   bedtimeDeadline,
   DAY_MS,
+  DEFAULT_WATER_TARGET_ML,
   Habit,
   HabitAllowance,
   HabitDayStatus,
@@ -26,6 +27,7 @@ import {
   HABIT_WINDOW_DAYS,
   sleepOnsetsFromSnapshot,
   useHabitsStore,
+  waterFromSnapshot,
 } from './useHabitsStore';
 import { useHealthStore } from './useHealthStore';
 
@@ -68,13 +70,20 @@ export interface NewHabitInput {
   tag?: FoodTagKey;
   /** Sleep habits only, e.g. "23:00". */
   before?: string;
+  /** Water habits only: the daily target in ml. */
+  targetMl?: number;
 }
 
 /** Normalise a draft: only the fields that kind of habit actually uses are kept,
  * and the "who decides" flag is forced where the kind leaves no choice. */
 function normalize(input: NewHabitInput): Omit<Habit, 'id' | 'createdAt'> {
   const type = input.type;
-  const auto = type === 'sleep' ? true : type === 'other' ? false : input.auto;
+  const auto =
+    type === 'sleep' || type === 'water'
+      ? true
+      : type === 'other'
+        ? false
+        : input.auto;
   const habit: Omit<Habit, 'id' | 'createdAt'> = {
     name: input.name,
     type,
@@ -83,6 +92,12 @@ function normalize(input: NewHabitInput): Omit<Habit, 'id' | 'createdAt'> {
   };
   if (type === 'food' && auto) habit.tag = input.tag ?? 'junk';
   if (type === 'sleep') habit.before = input.before ?? '23:00';
+  if (type === 'water') {
+    habit.targetMl =
+      input.targetMl && input.targetMl > 0
+        ? Math.round(input.targetMl)
+        : DEFAULT_WATER_TARGET_ML;
+  }
   return habit;
 }
 
@@ -210,6 +225,47 @@ export async function recordSleepOutcomes(): Promise<void> {
   }
 }
 
+/**
+ * Freeze the days each water habit HELD, for every day the snapshot still has
+ * hydration for — the water counterpart of {@link recordSleepOutcomes}, and for
+ * the same reason: those records age out of the read window, and without a row
+ * the 12-week grid would forget the day was met.
+ *
+ * Only held days are written, and only finished ones (not today). A shortfall
+ * is left to re-derive: water trackers often sync late, and a frozen 'miss'
+ * would outrank the glasses that arrive afterwards. Once a short day ages out
+ * it reads as a miss again anyway (a day after creation with no water data).
+ */
+export async function recordWaterOutcomes(
+  now: number = Date.now(),
+): Promise<void> {
+  const { habits, days } = useHabitsStore.getState();
+  const waterHabits = habits.filter(h => h.type === 'water');
+  if (waterHabits.length === 0) return;
+  const water = waterFromSnapshot(useHealthStore.getState().snapshot, now);
+  if (water.size === 0) return;
+  const oldest = windowStart();
+  const today = startOfLocalDay(now);
+  const store = useHabitsStore.getState();
+  for (const habit of waterHabits) {
+    const target = habit.targetMl ?? DEFAULT_WATER_TARGET_ML;
+    for (const [dayStart, ml] of water) {
+      if (dayStart < oldest || dayStart >= today || ml < target) continue;
+      const recorded = days[dayKey(habit.id, dayStart)];
+      // A day the user settled by hand, or already frozen, stays as it is.
+      if (recorded) continue;
+      store.setDayLocal(habit.id, dayStart, 'auto');
+      await setHabitDay({ habitId: habit.id, dayStart, status: 'auto' });
+    }
+  }
+}
+
+/** Freeze everything the health data can currently decide (sleep + water). */
+export async function recordHabitOutcomes(): Promise<void> {
+  await recordSleepOutcomes();
+  await recordWaterOutcomes();
+}
+
 /** The evaluated habits for right now, from the live stores. Used by the screens
  * and by the coach's data context. */
 export function currentHabitViews(now: number = Date.now()) {
@@ -219,6 +275,7 @@ export function currentHabitViews(now: number = Date.now()) {
     days,
     tagRows: useFoodTagsStore.getState().rows,
     sleepOnset: sleepOnsetsFromSnapshot(useHealthStore.getState().snapshot),
+    waterMl: waterFromSnapshot(useHealthStore.getState().snapshot, now),
     now,
   });
 }

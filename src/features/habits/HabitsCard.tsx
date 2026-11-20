@@ -5,7 +5,13 @@ import { AppNav } from '../../app/navigation/types';
 import { chunky, Pill, S } from '../../components/brief';
 import { Icon } from '../../components/Icon';
 import { foodTagLabel } from '../../state/foodTags';
-import { allowanceShort, Habit, HabitDayStatus } from '../../state/habits';
+import {
+  allowanceShort,
+  DEFAULT_WATER_TARGET_ML,
+  Habit,
+  HabitDayStatus,
+  litresLabel,
+} from '../../state/habits';
 import { setHabitChecked, toggleHabitDay } from '../../state/habitsService';
 import { useFoodTagsStore } from '../../state/useFoodTagsStore';
 import {
@@ -15,6 +21,7 @@ import {
   heldTodayCount,
   openYesterday,
   sleepOnsetsFromSnapshot,
+  waterFromSnapshot,
   useHabitsStore,
 } from '../../state/useHabitsStore';
 import { useHealthStore } from '../../state/useHealthStore';
@@ -34,10 +41,20 @@ function detailLine(
   habit: Habit,
   status: HabitDayStatus,
   allowanceUsed: boolean,
+  waterTodayMl: number | null = null,
 ): string {
   const sleep = habit.type === 'sleep';
   let detail: string;
-  if (status === 'auto') {
+  if (habit.type === 'water' && (status === 'auto' || status === 'open')) {
+    // Progress toward the target, read straight from today's hydration.
+    const target = litresLabel(habit.targetMl ?? DEFAULT_WATER_TARGET_ML);
+    detail =
+      status === 'auto'
+        ? `Auto · ${litresLabel(waterTodayMl ?? 0)} — target reached`
+        : `Auto · ${waterTodayMl != null ? litresLabel(waterTodayMl) : '0 L'} of ${target} so far`;
+  } else if (habit.type === 'water' && status === 'miss') {
+    detail = 'Missed · target not reached';
+  } else if (status === 'auto') {
     detail = sleep
       ? 'Auto · asleep in time'
       : 'Auto · nothing flagged in today’s food';
@@ -80,6 +97,7 @@ export function HabitsCard({ navigation }: { navigation: AppNav }) {
   const days = useHabitsStore(s => s.days);
   const tagRows = useFoodTagsStore(s => s.rows);
   const sleep = useHealthStore(s => s.snapshot.sleep);
+  const waterDays = useHealthStore(s => s.snapshot.waterDays);
   const now = useNow();
 
   const views = React.useMemo(
@@ -89,12 +107,14 @@ export function HabitsCard({ navigation }: { navigation: AppNav }) {
         days,
         tagRows,
         sleepOnset: sleepOnsetsFromSnapshot(useHealthStore.getState().snapshot),
+        waterMl: waterFromSnapshot(useHealthStore.getState().snapshot, now),
         now,
       }),
-    // `sleep` stands in for the part of the snapshot this reads, so the rows
-    // follow a fresh night without re-running on every other health field.
+    // `sleep` / `waterDays` stand in for the parts of the snapshot this reads,
+    // so the rows follow a fresh night or glass without re-running on every
+    // other health field.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [habits, days, tagRows, sleep, now],
+    [habits, days, tagRows, sleep, waterDays, now],
   );
 
   const catchup = openYesterday(views);
@@ -198,6 +218,7 @@ function HabitRow({
 }) {
   const c = useTheme().colors;
   const { habit, today: status } = view;
+  const waterTodayMl = useHealthStore(s => s.snapshot.waterTodayMl);
   const on = status === 'auto' || status === 'held';
   const todayStart = view.days[view.todayIndex];
 
@@ -240,7 +261,12 @@ function HabitRow({
         >
           <Text style={S(900, 17, { lh: 22, color: c.ink })}>{habit.name}</Text>
           <Text style={S(700, 14, { lh: 19, color: c.mut })}>
-            {detailLine(habit, status, allowanceSpentThisWeek(view))}
+            {detailLine(
+              habit,
+              status,
+              allowanceSpentThisWeek(view),
+              waterTodayMl,
+            )}
           </Text>
         </Pressable>
         <View

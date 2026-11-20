@@ -24,7 +24,6 @@ import {
 } from '../../components/brief';
 import { Icon } from '../../components/Icon';
 import {
-  connectHealthSource,
   FoodEntryInput,
   healthSourceName,
   NutritionSummary,
@@ -36,9 +35,8 @@ import {
   removeCommonFood,
 } from '../../state/commonFoodsService';
 import { FoodTagRow } from '../../db/foodTagsRepository';
-import { FOOD_TAGS, FoodTagKey, foodTagsLabel } from '../../state/foodTags';
+import { foodTagsLabel } from '../../state/foodTags';
 import { deleteFoodEntry, replaceFoodEntry } from '../../state/foodLogService';
-import { tagLoggedFood } from '../../state/foodTagsService';
 import { ScaledEntry } from '../../state/portion';
 import {
   activeCalorieGoal,
@@ -49,7 +47,6 @@ import {
   useCommonFoodsStore,
 } from '../../state/useCommonFoodsStore';
 import { tagsForEntry, useFoodTagsStore } from '../../state/useFoodTagsStore';
-import { useHabitsStore } from '../../state/useHabitsStore';
 import { useHealthStore } from '../../state/useHealthStore';
 import { useTheme } from '../../theme/theme';
 import {
@@ -61,7 +58,7 @@ import {
   MacroFields,
 } from './foodFormParts';
 import { FoodEditSheet } from './FoodEditSheet';
-import { MealLogger } from './MealLogger';
+import { HydrationCard } from './HydrationCard';
 import { PortionSheet } from './PortionSheet';
 
 function grp(n: number): string {
@@ -81,18 +78,6 @@ const MACRO_PLAN = [
   { name: 'FAT', kind: 'max' as const, key: 'fatG', target: 62 },
   { name: 'CARBS', kind: 'flat' as const, key: 'carbsG', target: 210 },
 ] as const;
-
-/**
- * Daily water reference (ml) for the Water bar. Like MACRO_PLAN this is a fixed
- * plan value, not a user goal: ~2.5 L is the common adult guideline for drinks.
- * It only scales the bar; the number shown is always the real logged total.
- */
-const WATER_TARGET_ML = 2500;
-
-/** ml → "1.25 L" (two decimals max, trailing zeros dropped). */
-function litres(ml: number): string {
-  return `${Number((ml / 1000).toFixed(2))} L`;
-}
 
 function titleCase(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
@@ -235,11 +220,11 @@ const PORTION_UNITS = [
 const CHIP_LIMIT = 8;
 
 /**
- * Food tab (ADR-007 "friendly" layout, Food artboard): a "kcal left" ring with
+ * Food tab (ADR-007 "friendly" layout, Food artboard): hydration on top
+ * ({@link HydrationCard}, read-only from the OS store), a "kcal left" ring with
  * eaten / burned / net chips, the two primary actions (Log food, Log a meal)
  * whose forms open inline right below them, Quick add tiles for saved foods
- * (tap → portion, hold → edit), Macros, Water (read-only, from the OS store)
- * and today's log with per-entry delete.
+ * (tap → portion, hold → edit), Macros, and today's log (tap → adjust).
  *
  * The artboards draw Log food, Log a meal and the portion picker as their own
  * screens/sheets; they stay inline here so no routes were added and every flow
@@ -250,10 +235,7 @@ export function NutritionScreen({ navigation }: ScreenProps) {
   const t = useTheme();
   const c = t.colors;
   const snap = useHealthStore(s => s.snapshot);
-  const logFoodEntry = useHealthStore(s => s.logFoodEntry);
   const logFood = useHealthStore(s => s.logFood);
-  const refreshHealth = useHealthStore(s => s.refresh);
-  const waterMl = snap.waterTodayMl;
   const commonFoods = useCommonFoodsStore(s => s.foods);
   const [removingId, setRemovingId] = React.useState<string | null>(null);
 
@@ -294,7 +276,6 @@ export function NutritionScreen({ navigation }: ScreenProps) {
     setEditingMeal(null);
     return null;
   };
-  const habits = useHabitsStore(s => s.habits);
 
   // The active calorie goal drives the hero + target quad here; setting/editing
   // goals lives on the Setup tab (CalorieGoalSection).
@@ -345,19 +326,6 @@ export function NutritionScreen({ navigation }: ScreenProps) {
     };
   }
 
-  // Add-food form.
-  const [adding, setAdding] = React.useState(false);
-  // Meal builder: group several foods under one meal type (see MealLogger).
-  const [mealOpen, setMealOpen] = React.useState(false);
-  const [name, setName] = React.useState('');
-  const [kcal, setKcal] = React.useState('');
-  const [protein, setProtein] = React.useState('');
-  const [carbs, setCarbs] = React.useState('');
-  const [fat, setFat] = React.useState('');
-  /** Tags on the entry being typed — junk / alcohol / sweets. The food habits
-   * read these, so tagging is how "no junk food" ever breaks. */
-  const [tags, setTags] = React.useState<FoodTagKey[]>([]);
-  const [busy, setBusy] = React.useState(false);
   const [commonBusy, setCommonBusy] = React.useState(false);
   // The common food whose portion is being chosen for a quick log (null = none).
   const [portionFood, setPortionFood] = React.useState<CommonFood | null>(null);
@@ -460,47 +428,6 @@ export function NutritionScreen({ navigation }: ScreenProps) {
     resetCommonForm();
   };
 
-  const submit = async () => {
-    const kcalNum = parseInt(kcal, 10);
-    if (!name.trim() || !Number.isFinite(kcalNum) || kcalNum <= 0) {
-      Alert.alert('Add food', 'Enter a name and a calorie amount.');
-      return;
-    }
-    const entry: FoodEntryInput = { name: name.trim(), kcal: kcalNum };
-    const p = parseMacro(protein);
-    const cb = parseMacro(carbs);
-    const f = parseMacro(fat);
-    if (p != null) entry.proteinG = p;
-    if (cb != null) entry.carbsG = cb;
-    if (f != null) entry.fatG = f;
-    setBusy(true);
-    // Go through logFoodEntry (not logFood) so we get the platform's record id
-    // back and can hang the tags off that exact entry.
-    const res = await logFoodEntry(entry);
-    if (res.ok && tags.length > 0) {
-      await tagLoggedFood({
-        name: entry.name,
-        tags,
-        entryId: res.name ?? null,
-      }).catch(err => console.warn('Failed to save food tags', err));
-    }
-    setBusy(false);
-    if (res.ok) {
-      setName('');
-      setKcal('');
-      setProtein('');
-      setCarbs('');
-      setFat('');
-      setTags([]);
-      setAdding(false);
-    } else {
-      Alert.alert(
-        'Not logged',
-        `Connect ${healthSourceName()} in Me to save food entries.`,
-      );
-    }
-  };
-
   // Quick-log a common food at a chosen portion (opened via the chip → slider).
   const logPortion = React.useCallback(
     async (food: CommonFood, entry: ScaledEntry) => {
@@ -570,30 +497,6 @@ export function NutritionScreen({ navigation }: ScreenProps) {
     });
   };
 
-  // Naming the habits a tag is about to break is the whole point of the note —
-  // it turns an abstract label into a consequence the user can weigh.
-  const breaks = React.useMemo(
-    () =>
-      tags.length === 0
-        ? []
-        : habits
-            .filter(
-              h => h.type === 'food' && h.auto && h.tag && tags.includes(h.tag),
-            )
-            .map(h => h.name),
-    [habits, tags],
-  );
-  const tagNote = breaks.length
-    ? `Heads up: this breaks today for “${breaks.join('”, “')}”.`
-    : tags.length
-      ? 'Tagged — none of your habits watch this one.'
-      : 'Tag junk food, alcohol or sweets so your food habits can count them.';
-
-  const kcalNum = parseInt(kcal, 10);
-  const logLabel =
-    Number.isFinite(kcalNum) && kcalNum > 0
-      ? `Log ${kcalNum} kcal`
-      : 'Log food';
   const seeAll = commonFoods.length > CHIP_LIMIT;
   const tiles = commonFoods.slice(0, CHIP_LIMIT);
   // Two-up grid as explicit rows: a wrapped flex row can't size an odd last
@@ -612,6 +515,10 @@ export function NutritionScreen({ navigation }: ScreenProps) {
         <Text style={pageTitleStyle(c.ink)}>Food</Text>
         <Pill spec={{ text: goalPill, bg: c.soft, textColor: c.mut }} />
       </View>
+
+      {/* ── Hydration: today's water toward the target (water habit's, if
+          any) — at the top so it's seen at a glance with the calories. ──── */}
+      <HydrationCard navigation={navigation} />
 
       {/* ── Calories left: ring + eaten / burned / net ────────────────── */}
       <View style={[chunky(c), styles.heroCard]}>
@@ -634,159 +541,25 @@ export function NutritionScreen({ navigation }: ScreenProps) {
       </View>
 
       {/* ── Primary actions ───────────────────────────────────────────── */}
-      {/* Each toggles its inline form below; the label flips to Cancel while
-          open, the accessibility label stays put. */}
+      {/* Each opens its own full screen (LogFood / MealLogger artboards). */}
       <View style={styles.actions}>
         <BriefButton
-          label={adding ? 'Cancel' : '+ Log food'}
+          label="+ Log food"
           accessibilityLabel="Log food"
-          onPress={() => setAdding(a => !a)}
-          kind={adding ? 'outline' : 'solid'}
+          onPress={() => navigation.navigate('LogFood')}
           tone="food"
           fontSize={17}
           style={styles.action}
         />
         <BriefButton
-          label={mealOpen ? 'Cancel' : 'Log a meal'}
+          label="Log a meal"
           accessibilityLabel="Log a meal"
-          onPress={() => setMealOpen(o => !o)}
+          onPress={() => navigation.navigate('MealLog')}
           kind="outline"
           fontSize={17}
           style={styles.action}
         />
       </View>
-
-      {/* ── Log food (inline form, LogFood artboard) ──────────────────── */}
-      {adding ? (
-        <View style={[chunky(c), styles.formCard]}>
-          <View style={formStyles.head}>
-            <Text style={cardTitleStyle(c.ink)}>Log food</Text>
-            <CloseButton
-              onPress={() => setAdding(false)}
-              accessibilityLabel="Close log food form"
-            />
-          </View>
-
-          <Pressable
-            onPress={() => navigation.navigate('Coach', { intent: 'food' })}
-            accessibilityRole="button"
-            accessibilityLabel="Tell the coach what you ate"
-            style={[styles.coach, { backgroundColor: c.accTint }]}
-          >
-            <View style={[styles.coachIcon, { backgroundColor: c.accSolid }]}>
-              <Icon name="sparkles" size={20} color={c.onAccent} />
-            </View>
-            <View style={styles.coachText}>
-              <Text style={S(900, 16, { color: c.ink })}>
-                Just tell the coach
-              </Text>
-              <Text style={S(700, 14, { lh: 19, color: c.mut })}>
-                “Two eggs and toast” — it fills in the numbers
-              </Text>
-            </View>
-          </Pressable>
-
-          <View style={formStyles.group}>
-            <FieldLabel>What did you eat?</FieldLabel>
-            <TextInput
-              value={name}
-              onChangeText={setName}
-              placeholder="Food name"
-              placeholderTextColor={c.fnt}
-              accessibilityLabel="Food name"
-              style={fieldStyle(c, 18)}
-            />
-          </View>
-          <View style={formStyles.group}>
-            <FieldLabel>Calories</FieldLabel>
-            <View style={styles.kcalRow}>
-              <TextInput
-                value={kcal}
-                onChangeText={setKcal}
-                placeholder="kcal"
-                placeholderTextColor={c.fnt}
-                keyboardType="number-pad"
-                accessibilityLabel="Calories"
-                style={[fieldStyle(c, 26), styles.kcalInput]}
-              />
-              <Text style={S(900, 18, { color: c.mut })}>kcal</Text>
-            </View>
-          </View>
-          <MacroFields
-            protein={protein}
-            carbs={carbs}
-            fat={fat}
-            onProtein={setProtein}
-            onCarbs={setCarbs}
-            onFat={setFat}
-          />
-
-          {/* Tag it if it was junk, alcohol or sweets — the food habits read
-              these, and nothing else in the app does. */}
-          <View style={formStyles.group}>
-            <FieldLabel>Was it a treat?</FieldLabel>
-            <View style={formStyles.tileRow}>
-              {FOOD_TAGS.map(tag => (
-                <ChoiceTile
-                  key={tag.key}
-                  label={titleCase(tag.label)}
-                  on={tags.includes(tag.key)}
-                  onPress={() =>
-                    setTags(cur =>
-                      cur.includes(tag.key)
-                        ? cur.filter(x => x !== tag.key)
-                        : [...cur, tag.key],
-                    )
-                  }
-                  role="checkbox"
-                  // The stored uppercase label, unchanged: tests and the
-                  // habit editor both refer to tags by it.
-                  accessibilityLabel={tag.label}
-                  tone="red"
-                />
-              ))}
-            </View>
-            <View
-              style={[
-                styles.note,
-                { backgroundColor: breaks.length ? c.redTint : c.soft },
-              ]}
-            >
-              <Text
-                style={S(800, 14, {
-                  lh: 19,
-                  color: breaks.length ? c.red : c.mut,
-                })}
-              >
-                {tagNote}
-              </Text>
-            </View>
-          </View>
-
-          <BriefButton
-            label={logLabel}
-            accessibilityLabel="Save food entry"
-            onPress={submit}
-            disabled={busy}
-            tone="food"
-            fontSize={18}
-          />
-        </View>
-      ) : null}
-
-      {/* ── Log a meal (inline, MealLogger artboard) ──────────────────── */}
-      {mealOpen ? (
-        <View style={[chunky(c), styles.formCard]}>
-          <View style={formStyles.head}>
-            <Text style={cardTitleStyle(c.ink)}>Log a meal</Text>
-            <CloseButton
-              onPress={() => setMealOpen(false)}
-              accessibilityLabel="Close meal logger"
-            />
-          </View>
-          <MealLogger onDone={() => setMealOpen(false)} />
-        </View>
-      ) : null}
 
       {/* ── Quick add (common foods) ──────────────────────────────────── */}
       <View style={styles.sectionHead}>
@@ -1046,65 +819,6 @@ export function NutritionScreen({ navigation }: ScreenProps) {
         })}
       </Card>
 
-      {/* ── Water ─────────────────────────────────────────────────────── */}
-      {/* Read-only: water is logged in the user's tracker app and read back
-          from the OS store. Nothing logged renders "—", never a fake 0. */}
-      <View style={[chunky(c), styles.water, { backgroundColor: c.waterTint }]}>
-        <View
-          style={[styles.glass, { borderColor: c.water }]}
-          accessible={false}
-        >
-          <View
-            style={[
-              styles.glassFill,
-              {
-                height: `${waterMl != null ? Math.min(1, waterMl / WATER_TARGET_ML) * 100 : 0}%`,
-                backgroundColor: c.water,
-              },
-            ]}
-          />
-        </View>
-        <View style={styles.waterText}>
-          <Text style={cardTitleStyle(c.ink)}>Water</Text>
-          <Text style={S(800, 16, { color: c.waterText })}>
-            <Text style={S(900, 26, { lh: 32, color: c.ink })}>
-              {waterMl != null ? litres(waterMl) : '—'}
-            </Text>{' '}
-            of {litres(WATER_TARGET_ML)}
-          </Text>
-          {waterMl != null ? (
-            <Text style={S(700, 14, { lh: 19, color: c.mut })}>
-              {waterMl < WATER_TARGET_ML
-                ? `${litres(WATER_TARGET_ML - waterMl)} to go`
-                : 'Reached for today'}{' '}
-              · from {healthSourceName()}
-            </Text>
-          ) : (
-            <>
-              <Text style={S(700, 14, { lh: 19, color: c.mut })}>
-                Nothing logged today. Water comes from {healthSourceName()} —
-                log it in your water tracker.
-              </Text>
-              {/* Users who connected before water was requested don't hold the
-                  read grant yet; re-running the sheet asks only for what's
-                  missing, so this is how they opt in without disconnecting. */}
-              <Pressable
-                onPress={async () => {
-                  if (await connectHealthSource()) await refreshHealth();
-                }}
-                accessibilityRole="button"
-                accessibilityLabel="Allow water access"
-                style={styles.waterLink}
-              >
-                <Text style={S(900, 15, { color: c.waterText })}>
-                  Allow water access →
-                </Text>
-              </Pressable>
-            </>
-          )}
-        </View>
-      </View>
-
       {/* ── Eaten today ───────────────────────────────────────────────── */}
       <View style={styles.sectionHead}>
         <Text style={S(900, 22, { lh: 28, color: c.ink })}>Eaten today</Text>
@@ -1214,26 +928,10 @@ const styles = StyleSheet.create({
   action: { flex: 1, minHeight: 56, paddingVertical: 0 },
   formCard: { marginTop: 14, padding: 18, gap: 18 },
   cfCard: { marginTop: 12 },
-  coach: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    padding: 14,
-    borderRadius: 18,
-  },
-  coachIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  coachText: { flex: 1, minWidth: 0 },
   kcalRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   kcalInput: { flex: 1, minWidth: 0 },
   sizeInput: { width: 96 },
   shrink: { flex: 1, flexShrink: 1 },
-  note: { paddingVertical: 12, paddingHorizontal: 14, borderRadius: 14 },
   deleteRow: {
     alignSelf: 'center',
     minHeight: 44,
@@ -1255,28 +953,6 @@ const styles = StyleSheet.create({
   tileHint: { marginTop: 10 },
   empty: { marginTop: 10 },
   macroGap: { marginTop: 16 },
-  water: {
-    marginTop: 14,
-    padding: 18,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 16,
-  },
-  glass: {
-    width: 56,
-    height: 84,
-    borderWidth: 3,
-    borderTopWidth: 0,
-    borderTopLeftRadius: 4,
-    borderTopRightRadius: 4,
-    borderBottomLeftRadius: 16,
-    borderBottomRightRadius: 16,
-    overflow: 'hidden',
-    justifyContent: 'flex-end',
-  },
-  glassFill: { width: '100%' },
-  waterText: { flex: 1, minWidth: 0, gap: 2 },
-  waterLink: { minHeight: 44, justifyContent: 'center' },
   log: { marginTop: 12, overflow: 'hidden' },
   logEmpty: { paddingVertical: 18, paddingHorizontal: 16 },
   meal: {

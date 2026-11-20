@@ -84,13 +84,9 @@ function Status({ text, color }: { text: string; color: string }) {
 
 // ── Today ────────────────────────────────────────────────────────────────────
 export const TodayTitle = () => <Eyebrow text={dateLabel()} />;
-export function TodayRight() {
-  const c = useBand();
-  const live = useHealthStore(s => s.snapshot.live);
-  return (
-    <Status text={live ? 'Live' : 'No data'} color={live ? c.acc : c.fnt} />
-  );
-}
+// No header status on Today: the greeting row's pill already says Live /
+// Updating / No data (and knows about stale cached data, which this didn't), so
+// a second "Live" up here only repeated it.
 
 // ── Fuel ─────────────────────────────────────────────────────────────────────
 export const FuelTitle = () => <Eyebrow text={dateLabel()} />;

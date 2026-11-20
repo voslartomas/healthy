@@ -17,6 +17,7 @@ import {
   useCommonFoodsStore,
 } from '../../state/useCommonFoodsStore';
 import { useTheme } from '../../theme/theme';
+import { PinnedFooterLayout } from './PinnedFooterLayout';
 import {
   ChoiceTile,
   FieldLabel,
@@ -62,9 +63,11 @@ function parseMacro(s: string): number | undefined {
  *
  * Laid out to the friendly MealLogger artboard (ADR-007): meal-type tiles, the
  * saved foods as chunky "+ name" chips, a type-it row with an orange add slab,
- * the draft in its own outlined list, and one orange slab that logs it all. The
- * host renders the title + close; this is the body. The artboard drops the
- * per-item macro fields; they are kept because typed items carried them before.
+ * the draft in its own outlined list, and one orange slab that logs it all —
+ * pinned at the bottom of the screen ({@link PinnedFooterLayout}). It is the
+ * whole body of the "Log a meal" screen (the stack header renders the title +
+ * close). The artboard drops the per-item macro fields; they are kept because
+ * typed items carried them before.
  */
 export function MealLogger({ onDone }: { onDone?: () => void }) {
   const t = useTheme();
@@ -143,7 +146,23 @@ export function MealLogger({ onDone }: { onDone?: () => void }) {
   const label = mealType.toLowerCase();
 
   return (
-    <View style={styles.wrap}>
+    <PinnedFooterLayout
+      footer={
+        // The disabled state says what's missing instead of just greying out
+        // the label.
+        <BriefButton
+          label={
+            items.length > 0
+              ? `Log ${label} · ${items.length} item${items.length > 1 ? 's' : ''} · ${totalKcal} kcal`
+              : 'Add something first'
+          }
+          accessibilityLabel={`Log ${titleCase(mealType)}`}
+          onPress={submit}
+          disabled={busy || items.length === 0}
+          tone="food"
+        />
+      }
+    >
       {/* Meal-type selector. */}
       <View style={formStyles.tileRow}>
         {MEAL_TYPES.map(mt => (
@@ -287,27 +306,11 @@ export function MealLogger({ onDone }: { onDone?: () => void }) {
           )}
         </View>
       </View>
-
-      {/* Log the whole meal. The disabled state says what's missing instead of
-          just greying out the label. */}
-      <BriefButton
-        label={
-          items.length > 0
-            ? `Log ${label} · ${items.length} item${items.length > 1 ? 's' : ''} · ${totalKcal} kcal`
-            : 'Add something first'
-        }
-        accessibilityLabel={`Log ${titleCase(mealType)}`}
-        onPress={submit}
-        disabled={busy || items.length === 0}
-        tone="food"
-        style={styles.logBtn}
-      />
-    </View>
+    </PinnedFooterLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  wrap: { marginTop: 16, gap: 18 },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   chip: {
     flexDirection: 'row',
@@ -349,5 +352,4 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   empty: { paddingVertical: 18, paddingHorizontal: 16 },
-  logBtn: { marginTop: 4 },
 });

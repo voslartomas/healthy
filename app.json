@@ -2,7 +2,7 @@
   "expo": {
     "name": "Healthy",
     "slug": "healthapp",
-    "version": "1.1.0",
+    "version": "1.2.0",
     "orientation": "portrait",
     "scheme": "healthapp",
     "userInterfaceStyle": "automatic",
@@ -30,7 +30,8 @@
       "package": "cz.healthy",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
-        "backgroundColor": "#FFFFFF"
+        "monochromeImage": "./assets/adaptive-icon-mono.png",
+        "backgroundColor": "#EAF1FE"
       },
       "permissions": [
         "android.permission.RECORD_AUDIO",
@@ -87,6 +88,28 @@
           "dark": {
             "backgroundColor": "#0B1220"
           }
+        }
+      ],
+      [
+        "react-native-android-widget",
+        {
+          "fonts": [
+            "./node_modules/@expo-google-fonts/nunito/800ExtraBold/Nunito_800ExtraBold.ttf",
+            "./node_modules/@expo-google-fonts/nunito/900Black/Nunito_900Black.ttf"
+          ],
+          "widgets": [
+            {
+              "name": "Healthy",
+              "label": "Healthy",
+              "description": "Water, food and recovery for today. Tap to switch.",
+              "minWidth": "250dp",
+              "minHeight": "110dp",
+              "targetCellWidth": 4,
+              "targetCellHeight": 2,
+              "resizeMode": "horizontal|vertical",
+              "updatePeriodMillis": 1800000
+            }
+          ]
         }
       ]
     ],

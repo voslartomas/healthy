@@ -44,7 +44,10 @@ export type IconName =
   | 'droplet'
   | 'flame'
   | 'sparkles'
-  | 'star';
+  | 'star'
+  | 'thermometer'
+  | 'bandage'
+  | 'journal';
 
 interface IconProps {
   name: IconName;
@@ -272,6 +275,28 @@ function renderIcon(
       return <Path d="M13 2 3 14h9l-1 8 10-12h-9l1-8z" {...s} />;
     case 'bars':
       return <Path d="M4 20h16M7 20V10M12 20V4M17 20v-7" {...s} />;
+    // Journal: sick / injured tiles and the journal card's title glyph.
+    case 'thermometer':
+      return (
+        <Path
+          d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"
+          {...s}
+        />
+      );
+    case 'bandage':
+      return (
+        <Path
+          d="M10.5 20.5l10-10a4.95 4.95 0 1 0-7-7l-10 10a4.95 4.95 0 1 0 7 7zM8.5 8.5l7 7"
+          {...s}
+        />
+      );
+    case 'journal':
+      return (
+        <Path
+          d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5zM4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"
+          {...s}
+        />
+      );
     case 'droplet':
       return <Path d="M12 2.7 6.3 9a7 7 0 1 0 11.4 0z" {...s} />;
     case 'flame':

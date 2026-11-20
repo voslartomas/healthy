@@ -78,6 +78,7 @@ async function generateBrief(): Promise<string> {
     languageDirective(useAppStore.getState().coachLanguage),
     'Using ONLY the data below, write ONE very short line (max ~8 words) on how they are doing today, with a light nudge if useful.',
     'Reference one real number (e.g. recovery %, sleep, protein, or steps). No lists, no markdown, no heading, no trailing period — just the short line.',
+    'If the journal says they are sick or injured today, lead with rest or recovery instead of training advice.',
     'Example style: "Recovery solid at 78% — room to add load"',
     '',
     "=== The user's current health data ===",
