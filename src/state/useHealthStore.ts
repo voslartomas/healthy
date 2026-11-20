@@ -81,11 +81,29 @@ const PENDING_SOURCE = 'local-pending';
  * scale they were binned on; the reader checks it and recomputes everything if
  * the scale has since moved (see `ZoneReuse`).
  */
-function zoneReuse(cached: RawHealthData | null): ZoneReuse | undefined {
+export function zoneReuse(cached: RawHealthData | null): ZoneReuse | undefined {
   if (!cached || cached.exercise.length === 0) return undefined;
   const zones = new Map<string, CardioZones | null>();
   for (const e of cached.exercise) zones.set(exerciseKey(e), e.hrZones ?? null);
   return { zones, hrMax: cached.hrMax ?? null };
+}
+
+/**
+ * Splice a LIGHT read onto the cached deep history: the store's fast refresh,
+ * shared with the widget's background refresh (src/widget/widgetRefresh.ts)
+ * so both derive the same numbers from the same reads.
+ */
+export function spliceRecent(
+  cached: RawHealthData,
+  recent: RawHealthData,
+  now: number,
+): RawHealthData {
+  return mergeRaw(
+    cached,
+    recent,
+    now - RECENT_SPLICE_DAYS * DAY_MS,
+    now - RECENT_METRICS_SPLICE_DAYS * DAY_MS,
+  );
 }
 
 /**
@@ -351,11 +369,10 @@ export const useHealthStore = create<HealthState>((set, get) => {
             zoneReuse(cachedRaw),
           );
           if (recent) {
-            const merged = mergeRaw(
+            const merged = spliceRecent(
               get().cachedRaw ?? cachedRaw,
               recent,
-              now - RECENT_SPLICE_DAYS * DAY_MS,
-              now - RECENT_METRICS_SPLICE_DAYS * DAY_MS,
+              now,
             );
             // Keep the spliced result as the new base. Without this every light
             // refresh re-spliced onto the same up-to-12h-old cache and threw its

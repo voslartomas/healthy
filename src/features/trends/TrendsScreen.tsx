@@ -26,6 +26,7 @@ import { goalWeekly, useGoalsStore } from '../../state/useGoalsStore';
 import {
   buildHabitViews,
   sleepOnsetsFromSnapshot,
+  waterFromSnapshot,
   useHabitsStore,
 } from '../../state/useHabitsStore';
 import { useHealthStore } from '../../state/useHealthStore';
@@ -450,6 +451,7 @@ function GoalsHistorySection() {
   const habitDays = useHabitsStore(s => s.days);
   const tagRows = useFoodTagsStore(s => s.rows);
   const sleep = useHealthStore(s => s.snapshot.sleep);
+  const waterDays = useHealthStore(s => s.snapshot.waterDays);
   // A grid of weeks only needs to notice the day turning over.
   const now = useNow(5 * 60_000);
 
@@ -506,6 +508,7 @@ function GoalsHistorySection() {
       days: habitDays,
       tagRows,
       sleepOnset: sleepOnsetsFromSnapshot(useHealthStore.getState().snapshot),
+      waterMl: waterFromSnapshot(useHealthStore.getState().snapshot, now),
       now,
     });
     return views.map(v => {
@@ -531,7 +534,7 @@ function GoalsHistorySection() {
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [habits, habitDays, tagRows, sleep, now]);
+  }, [habits, habitDays, tagRows, sleep, waterDays, now]);
 
   // A week is perfect when every row that HAS data for it was met. Weeks no row
   // can speak for stay blank rather than claiming a win.

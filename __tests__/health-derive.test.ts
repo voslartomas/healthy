@@ -15,6 +15,7 @@ import {
   startOfLocalDay,
   stepsInWindow,
   trackedFromExercise,
+  waterByDay,
   waterToday,
   weeklyGoalHistory,
   weekStartMs,
@@ -924,5 +925,36 @@ describe('waterToday (hydration)', () => {
     expect(deriveSnapshot(merged, NOW).waterTodayMl).toBe(330);
     // Legacy raw (no `water`) derives cleanly to "no data".
     expect(deriveSnapshot(emptyRaw(), NOW).waterTodayMl).toBeNull();
+  });
+});
+
+describe("waterByDay (a water habit's history)", () => {
+  const sod = startOfLocalDay(NOW);
+  const drink = (start: number, ml: number, source = 'com.water.app') => ({
+    ml,
+    start,
+    end: start + 60_000,
+    source,
+  });
+
+  it('totals each local day, oldest first, and today matches waterToday', () => {
+    const records = [
+      drink(sod - DAY + 3_600_000, 1000),
+      drink(sod - DAY + 5 * 3_600_000, 1500),
+      drink(sod + 1000, 250),
+      drink(sod + 2 * 3_600_000, 500),
+    ];
+    expect(waterByDay(records, NOW)).toEqual([
+      { day: sod - DAY, ml: 2500 },
+      { day: sod, ml: 750 },
+    ]);
+    expect(waterByDay(records, NOW).at(-1)?.ml).toBe(waterToday(records, NOW));
+  });
+
+  it('leaves days with nothing logged out, never as 0', () => {
+    expect(waterByDay([drink(sod - 3 * DAY, 400)], NOW)).toEqual([
+      { day: sod - 3 * DAY, ml: 400 },
+    ]);
+    expect(waterByDay(undefined, NOW)).toEqual([]);
   });
 });

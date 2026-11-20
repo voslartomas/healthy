@@ -8,6 +8,9 @@ import { CoachOverlay } from '../../features/coach/CoachOverlay';
 import { CoachScreen } from '../../features/coach/CoachScreen';
 import { GoalDefineScreen } from '../../features/goals/GoalDefineScreen';
 import { HabitDefineScreen } from '../../features/habits/HabitDefineScreen';
+import { JournalScreen } from '../../features/journal/JournalScreen';
+import { LogFoodScreen } from '../../features/nutrition/LogFoodScreen';
+import { MealLogScreen } from '../../features/nutrition/MealLogScreen';
 import { FoodsLibraryScreen } from '../../features/nutrition/FoodsLibraryScreen';
 import { RecoveryScreen } from '../../features/recovery/RecoveryScreen';
 import { SleepScreen } from '../../features/sleep/SleepScreen';
@@ -141,6 +144,35 @@ export function RootStack() {
           options={({ navigation, route }) => ({
             presentation: 'modal',
             title: route.params?.habitId ? 'Edit habit' : 'New habit',
+            headerRight: () => <HeaderClose onPress={navigation.goBack} />,
+          })}
+        />
+        {/* Full-screen food logging (LogFood / MealLogger artboards) — they
+            used to unfold inline under the Food tab's buttons. */}
+        <Stack.Screen
+          name="LogFood"
+          component={asScreen(LogFoodScreen)}
+          options={({ navigation }) => ({
+            presentation: 'modal',
+            title: 'Log food',
+            headerRight: () => <HeaderClose onPress={navigation.goBack} />,
+          })}
+        />
+        <Stack.Screen
+          name="MealLog"
+          component={asScreen(MealLogScreen)}
+          options={({ navigation }) => ({
+            presentation: 'modal',
+            title: 'Log a meal',
+            headerRight: () => <HeaderClose onPress={navigation.goBack} />,
+          })}
+        />
+        <Stack.Screen
+          name="Journal"
+          component={asScreen(JournalScreen)}
+          options={({ navigation }) => ({
+            presentation: 'modal',
+            title: 'Journal',
             headerRight: () => <HeaderClose onPress={navigation.goBack} />,
           })}
         />

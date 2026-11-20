@@ -47,6 +47,7 @@ export const EMPTY_SNAPSHOT: HealthSnapshot = {
   readiness: null,
   nutrition: null,
   waterTodayMl: null,
+  waterDays: [],
   energyBurnedToday: 0,
   activities: [],
   cardio: {
@@ -97,6 +98,19 @@ export function disconnectHealthSource(): Promise<void> {
 /** Whether we currently hold the read permissions needed to produce data. */
 export function isHealthSourceConnected(): Promise<boolean> {
   return activeHealthSource().isConnected();
+}
+
+/** Whether health reads work with the app in the background (the Android
+ * widget's live refresh, ADR-010). False where the source has no such grant. */
+export async function canReadHealthInBackground(): Promise<boolean> {
+  const source = activeHealthSource();
+  return (await source.canReadInBackground?.()) ?? false;
+}
+
+/** Ask the OS for background health reads; true once granted. */
+export async function requestHealthBackgroundRead(): Promise<boolean> {
+  const source = activeHealthSource();
+  return (await source.requestBackgroundRead?.()) ?? false;
 }
 
 /** One workout's heart-rate samples from the active source, oldest first; null

@@ -3,13 +3,15 @@ import { fireEvent, screen } from '@testing-library/react-native';
 
 import { mockNav, renderWithProviders } from '../jest/renderWithProviders';
 import { DashboardScreen } from '../src/features/dashboard/DashboardScreen';
-import { EMPTY_SNAPSHOT } from '../src/health';
+import { EMPTY_SNAPSHOT, startOfLocalDay } from '../src/health';
 import { readiness } from '../src/health/derive';
 import { useHealthStore } from '../src/state/useHealthStore';
+import { useJournalStore } from '../src/state/useJournalStore';
 
 describe('DashboardScreen', () => {
   afterEach(() => {
     useHealthStore.setState({ snapshot: EMPTY_SNAPSHOT });
+    useJournalStore.setState({ entries: [] });
   });
 
   it('renders the brief cards and the recovery hero', async () => {
@@ -48,6 +50,35 @@ describe('DashboardScreen', () => {
     expect(screen.getByText('62')).toBeOnTheScreen(); // HRV chip
     expect(screen.getByText('54')).toBeOnTheScreen(); // resting HR chip
     expect(screen.getByText('▲7')).toBeOnTheScreen(); // HRV above baseline
+  });
+
+  it('puts a journalled sickness ahead of the score’s advice', async () => {
+    const hrv = { value: 62, baseline: 55, delta: 7 };
+    const rhr = { value: 54, baseline: 56, delta: -2 };
+    useHealthStore.setState({
+      snapshot: {
+        ...EMPTY_SNAPSHOT,
+        readiness: readiness(hrv, rhr, { performancePct: 96, hours: 7.7 }),
+      },
+    });
+    useJournalStore.setState({
+      entries: [
+        {
+          day: startOfLocalDay(Date.now()),
+          tags: ['sick'],
+          ended: [],
+          note: '',
+          updatedAt: 0,
+        },
+      ],
+    });
+    await renderWithProviders(<DashboardScreen navigation={mockNav()} />);
+    // The score is left alone (ADR-004); only the suggestion changes.
+    expect(screen.getByText('Recovered')).toBeOnTheScreen();
+    expect(
+      screen.getByText('You logged sick — rest comes first'),
+    ).toBeOnTheScreen();
+    expect(screen.queryByText('Ready to add load today')).toBeNull();
   });
 
   it('deep-links into the recovery detail from the hero', async () => {

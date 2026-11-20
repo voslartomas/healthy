@@ -1357,6 +1357,33 @@ export function waterToday(
   return Math.round(total);
 }
 
+/**
+ * Water drunk per local day (ml), oldest first — every day up to `now` with
+ * any hydration logged. Each day is de-duplicated exactly like
+ * {@link waterToday} (overlapping glasses from two apps count once), so today's
+ * entry always equals `waterTodayMl`. Days with nothing logged are left out:
+ * "no data" must stay distinguishable from "drank nothing".
+ */
+export function waterByDay(
+  records: HydrationRecord[] | undefined,
+  now: number,
+): { day: number; ml: number }[] {
+  const byDay = new Map<number, HydrationRecord[]>();
+  for (const r of records ?? []) {
+    if (r.ml <= 0 || r.start > now) continue;
+    const day = startOfLocalDay(r.start);
+    const list = byDay.get(day);
+    if (list) list.push(r);
+    else byDay.set(day, [r]);
+  }
+  return [...byDay.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([day, list]) => ({
+      day,
+      ml: Math.round(dedupeIntervals(list).reduce((sum, r) => sum + r.ml, 0)),
+    }));
+}
+
 /** How many days of energy-balance history we surface (bounded by the
  * total-calories rollup's 14-day window). */
 export const ADHERENCE_DAYS = 14;
@@ -1874,6 +1901,7 @@ export function deriveSnapshot(
     readiness: readiness(hrv, restingHr, sleep),
     nutrition: nutritionToday(raw.nutrition, now),
     waterTodayMl: waterToday(raw.water, now),
+    waterDays: waterByDay(raw.water, now),
     // Prefer Health Connect's own cross-source aggregate (matches the Google
     // Health UI exactly); fall back to the single-source record computation on
     // platforms/reads without it (iOS/HealthKit, tests, aggregate failure).

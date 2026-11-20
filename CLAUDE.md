@@ -313,6 +313,8 @@ architectural change.
 | 006 | Daily habits                                      | Current                |
 | 007 | The "friendly" redesign (design source of truth)  | Current — rolling out  |
 | 008 | Coach on the OS model (Gemini Nano / Apple Intel.) | Current                |
+| 009 | Journal (daily tags, carried sick/injured)        | Current                |
+| 010 | Android home-screen widget                        | Current                |
 
 ADR-005 no longer reflects reality: the app was moved back to on-device Health
 Connect / HealthKit (see `src/health/HealthSource.ts` and the `user_version` 2 and

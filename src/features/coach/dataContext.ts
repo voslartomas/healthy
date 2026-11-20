@@ -14,7 +14,9 @@ import {
   useCalorieGoalsStore,
 } from '../../state/useCalorieGoalsStore';
 import { goalCurrent, useGoalsStore } from '../../state/useGoalsStore';
+import { journalContextLines } from '../../state/journal';
 import { useHealthStore } from '../../state/useHealthStore';
+import { useJournalStore } from '../../state/useJournalStore';
 
 function grp(n: number): string {
   return Math.round(n)
@@ -85,6 +87,12 @@ export function buildDataContext(): string {
   if (snap.readiness) {
     lines.push(`Recovery: ${snap.readiness.pct}% — ${snap.readiness.state}.`);
   }
+
+  // What the user journalled (sick, injured, alcohol last night…). Right after
+  // recovery: being sick changes what any of the numbers below should lead to.
+  lines.push(
+    ...journalContextLines(useJournalStore.getState().entries, Date.now()),
+  );
 
   const body: string[] = [];
   if (snap.hrv)

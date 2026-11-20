@@ -21,11 +21,19 @@ import {
   Tone,
 } from '../../components/brief';
 import { Icon } from '../../components/Icon';
-import { HealthSnapshot, healthSourceName } from '../../health';
+import {
+  HealthSnapshot,
+  healthSourceName,
+  startOfLocalDay,
+} from '../../health';
+import { activeConditions } from '../../state/journal';
 import { useHealthStore } from '../../state/useHealthStore';
+import { useJournalStore } from '../../state/useJournalStore';
+import { useNow } from '../../state/useNow';
 import { useTheme } from '../../theme/theme';
 import { WeeklyGoalsCard } from '../goals/WeeklyGoalsCard';
 import { HabitsCard } from '../habits/HabitsCard';
+import { JournalCard } from '../journal/JournalCard';
 import { useDailyBriefStore } from './useDailyBriefStore';
 
 /** Decimal hours → "7h 42m". */
@@ -70,12 +78,33 @@ function greeting(now: Date = new Date()): string {
  *    night yet (the usual state early in the morning — not a setup problem);
  *  - neither: nothing is connected.
  */
-function recoveryCopy(snap: HealthSnapshot): {
+function recoveryCopy(
+  snap: HealthSnapshot,
+  journal: { sick: boolean; injured: boolean } = {
+    sick: false,
+    injured: false,
+  },
+): {
   title: string;
   sub: string;
   tone: Tone;
 } {
   const r = snap.readiness;
+  // A journalled sickness or injury outranks the score's advice: the ring can
+  // read "Recovered" on day one of a cold, and "add load" would be wrong.
+  // The score itself is untouched (ADR-004) — only what we suggest doing.
+  if (r && journal.sick)
+    return {
+      title: r.state,
+      sub: 'You logged sick — rest comes first',
+      tone: r.state === 'Strained' ? 'red' : 'accent',
+    };
+  if (r && journal.injured)
+    return {
+      title: r.state,
+      sub: 'Injured — train around it',
+      tone: r.state === 'Strained' ? 'red' : 'accent',
+    };
   if (r) {
     if (r.state === 'Recovered')
       return {
@@ -248,8 +277,33 @@ export function DashboardScreen({ navigation }: ScreenProps) {
     void ensureBrief();
   }, [ensureBrief, hasNight]);
 
+  const journal = useJournalStore(s => s.entries);
+  const journalReady = useJournalStore(s => s.hydrated);
+  const now = useNow();
+  const conditions = activeConditions(journal, startOfLocalDay(now)).map(
+    x => x.key,
+  );
+  const sick = conditions.includes('sick');
+  const injured = conditions.includes('injured');
+
+  // The brief is written once a day; logging sick (or getting better) changes
+  // what it should say, so rewrite it then — not on every journal tap.
+  const conditionKey = `${sick}|${injured}`;
+  // Starts unset so the journal loading on launch isn't mistaken for a change.
+  const lastConditionKey = React.useRef<string | null>(null);
+  React.useEffect(() => {
+    if (!journalReady) return;
+    if (lastConditionKey.current === null) {
+      lastConditionKey.current = conditionKey;
+      return;
+    }
+    if (lastConditionKey.current === conditionKey) return;
+    lastConditionKey.current = conditionKey;
+    void regenerateBrief();
+  }, [conditionKey, journalReady, regenerateBrief]);
+
   const recoveryPct = snap.readiness?.pct ?? null;
-  const rec = recoveryCopy(snap);
+  const rec = recoveryCopy(snap, { sick, injured });
   const recTone = toneColors(c, rec.tone);
 
   const briefSyncing = briefStatus === 'syncing';
@@ -410,39 +464,44 @@ export function DashboardScreen({ navigation }: ScreenProps) {
             </Text>
           </Pressable>
         ) : null}
+
+        {/* The coach's daily brief, inside the recovery card: the coach's read
+            of these same numbers, right under them (it used to float as a
+            separate chat bubble below the card). */}
+        <View style={[styles.brief, { backgroundColor: c.accTint }]}>
+          <View style={[styles.avatar, { backgroundColor: c.accSolid }]}>
+            <Icon name="sparkles" size={16} color={c.onAccent} />
+          </View>
+          <View style={styles.briefBody}>
+            <View style={styles.bubbleHead}>
+              <Text style={S(900, 13, { color: c.acc })}>YOUR COACH</Text>
+              {briefWorking ? (
+                <ActivityIndicator size="small" color={c.acc} />
+              ) : (
+                <Pressable
+                  onPress={() => void regenerateBrief()}
+                  accessibilityRole="button"
+                  accessibilityLabel="Regenerate today's brief"
+                  hitSlop={10}
+                >
+                  <Text style={S(900, 14, { color: c.acc })}>Refresh</Text>
+                </Pressable>
+              )}
+            </View>
+            <Text
+              style={S(700, 15, {
+                lh: 21,
+                color: briefWorking || !briefText ? c.mut : c.ink,
+              })}
+            >
+              {briefBody}
+            </Text>
+          </View>
+        </View>
       </View>
 
-      {/* ── The coach's daily brief ──────────────────────────────────── */}
-      <View style={styles.brief}>
-        <View style={[styles.avatar, { backgroundColor: c.accSolid }]}>
-          <Icon name="sparkles" size={22} color={c.onAccent} />
-        </View>
-        <View style={[styles.bubble, { backgroundColor: c.accTint }]}>
-          <View style={styles.bubbleHead}>
-            <Text style={S(900, 13, { color: c.acc })}>YOUR COACH</Text>
-            {briefWorking ? (
-              <ActivityIndicator size="small" color={c.acc} />
-            ) : (
-              <Pressable
-                onPress={() => void regenerateBrief()}
-                accessibilityRole="button"
-                accessibilityLabel="Regenerate today's brief"
-                hitSlop={10}
-              >
-                <Text style={S(900, 14, { color: c.acc })}>Refresh</Text>
-              </Pressable>
-            )}
-          </View>
-          <Text
-            style={S(700, 16, {
-              lh: 22,
-              color: briefWorking || !briefText ? c.mut : c.ink,
-            })}
-          >
-            {briefBody}
-          </Text>
-        </View>
-      </View>
+      {/* ── Journal: how today is going (sick, injured, alcohol…) ─────── */}
+      <JournalCard navigation={navigation} />
 
       {/* ── Habits, then the week's goals ────────────────────────────── */}
       <HabitsCard navigation={navigation} />
@@ -563,23 +622,23 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     overflow: 'hidden',
   },
-  brief: { flexDirection: 'row', gap: 12, marginTop: 16 },
+  brief: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+    marginTop: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+  },
   avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  bubble: {
-    flex: 1,
-    minWidth: 0,
-    paddingVertical: 14,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    borderTopLeftRadius: 4,
-    gap: 6,
-  },
+  briefBody: { flex: 1, minWidth: 0, gap: 4 },
   bubbleHead: {
     flexDirection: 'row',
     alignItems: 'center',

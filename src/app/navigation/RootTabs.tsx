@@ -23,7 +23,6 @@ import {
   SetupTitle,
   StrengthRight,
   StrengthTitle,
-  TodayRight,
   TodayTitle,
   TrendsRight,
   TrendsTitle,
@@ -156,7 +155,7 @@ export function RootTabs() {
       <Tab.Screen
         name="Today"
         component={asScreen(DashboardScreen)}
-        options={{ headerTitle: TodayTitle, headerRight: TodayRight }}
+        options={{ headerTitle: TodayTitle }}
       />
       <Tab.Screen
         name="Nutrition"

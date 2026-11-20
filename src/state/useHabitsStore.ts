@@ -118,6 +118,25 @@ export function sleepOnsetsFromSnapshot(
   return onsets;
 }
 
+/**
+ * Water drunk (ml) keyed by local day start, from `snapshot.waterDays` — what a
+ * water habit reads. Falls back to today alone for a snapshot cached by an
+ * earlier build (no `waterDays`), so today's row still works.
+ */
+export function waterFromSnapshot(
+  snapshot: HealthSnapshot,
+  now: number = Date.now(),
+): Map<number, number> {
+  const water = new Map<number, number>();
+  for (const d of snapshot.waterDays ?? []) {
+    water.set(startOfDayMs(d.day), d.ml);
+  }
+  if (water.size === 0 && snapshot.waterTodayMl != null) {
+    water.set(startOfDayMs(now), snapshot.waterTodayMl);
+  }
+  return water;
+}
+
 /** Everything one habit's evaluation reads, assembled from the live stores. */
 export function habitContext(
   habit: Habit,
@@ -125,6 +144,7 @@ export function habitContext(
     days: Record<string, HabitDayStatus>;
     tagRows: FoodTagRow[];
     sleepOnset: Map<number, number>;
+    waterMl?: Map<number, number>;
     now: number;
   },
 ): HabitDayContext {
@@ -143,6 +163,7 @@ export function habitContext(
       ? daysWithTag(opts.tagRows, habit.tag)
       : new Set<number>(),
     sleepOnset: opts.sleepOnset,
+    waterMl: opts.waterMl,
   };
 }
 
@@ -183,6 +204,7 @@ export function buildHabitViews(opts: {
   days: Record<string, HabitDayStatus>;
   tagRows: FoodTagRow[];
   sleepOnset: Map<number, number>;
+  waterMl?: Map<number, number>;
   now: number;
 }): HabitView[] {
   const today = startOfDayMs(opts.now);

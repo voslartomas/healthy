@@ -11,16 +11,18 @@ import { FoodTagKey } from './foodTags';
  *     carrying that tag is logged, and otherwise passes at midnight. May also be
  *     checked by hand (`auto: false`) when the user would rather not tag food.
  *   • sleep — "asleep before 23:00"; read from the night's sleep onset.
+ *   • water — "drink 3 L a day"; read from the day's logged hydration.
  *   • other — the user checks it off.
  *
  * Everything in this module is pure: the statuses, streaks and weekly attainment
- * are derived from (habit, recorded checks, food tags, sleep onsets), never
+ * are derived from (habit, recorded checks, food tags, sleep onsets, daily
+ * water), never
  * stored as a snapshot. That keeps the Today strip, the catch-up card and the
  * Trends grid from ever disagreeing, and makes the whole thing testable without
  * a database.
  */
 
-export type HabitType = 'food' | 'sleep' | 'other';
+export type HabitType = 'food' | 'sleep' | 'water' | 'other';
 
 /** How many slips are forgiven, and over what period. */
 export type HabitAllowance = 'never' | 'week' | 'month' | 'month2';
@@ -45,7 +47,8 @@ export interface Habit {
   type: HabitType;
   /**
    * Whether the day is decided from data rather than by the user. Food habits
-   * can be either; sleep habits are always auto; 'other' is always manual.
+   * can be either; sleep and water habits are always auto; 'other' is always
+   * manual.
    */
   auto: boolean;
   allowance: HabitAllowance;
@@ -53,6 +56,8 @@ export interface Habit {
   tag?: FoodTagKey;
   /** Sleep habits: "23:00" — asleep before this counts as held. */
   before?: string;
+  /** Water habits: the daily target in ml — drinking this much holds the day. */
+  targetMl?: number;
   /** Epoch ms the habit was created; days before it read as 'none'. */
   createdAt: number;
 }
@@ -74,6 +79,11 @@ export const HABIT_TYPES: readonly HabitTypeDef[] = [
     key: 'sleep',
     label: 'SLEEP',
     note: 'READS LAST NIGHT FROM YOUR HEALTH DATA — PASSES IF YOU FELL ASLEEP IN TIME',
+  },
+  {
+    key: 'water',
+    label: 'WATER',
+    note: 'READS THE WATER YOU LOG IN YOUR HEALTH DATA — HOLDS ONCE YOU REACH THE TARGET',
   },
   {
     key: 'other',
@@ -120,6 +130,32 @@ export const ALLOWANCES: readonly AllowanceDef[] = [
 
 /** Bedtimes offered by the sleep-habit picker. */
 export const BEDTIMES = ['22:00', '22:30', '23:00', '23:30'] as const;
+
+/** Daily targets (ml) offered by the water-habit picker. */
+export const WATER_TARGETS = [2000, 2500, 3000, 3500] as const;
+
+/** The target a water habit uses when none was saved. */
+export const DEFAULT_WATER_TARGET_ML = 2500;
+
+/**
+ * The water target the app measures against: the user's water habit when they
+ * have one ("Drink 3 L a day"), so the Food screen, the widget and the habit
+ * can never disagree about what "reached" means; otherwise the common ~2.5 L
+ * adult guideline, which only scales the glass.
+ */
+export function waterTarget(habits: readonly Habit[]): {
+  ml: number;
+  habit: Habit | null;
+} {
+  const habit = habits.find(h => h.type === 'water') ?? null;
+  return { ml: habit?.targetMl ?? DEFAULT_WATER_TARGET_ML, habit };
+}
+
+/** "3 L", "2.5 L" — a water amount the way the picker and rows say it. */
+export function litresLabel(ml: number): string {
+  const l = Math.round(ml / 100) / 10;
+  return `${l % 1 === 0 ? l.toFixed(0) : l.toFixed(1)} L`;
+}
 
 export const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -228,6 +264,9 @@ export interface HabitDayContext {
   tagDays: ReadonlySet<number>;
   /** Sleep onset (epoch ms) for the night belonging to each local day start. */
   sleepOnset: ReadonlyMap<number, number>;
+  /** Water drunk (ml) on each local day start that has any logged. Optional so
+   * callers without hydration data (older tests, cached snapshots) still work. */
+  waterMl?: ReadonlyMap<number, number>;
 }
 
 /** Yesterday stays editable until this hour, so a habit checked off late still
@@ -265,6 +304,23 @@ function rawDay(habit: Habit, dayStart: number, ctx: HabitDayContext): RawDay {
       : null;
     if (deadline == null) return 'none';
     return onset <= deadline ? 'pass' : 'break';
+  }
+
+  // Water, like sleep, is a measurement the platform already holds, so a new
+  // "3 L a day" habit back-fills from the read window. Reaching the target
+  // holds the day the moment it happens; short of it, today stays open.
+  if (habit.type === 'water') {
+    const target = habit.targetMl ?? DEFAULT_WATER_TARGET_ML;
+    const ml = ctx.waterMl?.get(dayStart);
+    if (ml != null && ml >= target) return 'pass';
+    if (dayStart === ctx.today) return 'open';
+    // Frozen verdicts (habitsService.recordWaterOutcomes) keep the history
+    // once those records age out of the read window.
+    if (recorded === 'auto') return 'pass';
+    if (ml != null) return 'break';
+    // Nothing logged at all: before the habit existed that is "no data", not a
+    // miss; after it, a day without water logged did not reach the target.
+    return dayStart < startOfDayMs(habit.createdAt) ? 'none' : 'break';
   }
 
   // Food and manual habits have no such record to look back on — a day before

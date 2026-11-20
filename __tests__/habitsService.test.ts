@@ -5,6 +5,7 @@ import {
   createHabit,
   currentHabitViews,
   recordSleepOutcomes,
+  recordWaterOutcomes,
   setHabitChecked,
 } from '../src/state/habitsService';
 import { tagLoggedFood } from '../src/state/foodTagsService';
@@ -320,5 +321,69 @@ describe('food tag rows', () => {
   it('are a no-op when nothing was tagged', async () => {
     await tagLoggedFood({ name: 'Oats', tags: [] });
     expect(useFoodTagsStore.getState().rows).toHaveLength(0);
+  });
+});
+
+describe('water habits', () => {
+  const create = () =>
+    createHabit({
+      name: 'Drink 3 L a day',
+      type: 'water',
+      auto: false, // ignored: water is always read from the data
+      allowance: 'week',
+      targetMl: 3000,
+    });
+
+  it('is always automatic and keeps its target', async () => {
+    const habit = await create();
+    expect(habit.auto).toBe(true);
+    expect(habit.targetMl).toBe(3000);
+  });
+
+  it('defaults the target when none is given', async () => {
+    const habit = await createHabit({
+      name: 'Water',
+      type: 'water',
+      auto: true,
+      allowance: 'never',
+    });
+    expect(habit.targetMl).toBe(2500);
+  });
+
+  it('reads today from the snapshot in the shared views', async () => {
+    const habit = await create();
+    const today = startOfDayMs(Date.now());
+    useHealthStore.setState({
+      snapshot: {
+        ...EMPTY_SNAPSHOT,
+        waterTodayMl: 3200,
+        waterDays: [{ day: today, ml: 3200 }],
+      },
+    });
+    const view = currentHabitViews().find(v => v.habit.id === habit.id);
+    expect(view?.today).toBe('auto');
+  });
+
+  it('freezes only finished days that met the target', async () => {
+    const habit = await create();
+    const today = startOfDayMs(Date.now());
+    useHealthStore.setState({
+      snapshot: {
+        ...EMPTY_SNAPSHOT,
+        waterTodayMl: 3500,
+        waterDays: [
+          { day: today - 2 * DAY_MS, ml: 3100 },
+          { day: today - DAY_MS, ml: 1200 },
+          { day: today, ml: 3500 },
+        ],
+      },
+    });
+    await recordWaterOutcomes();
+    const days = useHabitsStore.getState().days;
+    expect(days[dayKey(habit.id, today - 2 * DAY_MS)]).toBe('auto');
+    // A short day is not frozen (late syncs may still complete it), and today
+    // is never frozen.
+    expect(days[dayKey(habit.id, today - DAY_MS)]).toBeUndefined();
+    expect(days[dayKey(habit.id, today)]).toBeUndefined();
   });
 });

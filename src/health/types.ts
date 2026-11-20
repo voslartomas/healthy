@@ -475,6 +475,11 @@ export interface HealthSnapshot {
   /** Water drunk today (ml), summed from today's hydration records; null when
    * nothing was logged today — the UI renders "-", never a fabricated 0. */
   waterTodayMl: number | null;
+  /** Water drunk per local day (ml), oldest first, for every day in the read
+   * window with any hydration logged — what a "3 L a day" habit reads. Days
+   * with nothing logged are absent, never 0. Optional only because snapshots
+   * cached by earlier builds lack it. */
+  waterDays?: { day: number; ml: number }[];
   /** Active energy burned today (kcal), from the calories rollup. */
   energyBurnedToday: number;
   /** Recent recorded workouts (last 7 days), newest first. */

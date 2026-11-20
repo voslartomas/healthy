@@ -49,6 +49,7 @@
     "posthog-react-native": "^4.67.0",
     "react": "19.2.3",
     "react-native": "0.86.2",
+    "react-native-android-widget": "0.26.0",
     "react-native-health-connect": "^3.4.0",
     "react-native-markdown-display": "^7.0.2",
     "react-native-safe-area-context": "~5.7.0",

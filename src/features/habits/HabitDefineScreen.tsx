@@ -25,9 +25,12 @@ import {
   ALLOWANCES,
   allowanceWord,
   BEDTIMES,
+  DEFAULT_WATER_TARGET_ML,
   HABIT_TYPES,
   HabitAllowance,
   HabitType,
+  litresLabel,
+  WATER_TARGETS,
 } from '../../state/habits';
 import { createHabit, editHabit, removeHabit } from '../../state/habitsService';
 import { useHabitsStore } from '../../state/useHabitsStore';
@@ -45,17 +48,24 @@ function sentence(text: string): string {
 /** The explainer under the type picker, which depends on both the kind of
  * habit and (for food) whether the user let the log decide. */
 function checkNote(type: HabitType, auto: boolean): string {
-  if (type === 'sleep') return sentence(HABIT_TYPES[1].note);
-  if (type === 'other') return sentence(HABIT_TYPES[2].note);
-  return auto
-    ? sentence(HABIT_TYPES[0].note)
-    : 'You check it off — yesterday stays editable until noon';
+  // Looked up by key — indexing HABIT_TYPES broke when Water was inserted.
+  const note = (key: HabitType) =>
+    sentence(HABIT_TYPES.find(t => t.key === key)?.note ?? '');
+  if (type === 'food' && !auto)
+    return 'You check it off — yesterday stays editable until noon';
+  return note(type);
+}
+
+/** A water habit's default name, kept in step with the target picker. */
+function waterName(ml: number): string {
+  return `Drink ${litresLabel(ml)} a day`;
 }
 
 /** The glyph on each habit-type tile. */
 const TYPE_ICON: Record<HabitType, IconName> = {
   food: 'nutrition',
   sleep: 'moon',
+  water: 'droplet',
   other: 'check',
 };
 
@@ -82,21 +92,41 @@ export function HabitDefineScreen({ navigation, route }: ScreenProps) {
     editingId ? (s.habits.find(h => h.id === editingId) ?? null) : null,
   );
 
-  const [name, setName] = useState(existing?.name ?? '');
-  const [type, setType] = useState<HabitType>(existing?.type ?? 'food');
+  const [name, setName] = useState(
+    existing?.name ??
+      (route?.params?.habitType === 'water'
+        ? waterName(DEFAULT_WATER_TARGET_ML)
+        : ''),
+  );
+  const presetType = route?.params?.habitType ?? null;
+  const [type, setType] = useState<HabitType>(
+    existing?.type ?? presetType ?? 'food',
+  );
   const [auto, setAuto] = useState(existing?.auto ?? true);
   const [allowance, setAllowance] = useState<HabitAllowance>(
     existing?.allowance ?? 'week',
   );
   const [tag, setTag] = useState<FoodTagKey>(existing?.tag ?? 'junk');
   const [before, setBefore] = useState<string>(existing?.before ?? '23:00');
+  const [targetMl, setTargetMl] = useState<number>(
+    existing?.targetMl ?? DEFAULT_WATER_TARGET_ML,
+  );
   const [busy, setBusy] = useState(false);
 
   function pickType(next: HabitType) {
     setType(next);
-    // Sleep is always read from the night's data; "other" is always by hand.
-    if (next === 'sleep') setAuto(true);
+    // Sleep and water are always read from the data; "other" is always by hand.
+    if (next === 'sleep' || next === 'water') setAuto(true);
     if (next === 'other') setAuto(false);
+    if (next === 'water' && !name.trim()) setName(waterName(targetMl));
+  }
+
+  function pickTarget(ml: number) {
+    setTargetMl(ml);
+    // Same rule as the bedtime: follow the picker, never clobber a real name.
+    if (!name.trim() || /^Drink [\d.]+ L a day$/.test(name)) {
+      setName(waterName(ml));
+    }
   }
 
   function pickBedtime(value: string) {
@@ -111,7 +141,12 @@ export function HabitDefineScreen({ navigation, route }: ScreenProps) {
   async function save() {
     if (busy) return;
     const finalName =
-      name.trim() || (type === 'sleep' ? `Asleep before ${before}` : '');
+      name.trim() ||
+      (type === 'sleep'
+        ? `Asleep before ${before}`
+        : type === 'water'
+          ? waterName(targetMl)
+          : '');
     if (!finalName) {
       Alert.alert(
         'Name your habit',
@@ -120,7 +155,15 @@ export function HabitDefineScreen({ navigation, route }: ScreenProps) {
       return;
     }
     setBusy(true);
-    const input = { name: finalName, type, auto, allowance, tag, before };
+    const input = {
+      name: finalName,
+      type,
+      auto,
+      allowance,
+      tag,
+      before,
+      targetMl,
+    };
     try {
       if (editingId) await editHabit(editingId, input);
       else await createHabit(input);
@@ -229,6 +272,21 @@ export function HabitDefineScreen({ navigation, route }: ScreenProps) {
                 options={BEDTIMES.map(b => ({ key: b, label: b }))}
                 value={before}
                 onPick={pickBedtime}
+                columns={4}
+              />
+            </>
+          ) : null}
+
+          {type === 'water' ? (
+            <>
+              <Label>Drink at least</Label>
+              <Tiles
+                options={WATER_TARGETS.map(ml => ({
+                  key: String(ml),
+                  label: litresLabel(ml),
+                }))}
+                value={String(targetMl)}
+                onPick={k => pickTarget(Number(k))}
                 columns={4}
               />
             </>

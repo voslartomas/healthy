@@ -19,7 +19,10 @@ export type ScreenName =
   | 'WorkoutSummary'
   | 'WorkoutsLibrary'
   | 'WorkoutDetail'
-  | 'HabitDefine';
+  | 'HabitDefine'
+  | 'LogFood'
+  | 'MealLog'
+  | 'Journal';
 
 /**
  * Minimal navigation surface the screens depend on. React Navigation's own
@@ -55,6 +58,11 @@ export interface ScreenParams {
   intent?: string;
   /** HabitDefine: the habit to edit; omitted when creating a new one. */
   habitId?: string;
+  /** HabitDefine: pre-pick the kind of a NEW habit — the Food screen's water
+   * card opens it as 'water' ("Make 3 L a day a habit"). */
+  habitType?: 'food' | 'sleep' | 'water' | 'other';
+  /** Journal: the local midnight of the day to open; today when omitted. */
+  day?: number;
   /** WorkoutDetail: `derive.exerciseKey` of the recorded session to open. */
   workoutKey?: string;
 }
@@ -99,6 +107,9 @@ export type RootStackParamList = {
   DefineGoal: undefined;
   FoodsLibrary: undefined;
   HabitDefine: ScreenParams | undefined;
+  LogFood: undefined;
+  MealLog: undefined;
+  Journal: ScreenParams | undefined;
 };
 
 /** The five numbered tabs of the v3 brief (Coach moved to a global FAB). */

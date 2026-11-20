@@ -16,6 +16,8 @@ import { getDb } from './database';
  *     is one; so is a sleep outcome, because a night's onset is only readable
  *     from the health snapshot for a short window, and once it has rolled out of
  *     that window the only record of whether the habit held is the one we wrote.
+ *     Water outcomes are stored for the same reason (hydration records age out
+ *     of the read window too).
  *     Food outcomes are NOT stored — they re-derive from the `food_tags` rows,
  *     which means retagging or deleting a meal corrects the history.
  */
@@ -28,11 +30,12 @@ interface HabitRow {
   allowance: string;
   tag: string | null;
   before_time: string | null;
+  target_ml: number | null;
   sort_order: number;
   created_at: number;
 }
 
-const TYPES: HabitType[] = ['food', 'sleep', 'other'];
+const TYPES: HabitType[] = ['food', 'sleep', 'water', 'other'];
 const ALLOWANCE_KEYS: HabitAllowance[] = ['never', 'week', 'month', 'month2'];
 
 function rowToHabit(r: HabitRow): Habit {
@@ -54,6 +57,7 @@ function rowToHabit(r: HabitRow): Habit {
   };
   if (r.tag && isFoodTagKey(r.tag)) habit.tag = r.tag as FoodTagKey;
   if (r.before_time) habit.before = r.before_time;
+  if (r.target_ml != null && r.target_ml > 0) habit.targetMl = r.target_ml;
   return habit;
 }
 
@@ -61,7 +65,7 @@ function rowToHabit(r: HabitRow): Habit {
 export async function loadHabits(): Promise<Habit[]> {
   const db = await getDb();
   const rows = await db.getAllAsync<HabitRow>(
-    'SELECT id, name, type, auto, allowance, tag, before_time, sort_order, created_at FROM habits ORDER BY sort_order ASC, created_at ASC;',
+    'SELECT id, name, type, auto, allowance, tag, before_time, target_ml, sort_order, created_at FROM habits ORDER BY sort_order ASC, created_at ASC;',
   );
   return rows.map(rowToHabit);
 }
@@ -74,8 +78,8 @@ export async function insertHabit(habit: Habit): Promise<void> {
   );
   await db.runAsync(
     `INSERT INTO habits
-       (id, name, type, auto, allowance, tag, before_time, sort_order, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
+       (id, name, type, auto, allowance, tag, before_time, target_ml, sort_order, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);`,
     habit.id,
     habit.name,
     habit.type,
@@ -83,6 +87,7 @@ export async function insertHabit(habit: Habit): Promise<void> {
     habit.allowance,
     habit.tag ?? null,
     habit.before ?? null,
+    habit.targetMl ?? null,
     order?.next ?? 0,
     habit.createdAt,
     Date.now(),
@@ -94,7 +99,7 @@ export async function updateHabit(habit: Habit): Promise<void> {
   const db = await getDb();
   await db.runAsync(
     `UPDATE habits
-        SET name = ?, type = ?, auto = ?, allowance = ?, tag = ?, before_time = ?, updated_at = ?
+        SET name = ?, type = ?, auto = ?, allowance = ?, tag = ?, before_time = ?, target_ml = ?, updated_at = ?
       WHERE id = ?;`,
     habit.name,
     habit.type,
@@ -102,6 +107,7 @@ export async function updateHabit(habit: Habit): Promise<void> {
     habit.allowance,
     habit.tag ?? null,
     habit.before ?? null,
+    habit.targetMl ?? null,
     Date.now(),
     habit.id,
   );
